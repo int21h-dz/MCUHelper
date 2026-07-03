@@ -1,0 +1,44 @@
+{
+  "version": "0.2",
+  "language": "en,ru",
+  "dictionaryDefinitions": [
+    {
+      "name": "mcu-nr-labels",
+      "path": "./cspell-mcu-labels.txt",
+      "addWords": true
+    }
+  ],
+  "dictionaries": ["mcu-nr-labels"],
+  "languageSettings": [
+    {
+      "languageId": "mcunr",
+      "ignoreRegExpList": [
+        "/\\b[A-Z][A-Z0-9]{1,5}\\b/",
+        "/\\b[XYZ][0-9]{2}\\b/"
+      ]
+    }
+  ],
+  "words": [
+    "TELA",
+    "TVELA",
+    "MUSE",
+    "OUSE",
+    "ZUSE",
+    "RGMM",
+    "RCII",
+    "mcunr",
+    "mcuhelper",
+    "BURNUP",
+    "RSTP",
+    "ZONB",
+    "SUMB",
+    "ZONS",
+    "SUMS",
+    "SUMR",
+    "ZONR",
+    "SUMG",
+    "ZONG",
+    "DENS",
+    "SIGM"
+  ]
+}

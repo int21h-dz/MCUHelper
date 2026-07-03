@@ -1,0 +1,30 @@
+import { describe, it } from "node:test";
+import assert from "node:assert";
+import { CARD_LINE_PARAM_GROUPS, getCardLineParamGroups } from "./cardLineParamGroups";
+
+describe("cardLineParamGroups", () => {
+  it("MATR has number and density params", () => {
+    const groups = getCardLineParamGroups("MATR");
+    assert.ok(groups);
+    assert.ok(groups!.some((g) => g.label === "number"));
+    assert.ok(groups!.some((g) => g.label.startsWith("DENS")));
+  });
+
+  it("POWER and STEP defined via burnup cards", () => {
+    assert.ok(CARD_LINE_PARAM_GROUPS.PIN);
+    assert.ok(CARD_LINE_PARAM_GROUPS.HEAD);
+  });
+
+  it("getCardLineParamGroups is case-insensitive", () => {
+    assert.deepStrictEqual(getCardLineParamGroups("matr"), getCardLineParamGroups("MATR"));
+  });
+
+  it("returns undefined for unknown card", () => {
+    assert.strictEqual(getCardLineParamGroups("ZZZZZ"), undefined);
+  });
+
+  it("SPNT has x,y,z coordinate group", () => {
+    const spnt = getCardLineParamGroups("SPNT");
+    assert.ok(spnt?.[0].label.includes("x,y,z"));
+  });
+});

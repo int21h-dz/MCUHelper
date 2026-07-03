@@ -1,0 +1,21 @@
+{
+  "name": "@mcuhelper/mcu-lsp",
+  "version": "0.1.0",
+  "main": "dist/server.js",
+  "bin": {
+    "mcu-lsp": "./dist/server.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node esbuild.config.js",
+    "build:server": "node esbuild.config.js",
+    "watch": "tsc -w -p tsconfig.json",
+    "test": "npm run build && node --test -r ./src/test-setup.js dist/**/*.test.js"
+  },
+  "dependencies": {
+    "vscode-languageserver": "^9.0.1",
+    "vscode-languageserver-textdocument": "^1.0.11"
+  },
+  "devDependencies": {
+    "esbuild": "^0.20.0"
+  }
+}

@@ -120,30 +120,13 @@ flowchart LR
 
 ---
 
-## Скриншоты
-
-> Добавьте PNG-файлы в папку [`docs/images/`](docs/images/) — пути ниже уже готовы для GitHub.
-
-| Редактор и hover | Каталог модулей |
-|:---:|:---:|
-| ![Редактор: hover по карте или нуклиду](docs/images/editor-hover.png) | ![Боковая панель: каталог](docs/images/sidebar-catalog.png) |
-| *`docs/images/editor-hover.png`* | *`docs/images/sidebar-catalog.png`* |
-
----
-
 ## Установка
 
 Для работы расширения нужен **[Visual Studio Code](https://code.visualstudio.com/download)** (версия 1.85 и новее). Скачать: [code.visualstudio.com/download](https://code.visualstudio.com/download).
 
 ### Из VSIX (рекомендуется для пользователей)
 
-1. Соберите пакет расширения (Windows):
-
-   ```bat
-   package-vsix.bat
-   ```
-
-   Файл появится в `release/mcuhelper-vscode-<version>.vsix`.
+1. Скачать свежий релиз [MCUHelper](https://github.com/int21h-dz/MCUHelper/releases)
 
 2. Установите в VS Code:
    - **Extensions** → **…** → **Install from VSIX…**

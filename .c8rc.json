@@ -1,0 +1,29 @@
+{
+  "all": true,
+  "reporter": ["text", "html", "lcov"],
+  "include": [
+    "packages/mcu-schema/dist/**/*.js",
+    "packages/mcu-language/dist/**/*.js",
+    "packages/mcu-geometry/dist/**/*.js",
+    "packages/mcu-lsp/dist/**/*.js",
+    "extension/dist/**/*.js"
+  ],
+  "exclude": [
+    "**/*.d.ts",
+    "**/*.test.js",
+    "**/userGuideCards.generated.js",
+    "extension/dist/extension.js",
+    "extension/dist/sidebarView.js",
+    "extension/dist/geometryPanel.js",
+    "extension/dist/templateInsert.js",
+    "extension/dist/expandNaturalIsotope.js",
+    "extension/dist/contentDetect.js",
+    "extension/dist/test-setup.js",
+    "extension/dist/vscode-mock.js",
+    "packages/mcu-lsp/dist/server.js",
+    "packages/mcu-lsp/dist/iaeaNds.js",
+    "packages/mcu-lsp/dist/test-setup.js",
+    "packages/mcu-geometry/dist/test-setup.js",
+    "packages/mcu-geometry/dist/types.js"
+  ]
+}

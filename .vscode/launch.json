@@ -1,0 +1,23 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}/extension"],
+      "outFiles": ["${workspaceFolder}/extension/dist/**/*.js"],
+      "preLaunchTask": "build",
+      "env": {
+        "MCUHELPER_PROFILE": "1"
+      }
+    },
+    {
+      "name": "Attach LSP",
+      "type": "node",
+      "request": "attach",
+      "port": 6010,
+      "skipFiles": ["<node_internals>/**"]
+    }
+  ]
+}

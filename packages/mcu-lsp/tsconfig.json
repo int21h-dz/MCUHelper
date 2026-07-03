@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "baseUrl": ".",
+    "paths": {
+      "@mcuhelper/mcu-schema": ["../mcu-schema/dist/index.d.ts"],
+      "@mcuhelper/mcu-language": ["../mcu-language/dist/index.d.ts"],
+      "@mcuhelper/mcu-geometry": ["../mcu-geometry/dist/index.d.ts"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["src/server.ts"]
+}

@@ -1,0 +1,13 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "lib": ["ES2020"],
+    "baseUrl": ".",
+    "paths": {
+      "@mcuhelper/mcu-language": ["../packages/mcu-language/dist/index.d.ts"]
+    }
+  },
+  "include": ["src/**/*"]
+}

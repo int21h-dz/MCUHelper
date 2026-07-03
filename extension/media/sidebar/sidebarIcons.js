@@ -1,0 +1,104 @@
+/* SVG-иконки и метаданные панелей MCU-NR sidebar */
+(function (global) {
+  const NS = "http://www.w3.org/2000/svg";
+
+  function svg(pathD, viewBox, extra) {
+    return (
+      '<svg class="mcu-icon" viewBox="' +
+      (viewBox || "0 0 16 16") +
+      '" aria-hidden="true"' +
+      (extra || "") +
+      "><path " +
+      pathD +
+      "/></svg>"
+    );
+  }
+
+  const ICONS = {
+    chevron:
+      '<svg class="mcu-icon mcu-icon-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5L10 8l-4 4.5" stroke="currentColor" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    drag:
+      '<svg class="mcu-icon mcu-icon-drag" viewBox="0 0 16 16" aria-hidden="true"><circle cx="5" cy="4" r="1.2" fill="currentColor"/><circle cx="11" cy="4" r="1.2" fill="currentColor"/><circle cx="5" cy="8" r="1.2" fill="currentColor"/><circle cx="11" cy="8" r="1.2" fill="currentColor"/><circle cx="5" cy="12" r="1.2" fill="currentColor"/><circle cx="11" cy="12" r="1.2" fill="currentColor"/></svg>',
+    search:
+      '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" stroke="currentColor" fill="none" stroke-width="1.4"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
+    catalog:
+      '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="5" height="5" rx="1" fill="currentColor" opacity=".9"/><rect x="9" y="2" width="5" height="5" rx="1" fill="currentColor" opacity=".5"/><rect x="2" y="9" width="5" height="5" rx="1" fill="currentColor" opacity=".5"/><rect x="9" y="9" width="5" height="5" rx="1" fill="currentColor" opacity=".7"/></svg>',
+    material:
+      '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5" stroke="currentColor" fill="none" stroke-width="1.3"/><circle cx="8" cy="8" r="1.8" fill="currentColor"/><path d="M8 3v2M8 11v2M3 8h2M11 8h2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
+    zone:
+      '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4h12v8H2z" stroke="currentColor" fill="none" stroke-width="1.3"/><path d="M2 7h12M5 4V2M11 4V2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
+    body:
+      '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 12L8 3l4 9H4z" stroke="currentColor" fill="none" stroke-width="1.3" stroke-linejoin="round"/></svg>',
+    constant:
+      '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><text x="3" y="12" font-size="11" font-weight="700" fill="currentColor" font-family="serif">π</text></svg>',
+    net:
+      '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 2h12v12H2z" stroke="currentColor" fill="none" stroke-width="1.2"/><path d="M2 6h12M2 10h12M6 2v12M10 2v12" stroke="currentColor" stroke-width=".9" opacity=".7"/></svg>',
+    lattice:
+      '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M8 3v10" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="2" fill="currentColor"/></svg>',
+    object:
+      '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="5" width="10" height="8" rx="1" stroke="currentColor" fill="none" stroke-width="1.3"/><path d="M6 5V3.5A2 2 0 0110 3.5V5" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>',
+    folder:
+      '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4.5A1 1 0 013 3.5h3l1.5 1.5H13A1 1 0 0114 6v6.5a1 1 0 01-1 1H3a1 1 0 01-1-1V4.5z" fill="currentColor" opacity=".85"/></svg>',
+    nuclide:
+      '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2" fill="currentColor"/><ellipse cx="8" cy="8" rx="6" ry="2.5" stroke="currentColor" fill="none" stroke-width="1"/><ellipse cx="8" cy="8" rx="6" ry="2.5" stroke="currentColor" fill="none" stroke-width="1" transform="rotate(60 8 8)"/><ellipse cx="8" cy="8" rx="6" ry="2.5" stroke="currentColor" fill="none" stroke-width="1" transform="rotate(120 8 8)"/></svg>',
+    card:
+      '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1.5" stroke="currentColor" fill="none" stroke-width="1.3"/><path d="M4 7h8M4 10h5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
+    empty:
+      '<svg class="mcu-icon mcu-icon-empty" viewBox="0 0 48 48" aria-hidden="true"><rect x="10" y="6" width="28" height="36" rx="3" stroke="currentColor" fill="none" stroke-width="2" opacity=".35"/><path d="M16 16h16M16 24h12M16 32h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity=".25"/></svg>',
+  };
+
+  const PANELS = {
+    "mcuhelper.catalog": { title: "Каталог модулей", icon: "catalog", accent: "#e8913a", hint: "Перетащите карточку или модуль в редактор" },
+    "mcuhelper.materials": { title: "Материалы", icon: "material", accent: "#e8913a", hint: "Клик — переход к определению в файле", searchPh: "Фильтр материалов…" },
+    "mcuhelper.zones": { title: "Зоны", icon: "zone", accent: "#4a9eff", hint: "Клик — переход к зоне", searchPh: "Фильтр зон…" },
+    "mcuhelper.bodies": { title: "Тела", icon: "body", accent: "#4a9eff", hint: "Клик — переход к телу", searchPh: "Фильтр тел…" },
+    "mcuhelper.constants": { title: "Константы", icon: "constant", accent: "#fbbf24", hint: "Видимые в области курсора (global / LCELL / CELL)", searchPh: "Фильтр констант…" },
+    "mcuhelper.nets": { title: "Сети", icon: "net", accent: "#2dd4bf", hint: "Клик — переход к NET", searchPh: "Фильтр сетей…" },
+    "mcuhelper.lattices": { title: "Решётки", icon: "lattice", accent: "#a78bfa", hint: "Клик — переход к LATT", searchPh: "Фильтр решёток…" },
+    "mcuhelper.objects": { title: "Объекты", icon: "object", accent: "#2dd4bf", hint: "Объекты регистрации", searchPh: "Фильтр объектов…" },
+  };
+
+  function panelAccent(panelId) {
+    return PANELS[panelId]?.accent || "#e8913a";
+  }
+
+  /** Цвета модулей MCU-NR (акцент слева + маркер). */
+  const MODULE_THEME = {
+    physical: { color: "#e8913a", label: "PIN" },
+    geometry: { color: "#4a9eff", label: "GEO" },
+    source: { color: "#a78bfa", label: "SRC" },
+    registration: { color: "#2dd4bf", label: "REG" },
+    burnupRegistration: { color: "#f472b6", label: "BRG" },
+    trajectory: { color: "#94a3b8", label: "TRJ" },
+    calculationControl: { color: "#fbbf24", label: "CAL" },
+    burnup: { color: "#ef4444", label: "BURN" },
+  };
+
+  function iconForNode(node) {
+    const id = node.id || "";
+    if (id.startsWith("mat-") && id.includes("-n-")) return "nuclide";
+    if (id.startsWith("mat-")) return "material";
+    if (id.startsWith("zone-")) return "zone";
+    if (id.startsWith("body-")) return "body";
+    if (id.startsWith("const-")) return "constant";
+    if (id.startsWith("net-")) return "net";
+    if (id.startsWith("latt-")) return "lattice";
+    if (id.startsWith("obj-")) return "object";
+    if (id.startsWith("scope-")) return "folder";
+    if (node.children && node.children.length) return "folder";
+    return "card";
+  }
+
+  function getIcon(name) {
+    return ICONS[name] || ICONS.card;
+  }
+
+  global.McuSidebarIcons = {
+    ICONS,
+    PANELS,
+    MODULE_THEME,
+    getIcon,
+    iconForNode,
+    panelAccent,
+  };
+})(typeof window !== "undefined" ? window : globalThis);

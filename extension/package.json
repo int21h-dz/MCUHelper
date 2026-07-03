@@ -1,0 +1,219 @@
+{
+  "name": "mcuhelper-vscode",
+  "displayName": "MCU-NR Helper",
+  "description": "Language Server для исходных данных MCU-NR: диагностика, автодополнение, навигация, визуализация геометрии",
+  "version": "0.1.0",
+  "publisher": "mcuhelper",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Programming Languages"],
+  "activationEvents": ["onStartupFinished", "onLanguage:mcunr", "onCommand:mcuhelper.showGeometry", "onCommand:mcuhelper.detectLanguage"],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "mcunr",
+        "aliases": ["MCU-NR", "mcunr"],
+        "extensions": [".mcu", ".mcunr"],
+        "filenames": [],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "mcunr",
+        "scopeName": "source.mcunr",
+        "path": "./syntaxes/mcunr.tmLanguage.json"
+      }
+    ],
+    "semanticTokenTypes": [
+      { "id": "card", "superType": "keyword", "description": "Карта MCU-NR" },
+      { "id": "body", "superType": "type", "description": "Тип геометрического тела" },
+      { "id": "zone", "superType": "function", "description": "Имя зоны или объекта" },
+      { "id": "nuclide", "superType": "property", "description": "Нуклид в составе MATR" },
+      { "id": "number", "superType": "number", "description": "Число" },
+      { "id": "comment", "superType": "comment", "description": "Комментарий" }
+    ],
+    "semanticTokenScopes": [
+      {
+        "language": "mcunr",
+        "scopes": {
+          "card": ["keyword.control.mcunr"],
+          "body": ["entity.name.type.mcunr"],
+          "zone": ["entity.name.function.mcunr"],
+          "nuclide": ["entity.name.tag.mcunr"],
+          "number": ["constant.numeric.mcunr"],
+          "comment": ["comment.line.mcunr"]
+        }
+      }
+    ],
+    "configuration": {
+      "title": "MCU Helper",
+      "properties": {
+        "mcuhelper.mcuNrPath": {
+          "type": "string",
+          "default": "",
+          "description": "Путь к исполняемому файлу MCU-NR"
+        },
+        "mcuhelper.variantName": {
+          "type": "string",
+          "default": "NAME",
+          "description": "Имя варианта (без расширения) для шага INPUT"
+        },
+        "mcuhelper.enableSolverValidation": {
+          "type": "boolean",
+          "default": false,
+          "description": "Автоматически запускать INPUT (не рекомендуется — долго)"
+        },
+        "mcuhelper.enableIaeaNuclideHover": {
+          "type": "boolean",
+          "default": true,
+          "description": "Дополнять hover по нуклидам справочными данными IAEA NDS (ENDF, распад)"
+        },
+        "mcuhelper.trace.server": {
+          "type": "string",
+          "enum": ["off", "messages", "verbose"],
+          "default": "off"
+        },
+        "mcuhelper.autoDetectLanguage": {
+          "type": "boolean",
+          "default": true,
+          "description": "Автоматически определять MCU-NR по содержимому файла (PIN, MATR, HEAD, …) и переключать язык редактора"
+        },
+        "mcuhelper.autoDetectFromLanguages": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["plaintext", "txt", "log", "text", "ansi", "ini"],
+          "description": "С каких language id переключать на mcunr при совпадении содержимого (не трогает уже размеченные языки)"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "mcuhelper.showCatalog",
+        "title": "MCU-NR: Каталог модулей",
+        "icon": "$(library)"
+      },
+      {
+        "command": "mcuhelper.showMaterials",
+        "title": "MCU-NR: Показать материалы",
+        "icon": "$(database)"
+      },
+      {
+        "command": "mcuhelper.showZones",
+        "title": "MCU-NR: Показать зоны",
+        "icon": "$(layers)"
+      },
+      {
+        "command": "mcuhelper.showObjects",
+        "title": "MCU-NR: Показать объекты",
+        "icon": "$(symbol-object)"
+      },
+      {
+        "command": "mcuhelper.showConstants",
+        "title": "MCU-NR: Показать константы",
+        "icon": "$(symbol-number)"
+      },
+      {
+        "command": "mcuhelper.showBodies",
+        "title": "MCU-NR: Показать тела",
+        "icon": "$(symbol-structure)"
+      },
+      {
+        "command": "mcuhelper.showNets",
+        "title": "MCU-NR: Показать сети",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "mcuhelper.showLattices",
+        "title": "MCU-NR: Показать решётки",
+        "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "mcuhelper.showGeometry",
+        "title": "MCU-NR: Сечения геометрии",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "mcuhelper.validateInput",
+        "title": "MCU-NR: Validate (INPUT)",
+        "icon": "$(run-all)"
+      },
+      {
+        "command": "mcuhelper.refreshIndex",
+        "title": "MCU-NR: Обновить индекс",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "mcuhelper.exportDiagnostics",
+        "title": "MCU-NR: Экспорт диагностик",
+        "icon": "$(output)"
+      },
+      {
+        "command": "mcuhelper.detectLanguage",
+        "title": "MCU-NR: Определить язык по содержимому",
+        "icon": "$(search)"
+      },
+      {
+        "command": "mcuhelper.expandNaturalIsotope",
+        "title": "MCU-NR: Разложить природный элемент на изотопы",
+        "icon": "$(replace)"
+      },
+      {
+        "command": "mcuhelper.insertTemplate",
+        "title": "MCU-NR: Вставить шаблон"
+      }
+    ],
+    "views": {
+      "mcuhelper": [
+        { "type": "webview", "id": "mcuhelper.catalog", "name": "Каталог", "visibility": "visible" },
+        { "type": "webview", "id": "mcuhelper.materials", "name": "Материалы" },
+        { "type": "webview", "id": "mcuhelper.constants", "name": "Константы" },
+        { "type": "webview", "id": "mcuhelper.bodies", "name": "Тела" },
+        { "type": "webview", "id": "mcuhelper.nets", "name": "Сети" },
+        { "type": "webview", "id": "mcuhelper.lattices", "name": "Решётки" },
+        { "type": "webview", "id": "mcuhelper.zones", "name": "Зоны" },
+        { "type": "webview", "id": "mcuhelper.objects", "name": "Объекты" }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        { "id": "mcuhelper", "title": "MCU-NR", "icon": "$(flame)" }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        { "command": "mcuhelper.refreshIndex", "when": "view =~ /^mcuhelper\\./", "group": "navigation" }
+      ]
+    }
+  },
+  "configurationDefaults": {
+    "[mcunr]": {
+      "editor.semanticHighlighting.enabled": false
+    },
+    "cSpell.languageSettings": [
+      {
+        "languageId": "mcunr",
+        "ignoreRegExpList": [
+          "/\\b[A-Z][A-Z0-9]{1,5}\\b/",
+          "/\\b[XYZ][0-9]{2}\\b/",
+          "/\\b[0-9]+\\.[0-9]+([Ee][+-]?[0-9]+)?\\b/"
+        ]
+      }
+    ]
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "watch": "tsc -w -p tsconfig.json",
+    "package": "vsce package --allow-missing-repository",
+    "test": "npm run build && node --test -r ./src/test-setup.js dist/**/*.test.js"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1",
+    "vscode-languageserver": "^9.0.1",
+    "vscode-languageserver-textdocument": "^1.0.11"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.2.1"
+  }
+}

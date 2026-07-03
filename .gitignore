@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+**/dist/
+extension/server/
+extension/vendor/
+release/
+
+# Coverage
+coverage/
+
+# Debug sessions
+.cursor/debug-*.log
+
+# Proprietary / large reference docs (local only)
+docs/MCU-NR_Reference.md
+docs/MCU-NR_UserGuide_220519.txt
+MCU-NR_UserGuide_220519.pdf
+
+# Large RUNTEST cases (local solver regression data)
+RUNTEST/3l070626
+RUNTEST/958
+RUNTEST/accumulation
+RUNTEST/Bochka.inp
+RUNTEST/burnup
+RUNTEST/NZK150.inp
+RUNTEST/radiation
+RUNTEST/source
+RUNTEST/vs_ru
+RUNTEST/BURNUPR/burnup
+RUNTEST/BURNUPR/mcu5.sh
+RUNTEST/BURNUPR/runtest.bat
+RUNTEST/N_PH/gor_sp
+RUNTEST/N_PH/runtest.bat
+RUNTEST/PH_EL/rhdet_pbg
+RUNTEST/PH_EL/runtest.bat
+RUNTEST/pr2/mcuinp

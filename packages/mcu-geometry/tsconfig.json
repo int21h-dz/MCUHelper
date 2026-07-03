@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "baseUrl": ".",
+    "paths": {
+      "@mcuhelper/mcu-language": ["../mcu-language/dist/index.d.ts"]
+    }
+  },
+  "include": ["src/**/*"]
+}
