@@ -6,6 +6,8 @@
 
 > **English:** MCU Helper is a VS Code extension and Language Server for editing MCU6 input decks — text files that describe materials, 3D geometry, sources, tallying, and burnup for Monte Carlo particle transport. It brings syntax highlighting, diagnostics, completions, hover documentation, a module catalog, geometry slice viewer, and optional validation via the MCU solver. MCU itself is not included; you need a separate installation for INPUT validation.
 
+![Демонстрация MCU Helper в VS Code](media/Promo.gif)
+
 ---
 
 ## Содержание
