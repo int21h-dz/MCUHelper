@@ -18,6 +18,7 @@ export * from "./nuclideIaea";
 export * from "./ast";
 export * from "./lexer";
 export * from "./preprocessor";
+export * from "./includeResolve";
 export * from "./parser";
 export * from "./semantic";
 export * from "./document";

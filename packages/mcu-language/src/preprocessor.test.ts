@@ -25,6 +25,15 @@ describe("preprocessor", () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
+  it("expandIncludes inlines bare filename without extension", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-inc-"));
+    fs.writeFileSync(path.join(dir, "confpd"), "MATR 1\nU235 1.E-3", "utf8");
+    const result = expandIncludes("#include confpd", dir);
+    assert.ok(result.text.includes("U235"));
+    assert.deepStrictEqual(result.includes, ["confpd"]);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
   it("expandIncludes reports missing file", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-inc-"));
     const result = expandIncludes("#include <missing.mcu>", dir);

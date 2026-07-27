@@ -188,7 +188,34 @@
   },
   "configurationDefaults": {
     "[mcunr]": {
-      "editor.semanticHighlighting.enabled": false
+      "editor.semanticHighlighting.enabled": false,
+      "editor.tokenColorCustomizations": {
+        "textMateRules": [
+          {
+            "scope": "markup.heading.section.start.mcunr",
+            "settings": {
+              "foreground": "#FFB454",
+              "fontStyle": "bold",
+              "background": "#FFB45422"
+            }
+          },
+          {
+            "scope": "markup.heading.section.end.mcunr",
+            "settings": {
+              "foreground": "#79C0FF",
+              "fontStyle": "bold underline",
+              "background": "#79C0FF22"
+            }
+          },
+          {
+            "scope": "string.unquoted.include.path.mcunr",
+            "settings": {
+              "foreground": "#4FC1FF",
+              "fontStyle": "underline"
+            }
+          }
+        ]
+      }
     },
     "cSpell.languageSettings": [
       {

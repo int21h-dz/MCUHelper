@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { CompletionItemKind } from "vscode-languageserver";
@@ -96,6 +97,23 @@ describe("completion", () => {
     const { doc, index } = openText(text);
     const def = getDefinition(doc, { line: 1, character: 4 }, index);
     assert.ok(def);
+  });
+
+  it("getDefinition opens #include target file", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-def-"));
+    const mainPath = path.join(dir, "main.mcu");
+    const incPath = path.join(dir, "confpd.mcu");
+    fs.writeFileSync(incPath, "PIN 1 0\nFINISH", "utf8");
+    fs.writeFileSync(mainPath, "#include confpd\nFINISH", "utf8");
+    const uri = `file:///${mainPath.replace(/\\/g, "/")}`;
+    const text = fs.readFileSync(mainPath, "utf8");
+    const doc = TextDocument.create(uri, "mcunr", 1, text);
+    const index = analyzeDocument(uri, text, 1, { baseDir: dir, expandInclude: true });
+    const inc = index.ast.includes[0]!;
+    const def = getDefinition(doc, { line: inc.range.start.line, character: inc.range.start.character + 2 }, index);
+    assert.ok(def);
+    assert.ok(def!.uri.includes("confpd.mcu"));
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 
   it("FINISH is always suggested in any fragment", () => {

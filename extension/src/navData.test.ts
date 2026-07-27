@@ -148,8 +148,35 @@ describe("navData", () => {
     const payload = richPayload();
     const zones = buildZonesTree(payload, "file:///t.mcu");
     assert.ok(zones[0]!.description?.includes("M1"));
-    const objects = buildObjectsTree(payload);
+    const objects = buildObjectsTree(payload, "file:///t.mcu");
     assert.ok(objects[0]!.children?.length === 2);
+    assert.ok(objects[0]!.children?.[0]!.uri);
+    assert.ok(objects[0]!.children?.[0]!.range);
+  });
+
+  it("objects tree prefers zone with matching objNum when names duplicate", () => {
+    const r1 = { start: { line: 1, character: 0 }, end: { line: 1, character: 5 } };
+    const r2 = { start: { line: 9, character: 0 }, end: { line: 9, character: 5 } };
+    const payload: IndexPayload = {
+      summaries: {
+        materials: [],
+        zones: [
+          { name: "Z", expression: "A", materialNum: 1, regNum: 1, objNum: 1, range: r1 },
+          { name: "Z", expression: "B", materialNum: 2, regNum: 2, objNum: 2, range: r2 },
+        ],
+        objects: [
+          { objectNum: 1, zoneNames: ["Z"], materialNums: [1] },
+          { objectNum: 2, zoneNames: ["Z"], materialNums: [2] },
+        ],
+        constants: [],
+        bodies: [],
+        nets: [],
+        lattices: [],
+      },
+    };
+    const objects = buildObjectsTree(payload, "file:///t.mcu");
+    assert.strictEqual(objects[0]!.children?.[0]!.range?.start.line, 1);
+    assert.strictEqual(objects[1]!.children?.[0]!.range?.start.line, 9);
   });
 
   it("constants tree with editor context wraps header", () => {

@@ -4,6 +4,8 @@
   "scopeName": "source.mcunr",
   "patterns": [
     { "include": "#comments" },
+    { "include": "#includes" },
+    { "include": "#sectionMarkers" },
     { "include": "#cards" },
     { "include": "#bodies" },
     { "include": "#numbers" },
@@ -15,6 +17,32 @@
         { "match": "^\\*.*$", "name": "comment.line.mcunr" },
         { "match": "^C=.*$", "name": "comment.line.mcunr" },
         { "match": ";.*$", "name": "comment.line.mcunr" }
+      ]
+    },
+    "includes": {
+      "patterns": [
+        {
+          "match": "^\\s*#include\\s+(?:<([^>]+)>|(\\S+))",
+          "name": "meta.preprocessor.include.mcunr",
+          "captures": {
+            "1": { "name": "string.unquoted.include.path.mcunr" },
+            "2": { "name": "string.unquoted.include.path.mcunr" }
+          }
+        }
+      ]
+    },
+    "sectionMarkers": {
+      "patterns": [
+        {
+          "comment": "Начало фрагмента варианта (PIN, HEAD, CAL, …) — см. FRAGMENT_STARTERS в mcu-schema/keywords.ts",
+          "match": "^(PIN|HEAD|CONT|MIR|SRCD|SRC|SPNT|RGS|REGD|REG|BRGD|BRG|TRJD|TRJ|NTOT|NAMV|NAMVAR|CALD|CAL|BURD|BURN|BURNUP)\\b",
+          "name": "markup.heading.section.start.mcunr"
+        },
+        {
+          "comment": "Конец фрагмента",
+          "match": "^(FINISH)\\b",
+          "name": "markup.heading.section.end.mcunr"
+        }
       ]
     },
     "cards": {

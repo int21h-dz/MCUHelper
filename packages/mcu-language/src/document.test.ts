@@ -1,5 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import { analyzeDocument, getDocumentIndex, clearDocument, resetDocumentParseCount, getDocumentParseCount } from "./document";
 
 describe("document", () => {
@@ -44,5 +47,22 @@ describe("document", () => {
     const second = analyzeDocument(uri, text, 10);
     assert.strictEqual(first, second);
     assert.strictEqual(getDocumentParseCount(), 1);
+  });
+
+  it("analyzeDocument preserves includes when expandInclude inlines file", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-doc-inc-"));
+    const incPath = path.join(dir, "confpd.mcu");
+    fs.writeFileSync(incPath, "U235 1.E-3", "utf8");
+    const mainPath = path.join(dir, "main.mcu");
+    const mainText = "#include confpd\nFINISH";
+    fs.writeFileSync(mainPath, mainText, "utf8");
+    const fileUri = `file:///${mainPath.replace(/\\/g, "/")}`;
+    clearDocument(fileUri);
+    const index = analyzeDocument(fileUri, mainText, 1, { baseDir: dir, expandInclude: true });
+    assert.strictEqual(index.ast.includes.length, 1);
+    assert.strictEqual(index.ast.includes[0]!.path, "confpd");
+    assert.strictEqual(index.ast.includes[0]!.range.start.line, 0);
+    assert.strictEqual(index.ast.includes[0]!.range.start.character, 9);
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 });

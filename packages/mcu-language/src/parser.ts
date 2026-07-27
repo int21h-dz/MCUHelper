@@ -21,6 +21,7 @@ import type {
   ZoneTailLegacy,
 } from "./ast";
 import { lexDocument, type LineInfo } from "./lexer";
+import { collectIncludesFromSource } from "./includeResolve";
 import { expandIncludes, expandRepeats } from "./preprocessor";
 import { applyGeometryScopeTransition, initialGeometryScopeState } from "./geometryScope";
 import { isG2mpCartogramRow, looksLikeZoneStatement } from "./zoneStatement";
@@ -360,9 +361,34 @@ export interface ParseOptions {
   expandInclude?: boolean;
 }
 
+/** `#include` из исходного текста — до expandIncludes, чтобы LSP сохранил ссылки на строки редактора. */
+function includeNodesFromSource(text: string): IncludeNode[] {
+  const lines = text.split(/\r?\n/);
+  const lineStarts: number[] = [];
+  let offset = 0;
+  for (let i = 0; i < lines.length; i++) {
+    lineStarts[i] = offset;
+    offset += lines[i]!.length + 1;
+  }
+  return collectIncludesFromSource(text).map((span) => {
+    const startOffset = lineStarts[span.line]! + span.pathStart;
+    const len = span.pathEnd - span.pathStart;
+    return {
+      kind: "include" as const,
+      path: span.path,
+      range: {
+        start: { line: span.line, character: span.pathStart },
+        end: { line: span.line, character: span.pathEnd },
+        offset: startOffset,
+        endOffset: startOffset + len,
+      },
+    };
+  });
+}
+
 export function parseDocument(text: string, options: ParseOptions): DocumentAst {
+  const includes = includeNodesFromSource(text);
   let sourceText = expandRepeats(text);
-  const includes: IncludeNode[] = [];
   const diagnostics: DiagnosticMessage[] = [];
 
   if (options.expandInclude !== false && options.baseDir) {
@@ -407,10 +433,6 @@ export function parseDocument(text: string, options: ParseOptions): DocumentAst 
     if (cam) cameraPresets.push(cam);
 
     if (line.tokens.some((t) => t.type === "include")) {
-      const inc = line.tokens.find((t) => t.type === "include");
-      if (inc) {
-        includes.push({ kind: "include", path: inc.value, range: rangeFromLine(line) });
-      }
       i++;
       continue;
     }

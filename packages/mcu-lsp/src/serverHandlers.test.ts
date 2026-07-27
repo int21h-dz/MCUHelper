@@ -1,12 +1,15 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { analyzeDocument } from "@mcuhelper/mcu-language";
 import { setCachedSolverResult } from "./solver";
 import {
   buildDocumentSymbols,
+  buildFoldingRanges,
+  buildDocumentLinks,
   buildSemanticTokenData,
   collectDiagnostics,
   handleGetIndex,
@@ -125,6 +128,32 @@ describe("serverHandlers extended", () => {
     assert.ok(symbols.some((s) => s.name.startsWith("MATR")));
     assert.ok(symbols.some((s) => s.name.startsWith("Body")));
     assert.ok(symbols.some((s) => s.name.startsWith("Zone")));
+  });
+
+  it("buildFoldingRanges returns fragment and MATR folds", () => {
+    const text = fs.readFileSync(path.join(fixtures, "full_variant.mcu"), "utf8");
+    const uri = "file:///fixtures/full_variant.mcu";
+    const index = analyzeDocument(uri, text, 1);
+    const ranges = buildFoldingRanges(index);
+    assert.ok(ranges.some((r) => r.startLine === 0 && r.endLine >= 8));
+    assert.ok(ranges.some((r) => r.startLine === 2 && r.endLine === 5));
+    assert.ok(ranges.some((r) => r.startLine === 6 && r.endLine === 7));
+  });
+
+  it("buildDocumentLinks resolves #include target", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-link-"));
+    const mainPath = path.join(dir, "main.mcu");
+    const incPath = path.join(dir, "confpd");
+    fs.writeFileSync(incPath, "PIN 1 0\nFINISH", "utf8");
+    fs.writeFileSync(mainPath, "#include confpd\nFINISH", "utf8");
+    const uri = `file:///${mainPath.replace(/\\/g, "/")}`;
+    const text = fs.readFileSync(mainPath, "utf8");
+    const index = analyzeDocument(uri, text, 1, { baseDir: dir, expandInclude: true });
+    const links = buildDocumentLinks(index, uri);
+    assert.strictEqual(links.length, 1);
+    assert.strictEqual(links[0]!.range.start.character, 9);
+    assert.ok(links[0]!.target?.includes("confpd"));
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 
   it("resolveDocumentIndex falls back to getDoc when cache empty", () => {

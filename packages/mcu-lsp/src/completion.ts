@@ -13,7 +13,7 @@ import {
   type FragmentId,
 } from "@mcuhelper/mcu-schema";
 import type { DocumentIndex } from "@mcuhelper/mcu-language";
-import { formatTotalHistoriesEstimate, getTotalHistoriesEstimate } from "@mcuhelper/mcu-language";
+import { formatTotalHistoriesEstimate, getTotalHistoriesEstimate, resolveIncludeFileUri } from "@mcuhelper/mcu-language";
 import { formatBurnupLoadHover, formatVolCardHover, formatSourceSpectrumHover, findSourceSpectrumAtLine, getBurnupLoadAnalysis } from "@mcuhelper/mcu-language";
 import {
   CompletionItem,
@@ -23,6 +23,7 @@ import {
   Position,
 } from "vscode-languageserver";
 import { fullLine, wordAtPosition } from "./hover";
+import { uriToBaseDir } from "./serverHandlers";
 
 export { getHover, getHoverAsync, getHoverContent } from "./hover";
 
@@ -358,6 +359,25 @@ export function getDefinition(
   pos: Position,
   index: DocumentIndex
 ): { uri: string; range: import("@mcuhelper/mcu-language").SourceRange } | null {
+  for (const inc of index.ast.includes) {
+    const r = inc.range;
+    if (
+      pos.line === r.start.line &&
+      pos.character >= r.start.character &&
+      pos.character < r.end.character
+    ) {
+      return {
+        uri: resolveIncludeFileUri(uriToBaseDir(index.uri), inc.path),
+        range: {
+          start: { line: 0, character: 0 },
+          end: { line: 0, character: 0 },
+          offset: 0,
+          endOffset: 0,
+        },
+      };
+    }
+  }
+
   const line = fullLine(doc, pos);
   const word = wordAtPosition(line, pos.character);
   if (!word) return null;

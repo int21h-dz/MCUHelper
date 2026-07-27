@@ -1,28 +1,27 @@
 import * as fs from "fs";
-import * as path from "path";
+import { parseIncludeLine, resolveIncludeFilePath } from "./includeResolve";
 
 export function expandIncludes(text: string, baseDir: string): { text: string; includes: string[]; errors: string[] } {
   const includes: string[] = [];
   const errors: string[] = [];
-  const includeRe = /^#include\s+<([^>]+)>/im;
 
   const lines = text.split(/\r?\n/);
   const out: string[] = [];
 
   for (const line of lines) {
-    const m = line.match(includeRe);
-    if (m && line.trimStart().startsWith("#")) {
-      const incPath = m[1];
+    const parsed = parseIncludeLine(line);
+    if (parsed) {
+      const incPath = parsed.path;
       includes.push(incPath);
-      const full = path.isAbsolute(incPath) ? incPath : path.join(baseDir, incPath);
+      const { fsPath, exists } = resolveIncludeFilePath(baseDir, incPath);
       try {
-        if (!fs.existsSync(full)) {
+        if (!exists) {
           errors.push(`Файл include не найден: ${incPath}`);
           out.push(line);
           continue;
         }
-        const incText = fs.readFileSync(full, "utf8");
-        if (/#include\s+</i.test(incText)) {
+        const incText = fs.readFileSync(fsPath, "utf8");
+        if (/#include\s+(?:<|\S)/i.test(incText)) {
           errors.push(`Вложенный #include запрещён: ${incPath}`);
         }
         out.push(`* --- included from ${incPath} ---`);

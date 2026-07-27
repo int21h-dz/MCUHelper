@@ -4,7 +4,7 @@
 
 [`VS Code ^1.85`](https://code.visualstudio.com/download) · `Node.js` · язык `mcunr` · ~374 теста
 
-> **English:** MCU Helper is a VS Code extension and Language Server for editing MCU6 input decks — text files that describe materials, 3D geometry, sources, tallying, and burnup for Monte Carlo particle transport. It brings syntax highlighting, diagnostics, completions, hover documentation, a module catalog, geometry slice viewer, and optional validation via the MCU solver. MCU itself is not included; you need a separate installation for INPUT validation.
+> **English:** MCU Helper is a VS Code extension and Language Server for editing MCU6 input decks — text files that describe materials, 3D geometry, sources, tallying, and burnup for Monte Carlo particle transport. It brings syntax highlighting, diagnostics, completions, hover documentation, a module catalog, and convenient navigation inside MCU input files.
 
 ![Демонстрация MCU Helper в VS Code](media/Promo.gif)
 
@@ -40,9 +40,7 @@
 
 Исходники MCU — большие текстовые файлы со строгим синтаксисом.
 
-**McuHelper** (MCU-NR Helper) добавляет к VS Code поддержку уровня современных IDE: подсветку, диагностику, автодополнение, навигацию и визуализацию.
-
-> **Примечание:** исполняемый файл MCU в этот репозиторий **не входит**. 
+**McuHelper** (MCU-NR Helper) добавляет к VS Code поддержку уровня современных IDE: подсветку, диагностику, автодополнение и навигацию.
 
 ### Архитектура
 
@@ -52,9 +50,9 @@
 |-----------|------------|
 | [`packages/mcu-schema`](packages/mcu-schema) | Схемы карт PIN/GEO, типы тел, hover-тексты, каталог шаблонов модулей |
 | [`packages/mcu-language`](packages/mcu-language) | Лексер, парсер, семантический анализ, индекс документа |
-| [`packages/mcu-geometry`](packages/mcu-geometry) | Geometry IR, аналитика зон, срезы, запрос зоны в точке |
+| [`packages/mcu-geometry`](packages/mcu-geometry) | Geometry IR, аналитика зон, запросы к геометрии |
 | [`packages/mcu-lsp`](packages/mcu-lsp) | Language Server: diagnostics, completion, hover, custom requests |
-| [`extension/`](extension) | UI VS Code: боковая панель, WebView геометрии, команды |
+| [`extension/`](extension) | UI VS Code: боковая панель и команды |
 
 ```mermaid
 flowchart LR
@@ -65,7 +63,6 @@ flowchart LR
   Lang --> Schema[mcu-schema]
   Geo --> Schema
   Ext --> Sidebar[Webview Sidebar]
-  Ext --> GeomView[Geometry Slices]
 ```
 
 ---
@@ -87,6 +84,9 @@ flowchart LR
 - **Signature Help** — подсказка активного параметра при вводе тел (`RCC`, `RCZ`, …), карт (`MATR`, `POWER`, `STEP`, …), строк нуклидов
 - **Hover** — описания из UserGuide; для нуклидов — концентрация, плотность, атомная масса; опционально справочник **IAEA NDS** (ENDF, сечения, распад); для `POWER`/`STEP` — SVG-график мощности и энерговыработки; для `EMES`/`EPRO` — спектр источника; для `VOL` — объёмы материалов
 - **Автоопределение языка** `mcunr` по содержимому (`PIN`, `MATR`, `HEAD`, …) — даже для файлов без расширения `.mcu`
+- **Сворачивание (folding)** — фрагменты варианта (`PIN`…`FINISH`) и блоки `MATR` в редакторе
+- **Кликабельный `#include`** — переход к включаемому файлу (Ctrl+Click / F12); поддерживаются `#include <path>` и `#include path` (расширения `.mcu` / `.mcunr` подставляются автоматически)
+- **Выделение маркеров разделов** — `PIN`, `HEAD`, `FINISH` и др. визуально крупнее (bold + цвет + фон)
 
 ### Боковая панель MCU-NR
 
@@ -104,15 +104,6 @@ flowchart LR
 | **Объекты** | Регистрационные объекты |
 
 Клик по элементу — переход к строке в файле. Кнопка обновления на панели — пересчёт индекса.
-
-### Визуализация геометрии
-
-Команда **MCU-NR: Сечения геометрии** открывает WebView с **2D-срезами** (ОЧЕНЬ СЫРО):
-
-- плоскости **XY**, **XZ**, **YZ** — раскраска по зонам;
-- зум колёсиком мыши;
-- клик по срезу — имя зоны в точке;
-- автообновление при правке файла;
 
 ### Прочее
 
@@ -155,15 +146,13 @@ npm run build
 2. Язык редактора переключится на **mcunr** автоматически (настройка `mcuhelper.autoDetectLanguage`).
 3. В Activity Bar нажмите иконку **MCU-NR** — откроется боковая панель с каталогом и навигацией.
 4. Наведите курсор на карту или нуклид — появится hover из UserGuide.
-5. Для геометрии: **Ctrl+Shift+P** → `MCU-NR: Сечения геометрии`.
-
 **Примеры файлов** в репозитории:
 
 | Файл | Что демонстрирует |
 |------|-------------------|
 | [test/fixtures/full_variant.mcu](test/fixtures/full_variant.mcu) | Полный вариант |
 | [test/fixtures/pin_example.mcu](test/fixtures/pin_example.mcu) | Фрагмент PIN / MATR |
-| [test/fixtures/trx_geometry.mcu](test/fixtures/trx_geometry.mcu) | Простая геометрия |
+| [test/fixtures/trx_geometry.mcu](test/fixtures/trx_geometry.mcu) | Пример описания геометрии |
 | [test/fixtures/latt_example.mcu](test/fixtures/latt_example.mcu) | Решётка LATT |
 | [test/fixtures/cell_example.mcu](test/fixtures/cell_example.mcu) | Ячейка CELL / NET |
 
@@ -188,12 +177,10 @@ npm run build
 | MCU-NR: Обновить индекс | Пересчитать индекс документа |
 | MCU-NR: Вставить шаблон | Вставка шаблона из каталога |
 
-### Геометрия и валидация
+### Дополнительные команды
 
 | Команда | Описание |
 |---------|----------|
-| MCU-NR: Сечения геометрии | WebView со срезами XY/XZ/YZ |
-| MCU-NR: Validate (INPUT) | Проверка через солвер MCU-NR |
 | MCU-NR: Экспорт диагностик | Вывод Problems в Output |
 
 ### Утилиты
@@ -211,9 +198,6 @@ npm run build
 
 | Параметр | По умолчанию | Описание |
 |----------|--------------|----------|
-| `mcuhelper.mcuNrPath` | `""` | Путь к исполняемому файлу MCU-NR |
-| `mcuhelper.variantName` | `NAME` | Имя варианта (1–8 символов) для шага INPUT |
-| `mcuhelper.enableSolverValidation` | `false` | Автоматически запускать INPUT при сохранении (долго; не рекомендуется) |
 | `mcuhelper.enableIaeaNuclideHover` | `true` | Дополнять hover по нуклидам данными IAEA NDS |
 | `mcuhelper.autoDetectLanguage` | `true` | Определять MCU-NR по содержимому и переключать язык на `mcunr` |
 | `mcuhelper.autoDetectFromLanguages` | `plaintext`, `txt`, `ini`, … | С каких language id переключать (уже размеченные языки не трогает) |

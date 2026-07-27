@@ -7,12 +7,14 @@ import {
   semanticKindToIndex,
   listVisibleConstants,
   resolveScopeAtLine,
+  resolveIncludeFilePath,
+  resolveIncludeFileUri,
   type DocumentIndex,
   type DiagnosticMessage,
 } from "@mcuhelper/mcu-language";
 import { buildScene, buildSliceGrid, queryPoint } from "@mcuhelper/mcu-geometry";
 import type { SliceAxis } from "@mcuhelper/mcu-geometry";
-import { SymbolInformation, SymbolKind, Diagnostic, DiagnosticSeverity } from "vscode-languageserver";
+import { SymbolInformation, SymbolKind, Diagnostic, DiagnosticSeverity, FoldingRange, FoldingRangeKind, DocumentLink } from "vscode-languageserver";
 import { getCachedSolverResult, runInputStep, setCachedSolverResult, type SolverResult } from "./solver";
 
 export interface McuServerSettings {
@@ -23,7 +25,18 @@ export interface McuServerSettings {
 }
 
 export function uriToBaseDir(uri: string): string {
-  return path.dirname(uri.replace(/^file:\/\//, "").replace(/^\//, "").replace(/^([A-Z]):/, "$1:"));
+  try {
+    const { pathname } = new URL(uri);
+    let fsPath = decodeURIComponent(pathname);
+    if (/^\/[A-Za-z]:/.test(fsPath)) {
+      fsPath = fsPath.slice(1);
+    }
+    return path.dirname(fsPath);
+  } catch {
+    return path.dirname(
+      uri.replace(/^file:\/\//, "").replace(/^\//, "").replace(/^([A-Z]):/, "$1:")
+    );
+  }
 }
 
 export function toLspDiagnostic(d: DiagnosticMessage): Diagnostic {
@@ -152,6 +165,66 @@ export function buildDocumentSymbols(index: DocumentIndex, uri: string): SymbolI
     });
   }
   return symbols;
+}
+
+const MATERIAL_BLOCK_STOP_LABELS = new Set(["MATR", "END", "FINISH", "DEF", "TEMPR", "PIN"]);
+
+function buildMaterialFoldingRanges(index: DocumentIndex): FoldingRange[] {
+  const physicalStatements = index.ast.statements
+    .filter((stmt) => stmt.fragment === "physical")
+    .sort((a, b) => a.range.start.line - b.range.start.line);
+
+  const ranges: FoldingRange[] = [];
+  for (const mat of index.ast.materials) {
+    const startLine = mat.range.start.line;
+    const stmtIdx = physicalStatements.findIndex(
+      (stmt) => stmt.range.start.line === startLine && stmt.label === "MATR"
+    );
+    if (stmtIdx < 0) continue;
+
+    let endLine = physicalStatements[physicalStatements.length - 1]?.range.end.line ?? startLine;
+    for (let i = stmtIdx + 1; i < physicalStatements.length; i++) {
+      const next = physicalStatements[i]!;
+      if (MATERIAL_BLOCK_STOP_LABELS.has(next.label.toUpperCase())) {
+        endLine = next.range.start.line - 1;
+        break;
+      }
+    }
+
+    if (endLine > startLine) {
+      ranges.push({ startLine, endLine, kind: FoldingRangeKind.Region });
+    }
+  }
+  return ranges;
+}
+
+export function buildFoldingRanges(index: DocumentIndex): FoldingRange[] {
+  const ranges: FoldingRange[] = [];
+  for (const fragment of index.ast.fragments) {
+    if (fragment.endLine <= fragment.startLine) continue;
+    ranges.push({
+      startLine: fragment.startLine,
+      endLine: fragment.endLine,
+      kind: FoldingRangeKind.Region,
+    });
+  }
+  ranges.push(...buildMaterialFoldingRanges(index));
+  return ranges.sort((a, b) => a.startLine - b.startLine || a.endLine - b.endLine);
+}
+
+export function buildDocumentLinks(index: DocumentIndex, documentUri: string): DocumentLink[] {
+  const baseDir = uriToBaseDir(documentUri);
+  return index.ast.includes.map((inc) => {
+    const { fsPath, exists } = resolveIncludeFilePath(baseDir, inc.path);
+    return {
+      range: {
+        start: { line: inc.range.start.line, character: inc.range.start.character },
+        end: { line: inc.range.end.line, character: inc.range.end.character },
+      },
+      target: resolveIncludeFileUri(baseDir, inc.path),
+      tooltip: exists ? fsPath : `Файл не найден: ${inc.path}`,
+    };
+  });
 }
 
 export function resolveDocumentIndex(

@@ -28,6 +28,7 @@ export type TokenType =
   | "include";
 
 import { isKnownMcuLabel } from "./schemaBridge";
+import { parseIncludeLine } from "./includeResolve";
 
 const LABEL_RE = /^[A-Za-z][A-Za-z0-9]{0,5}/;
 const NUMBER_RE = /^[+-]?(\d+\.?\d*|\.\d+)([Ee][+-]?\d+)?/;
@@ -80,10 +81,16 @@ export function tokenizeLine(
 
     const rest = line.slice(i);
 
-    if (firstToken && rest.startsWith("#include") || rest.startsWith("#INCLUDE")) {
-      const m = rest.match(/^#include\s+<([^>]+)>/i);
-      if (m) {
-        tokens.push({ type: "include", value: m[1], line: lineNo, column: i, offset: offset + i });
+    if ((firstToken && rest.startsWith("#include")) || rest.startsWith("#INCLUDE")) {
+      const parsed = parseIncludeLine(line);
+      if (parsed) {
+        tokens.push({
+          type: "include",
+          value: parsed.path,
+          line: lineNo,
+          column: parsed.pathStart,
+          offset: offset + parsed.pathStart,
+        });
         break;
       }
     }

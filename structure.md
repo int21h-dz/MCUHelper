@@ -5,6 +5,8 @@
 
 **Пользовательская документация:** [README.md](README.md) — установка, быстрый старт, возможности, команды, настройки.
 
+**Политика README:** не описывать в README пользовательские сценарии **2D-срезов геометрии** (`MCU-NR: Сечения геометрии`) и **валидации через солвер MCU-NR** (`MCU-NR: Validate (INPUT)`, `mcuhelper.mcuNrPath`, `mcuhelper.variantName`, `mcuhelper.enableSolverValidation`). Эти возможности экспериментальны и документируются здесь, в `structure.md` (см. разделы «Команды extension», LSP custom requests).
+
 ## Структура репозитория
 
 ```
@@ -15,14 +17,14 @@ McuHelper/
 ├── extension/                 # VS Code extension
 │   ├── src/extension.ts       # активация, LSP client, Webview sidebar, команды
 │   ├── src/sidebarView.ts     # WebviewView: каталог + 7 навигационных панелей
-│   ├── src/navData.ts         # buildNavTree — деревья из LSP getIndex
+│   ├── src/navData.ts         # buildNavTree — деревья из LSP getIndex (Объекты: клики по зонам, objNum при дубликатах имён)
 │   ├── src/catalogBridge.ts   # buildCatalogPayload (mcu-schema vendor)
 │   ├── src/templateInsert.ts  # вставка шаблонов, DocumentDropEditProvider
 │   ├── media/sidebar/         # sidebar.css, sidebarIcons.js, sidebarShell.js (design system)
 │   └── src/geometryPanel.ts   # WebView: срезы геометрии (без 3D)
 ├── packages/
 │   ├── mcu-schema/            # карточки, типы тел, hover-тексты, catalog.ts (шаблоны модулей)
-│   ├── mcu-language/          # lexer, parser, semantic, document index
+│   ├── mcu-language/          # lexer, parser, semantic, document index, includeResolve
 │   ├── mcu-geometry/          # Geometry IR, аналитика зон, срезы, queryPoint
 │   │   └── src/
 │   │       ├── zoneExpression.ts  # парсер булевых выражений зон
@@ -58,7 +60,7 @@ McuHelper/
 | Пакет | Ответственность |
 |-------|-----------------|
 | `@mcuhelper/mcu-schema` | Схемы PIN/GEO карт, BODY_TYPES, FRAGMENT_ORDER |
-| `@mcuhelper/mcu-language` | `parseDocument`, `analyzeSemantics`, `analyzeDocument` (кэш uri+version+hash), `buildSummaries`, … |
+| `@mcuhelper/mcu-language` | `parseDocument`, `analyzeSemantics`, `analyzeDocument` (кэш uri+version+hash), `buildSummaries`, `includeResolve` (`collectIncludesFromSource` — диапазоны `#include` до expand), … |
 | `@mcuhelper/mcu-geometry` | `buildScene`, `queryPoint`, `buildSliceGrid`, `pointInBody`, `parseZoneExpression` |
 | `@mcuhelper/mcu-lsp` | LSP server, solver bridge (INPUT + .LST) |
 
@@ -68,7 +70,7 @@ McuHelper/
 - **Signature Help** — подсказка активного параметра при вводе тел (`RCC`, `RCZ`, …), карт (`MATR`, `POWER`, `STEP`, `SUMZON`, `SPNT`, …), **строк нуклидов** (`name`, `dens`, `MODS=…`); `parameterHints.ts`, `bodyParamGroups.ts`, `cardLineParamGroups.ts`, `nuclideLineParamGroups.ts`
 - **body-params-extra** — лишние токены в строке тела (`bodyParamValidation.ts`): лимит по числу полей тела; пробелы и запятые взаимозаменяемы (UserGuide §7.1, §9.1.3)
 - Hover (из schema + символы документа)
-- Definition, DocumentSymbol
+- Definition, DocumentSymbol, **FoldingRange** (крупные фрагменты PIN/HEAD/… + блоки MATR), **DocumentLink** (`#include` → клик по имени файла; includes собираются из исходного текста до `expandIncludes`)
 - Custom: `mcuhelper/getIndex`, `mcuhelper/getGeometry`, `mcuhelper/queryPoint`, `mcuhelper/getSlice`, `mcuhelper/validateInput`
 - **Hover** (LSP): описания из UserGuide (`userGuideCards.generated.ts`) + `cardDescriptionsExtra.ts` + ручные карты; **без** заглушек «см. UserGuide»
 - **extract-cards**: `npm run extract-cards --prefix packages/mcu-schema` — перегенерация карт из `docs/MCU-NR_UserGuide_220519.txt`
@@ -81,7 +83,7 @@ McuHelper/
 - **ENERGY/ENERG**: семантика — нижние границы ≥ 0, 0 явно; список строго по возрастанию (0, E1, …) или по убыванию (…, 0); `energyGroups.ts`
 - **Физические величины**: TEMPR, MATR (T, DENS*, концентрации), VOL, POWER, STEP/DSTP, TIMP/TSEC/TMIN/THOU/TDAY/TYEA — значения ≥ 0 (константы EQU/SET тоже при подстановке); `positiveQuantities.ts`
 - **EQU/SET и выражения**: неинициализированные имена в EQU/SET, параметрах тел, картах с числами; `variableRefs.ts` (`var-undef`, `expr-syntax`)
-- **Подсветка**: TextMate (`syntaxes/mcunr.tmLanguage.json`) + **семантические токены LSP** (`semanticHighlight.ts`) — карта / зона / тело / нуклид по контексту; из TextMate убраны коллизии (CROD, GRIN, SI, …)
+- **Подсветка**: TextMate (`syntaxes/mcunr.tmLanguage.json`) — карты, тела, зоны; **маркеры разделов** (`PIN`, `HEAD`, `FINISH`, …) — scope `markup.heading.section.*.mcunr`, жирный + фон (`editor.tokenColorCustomizations` в extension); семантические токены LSP отключены (UI freeze)
 
 ## Команды extension
 - `MCU-NR: Validate (INPUT)` — опциональный запуск солвера

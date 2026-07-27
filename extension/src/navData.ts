@@ -193,17 +193,45 @@ export function buildZonesTree(index: IndexPayload, uri: string): NavTreeNode[] 
   }));
 }
 
-export function buildObjectsTree(index: IndexPayload): NavTreeNode[] {
-  return index.summaries.objects.map((o) => ({
-    id: `obj-${o.objectNum}`,
-    label: `Object ${o.objectNum}`,
-    description: `Зоны: ${o.zoneNames.join(", ")}`,
-    children: o.zoneNames.map((zn, i) => ({
-      id: `obj-${o.objectNum}-z-${i}`,
-      label: zn,
-      description: `мат. ${o.materialNums.join(",")}`,
-    })),
-  }));
+export function buildObjectsTree(index: IndexPayload, uri: string): NavTreeNode[] {
+  // "Объект" в индексе не содержит прямого range/position,
+  // поэтому кликабельность делаем через зоны, на которые он ссылается.
+  const zonesByName = new Map<string, typeof index.summaries.zones>();
+  for (const z of index.summaries.zones) {
+    const list = zonesByName.get(z.name);
+    if (list) list.push(z);
+    else zonesByName.set(z.name, [z]);
+  }
+
+  const zoneForObject = (zoneName: string, objectNum: number) => {
+    const matches = zonesByName.get(zoneName);
+    if (!matches?.length) return undefined;
+    return matches.find((z) => z.objNum === objectNum) ?? matches[0];
+  };
+
+  return index.summaries.objects.map((o) => {
+    const children = o.zoneNames.map((zn, i) => {
+      const zone = zoneForObject(zn, o.objectNum);
+      return {
+        id: `obj-${o.objectNum}-z-${i}`,
+        label: zn,
+        description: `мат. ${o.materialNums.join(",")}`,
+        uri: zone ? uri : undefined,
+        range: zone?.range,
+      };
+    });
+
+    const firstClickableRange = children.find((c) => c.uri && c.range)?.range;
+
+    return {
+      id: `obj-${o.objectNum}`,
+      label: `Object ${o.objectNum}`,
+      description: `Зоны: ${o.zoneNames.join(", ")}`,
+      uri,
+      range: firstClickableRange,
+      children,
+    };
+  });
 }
 
 export function buildConstantsTree(
@@ -372,7 +400,7 @@ export function buildNavTree(viewId: NavViewId, index: IndexPayload, uri: string
     case "zones":
       return buildZonesTree(index, uri);
     case "objects":
-      return buildObjectsTree(index);
+      return buildObjectsTree(index, uri);
     case "constants":
       return buildConstantsTree(index, uri, index.editorContext);
     case "bodies":
