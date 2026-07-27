@@ -2,7 +2,7 @@
   "name": "mcuhelper-vscode",
   "displayName": "MCU-NR Helper",
   "description": "Language Server для исходных данных MCU-NR: диагностика, автодополнение, навигация, визуализация геометрии",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "publisher": "mcuhelper",
   "engines": { "vscode": "^1.85.0" },
   "categories": ["Programming Languages"],

@@ -139,7 +139,7 @@ npm run build
 ```bat
 package-vsix.bat
 ```
-Создаёт `release/mcuhelper-vscode-<version>.vsix`. Установка: **Extensions → … → Install from VSIX** или `code --install-extension release\mcuhelper-vscode-0.1.0.vsix`.
+Перед упаковкой: в `package-vsix.bat` задаётся **MAJOR** (`set RELEASE_MAJOR=0`), скрипт `scripts/bump-vsix-version.js` ищет max **MINOR** среди `release/mcuhelper-vscode-<MAJOR>.*.vsix` и `extension/package.json`, увеличивает MINOR на 1. В лог: `0.3 -> 0.4`; в `package.json` для vsce: `0.4.0`. Итог: `release/mcuhelper-vscode-0.4.0.vsix`. Установка: **Extensions → … → Install from VSIX** или `code --install-extension release\mcuhelper-vscode-0.4.0.vsix`.
 
 ## Тесты
 ***При добавлении новых фрагментов кода*** надо сразу реализовывать новые тесты.
