@@ -28,3 +28,6 @@ export * from "./constants";
 export * from "./naturalIsotopes";
 export * from "./otherModules";
 export * from "./zoneRegistration";
+export * from "./zoneStatement";
+export * from "./zoneBodyRefs";
+export * from "./netCartogram";

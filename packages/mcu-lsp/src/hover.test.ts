@@ -193,6 +193,36 @@ describe("getHover", () => {
     assert.ok(hover?.includes("Тело **N3**"));
     assert.ok(hover?.includes("RCZ"));
   });
+
+  it("hover on numeric body shorthand works on multi-line zone continuation", () => {
+    const text = [
+      "HEAD 3 0",
+      "CONT T T",
+      "RCZ N16 0 0 0 10 1",
+      "RCZ N17 0 0 0 10 2",
+      "RCZ N51 0 0 0 10 3",
+      "RCZ N52 0 0 0 10 4",
+      "END",
+      "CLAD  17  -16 U",
+      "               52  -51 U",
+      "      /-1:13/2",
+      "END",
+      "FINISH",
+    ].join("\n");
+    const { doc, index } = openText(text);
+    const cont = text.split("\n")[8]!;
+    const hover52 = getHoverContent(
+      doc,
+      { line: 8, character: cont.indexOf("52") + 1 },
+      index,
+      { enableIaeaNuclide: false }
+    );
+    assert.ok(hover52?.includes("Тело **N52**"), hover52 ?? "(null)");
+    assert.ok(hover52?.includes("RCZ"));
+
+    const hoverTail = getHoverContent(doc, { line: 9, character: 10 }, index, { enableIaeaNuclide: false });
+    assert.ok(!hoverTail?.includes("Тело **N13**"), hoverTail ?? "(null)");
+  });
 });
 
 describe("getHoverContent", () => {
@@ -286,9 +316,9 @@ describe("getHoverContent", () => {
   });
 
   it("hover VOL keyword appends volume table", () => {
-    const text = "PIN 1 0\nMATR 1\nU235 1.E-3\nBURN\nVOL 1.0 0.5\nFINISH";
+    const text = "PIN 1 0\nMATR 1\nU235 1.E-3\nVOL 1.0 0.5\nFINISH";
     const { doc, index } = openText(text);
-    const hover = getHover(doc, { line: 4, character: 1 }, index);
+    const hover = getHover(doc, { line: 3, character: 1 }, index);
     assert.ok(hover?.includes("VOL"));
     assert.ok(hover?.includes("0.5") || hover?.includes("объём"));
   });
@@ -326,5 +356,15 @@ describe("getHoverContent", () => {
     const { doc, index } = openText(text);
     const hover = getHover(doc, { line: 1, character: 10 }, index);
     if (hover) assert.ok(hover.includes("FINISH") || hover.includes("PIN"));
+  });
+
+  it("hover DELN in registration shows card description, not nuclide dens", () => {
+    const text = "RGS 1 0\nKEFF\nDELN 0\nEND\nFINISH";
+    const { doc, index } = openText(text);
+    const delnLine = index!.ast.statements.find((s) => s.label === "DELN")!.range.start.line;
+    const hover = getHoverContent(doc, { line: delnLine, character: 1 }, index, { enableIaeaNuclide: false });
+    assert.ok(hover?.includes("другого модуля") || hover?.includes("недопустима"));
+    assert.ok(!hover?.includes("Параметр: `dens`"));
+    assert.ok(!hover?.includes("запаздывающ"));
   });
 });

@@ -149,9 +149,9 @@ describe("completion", () => {
   });
 
   it("VOL completion includes material volumes", () => {
-    const text = "PIN 1 0\nMATR 1\nU235 1.E-3\nBURN\nVOL \nFINISH";
+    const text = "PIN 1 0\nMATR 1\nU235 1.E-3\nVOL \nFINISH";
     const { doc, index } = openText(text);
-    const items = getCompletions(doc, { line: 4, character: 4 }, index);
+    const items = getCompletions(doc, { line: 3, character: 4 }, index);
     const vol = items.find((i) => i.label === "VOL");
     assert.ok(vol);
     const docText = typeof vol!.documentation === "string" ? vol!.documentation : vol!.documentation?.value ?? "";

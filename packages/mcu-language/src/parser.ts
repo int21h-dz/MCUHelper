@@ -27,7 +27,13 @@ import { collectIncludesFromSource } from "./includeResolve";
 import { expandIncludes, expandRepeats } from "./preprocessor";
 import { applyGeometryScopeTransition, initialGeometryScopeState } from "./geometryScope";
 import { isG2mpCartogramRow, looksLikeZoneOverridingFragment, looksLikeZoneStatement } from "./zoneStatement";
-import { detectFragmentFromLabel, isKnownMcuLabel } from "./schemaBridge";
+import {
+  detectFragmentFromLabel,
+  FRAGMENT_DISPLAY,
+  fragmentsForLabel,
+  isKnownMcuLabel,
+  labelAllowedInFragment,
+} from "./schemaBridge";
 
 const BODY_KEYS = new Set([
   "SPH", "RCC", "ELL", "BOX", "WED", "RPP", "HEX", "HEXX", "HEXY", "RCZ",
@@ -467,6 +473,24 @@ export function parseDocument(text: string, options: ParseOptions): DocumentAst 
         range: stmt.range,
         fragment: currentFragment ?? "physical",
       });
+
+      const frag = currentFragment ?? "physical";
+      // В geometry имена зон часто совпадают с картами регистрации (GROU, CROD, GZAZI…).
+      const zoneHomonym =
+        frag === "geometry" && looksLikeZoneStatement(stmt.text);
+      if (isKnownMcuLabel(label) && !labelAllowedInFragment(label, frag) && !zoneHomonym) {
+        const allowedFrags = fragmentsForLabel(label);
+        const allowedNames = allowedFrags
+          .map((f) => FRAGMENT_DISPLAY[f as keyof typeof FRAGMENT_DISPLAY] ?? f)
+          .join(", ");
+        const lineFrag = FRAGMENT_DISPLAY[frag as keyof typeof FRAGMENT_DISPLAY] ?? frag;
+        diagnostics.push({
+          severity: "error",
+          message: `Карта ${label} недопустима во «${lineFrag}»${allowedNames ? ` (допустима: ${allowedNames})` : ""}`,
+          code: "card-wrong-fragment",
+          range: stmt.range,
+        });
+      }
     }
 
     if (label === "FINISH") {

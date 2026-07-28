@@ -72,7 +72,7 @@ McuHelper/
 - Hover (из schema + символы документа)
 - Definition, DocumentSymbol, **FoldingRange** (крупные фрагменты PIN/HEAD/… + блоки MATR + **LCELL…ENDL** + **LATT…LISTEL/PARM/LFIXSO**), **DocumentLink** (`#include` → клик по имени файла; includes собираются из исходного текста до `expandIncludes`)
 - Custom: `mcuhelper/getIndex`, `mcuhelper/getGeometry`, `mcuhelper/queryPoint`, `mcuhelper/getSlice`, `mcuhelper/validateInput`
-- **Hover** (LSP): описания из UserGuide (`userGuideCards.generated.ts`) + `cardDescriptionsExtra.ts` + ручные карты; **без** заглушек «см. UserGuide»
+- **Hover** (LSP): описания из UserGuide (`userGuideCards.generated.ts`) + `cardDescriptionsExtra.ts` + ручные карты; **без** заглушек «см. UserGuide»; membership карт — `MCU_LABELS_BY_FRAGMENT` + `labelAllowedInFragment` / `fragmentsForLabel` (`keywords.ts`); чужая карта во фрагменте → диагностика **`card-wrong-fragment` (error)**; исключение — зоны в geometry с именами-омонимами карт регистрации (`GROU`/`CROD`/`GZAZI`… при `looksLikeZoneStatement`); hover чужой карты — короткий текст «карта другого модуля» без dens/spectrum/VOL extras; `shared` только `FINISH`/`END`/`STOP`/`SHOW`/`EQU`/`SET`; multi-home явно (VOL, BUCL, WWEN…)
 - **extract-cards**: `npm run extract-cards --prefix packages/mcu-schema` — перегенерация карт из `docs/MCU-NR_UserGuide_220519.txt`
 - `npm run build` в корне — также копирует esbuild-бандл LSP в `extension/server/server.js` (VSIX и Extension Development Host)
 - Сборка пакетов с публикуемым/тестируемым `dist` должна начинаться с очистки `dist`, иначе `node --test dist/**/*.test.js` и копирование vendor могут подхватить stale-артефакты удалённых модулей
@@ -111,6 +111,7 @@ McuHelper/
 - **LATT GLTL:** `LATT GLTL <зоны>` + `LISTEL` + `PARM [/n] x,y,z…` (UserGuide §9.2.6.1); после PARM — опционально **`LFIXSO` / `LBLACK`** (накопление источника: пары объектных номеров → поверхность накопления/поглощения; не зоны). См. `MCU-NR_Reference.md`
 - **Выражения в параметрах тел:** операнд, оканчивающийся на `*` (`DF-1* DELT`), склеивается со следующим токеном → `DF-1*DELT`; запятая = пробел при подсчёте параметров (`body-params-extra`)
 - `zone-body`/`transf-ref` — только тела того же scope; **первая ссылка `0`** в зоне — всё пространство (UserGuide §9.1.4, `zoneBodyRefs.ts`), не тело N0
+- Hover по числовым ссылкам тел в зоне (`17` ≡ `N17`) — и на однострочных, и на continuation-строках многострочного выражения; номера в хвосте регистрации (`/-1:13/2`) не считаются body-ref (`hover.ts`)
 - Scope `global` для контейнера; `lcell:NAME` / `cell:NAME` для прототипов решётки/сети; **EQU/SET в прототипе** — локальные имена (UserGuide txt 3264–3268, 3541–3545), перекрытие global по имени без ошибки `const-redef`.
 - Карты других модулей — `packages/mcu-schema/src/keywords.ts` (~229 меток).
 
@@ -166,7 +167,7 @@ npm run coverage:check    # gate: lines/statements ≥95%, branches ≥80%, func
 
 | Пакет | Скрипт | Тест-файлы (src) | ~тестов |
 |-------|--------|------------------|---------|
-| `mcu-schema` | `npm run test --prefix packages/mcu-schema` | `keywords`, `catalog`, `bodyParamGroups`, `cardLineParamGroups`, `nuclideLineParamGroups`, `moduleCards`, `index.smoke`, `cardDescriptionsExtra`, `userGuideCards.smoke`, `cardArgEnums` | 47 |
+| `mcu-schema` | `npm run test --prefix packages/mcu-schema` | `keywords`, `catalog`, `bodyParamGroups`, `cardLineParamGroups`, `nuclideLineParamGroups`, `moduleCards`, `index.smoke`, `cardDescriptionsExtra`, `userGuideCards.smoke`, `cardArgEnums` | 50 |
 | `mcu-language` | `npm run test --prefix packages/mcu-language` | unit: `lexer`, `preprocessor`, `expression`, `document`, `encodingDetect`, `constants`, `schemaBridge`, `otherModules`, `bodyVolume`, `calculationControl`, `materialVolumes`, `materialDensity`, `semantic`, `energyGroups`; integration: `integration/fixtures` | 183 |
 | `mcu-geometry` | `npm run test --prefix packages/mcu-geometry` | `geometry`, `netQuery`, `gltl`, `primitives`, `hex2d`, `bodyRefs`, `colors`, `pointInBody`, `query`, `buildScene` | 71 |
 | `mcu-lsp` | `npm run test --prefix packages/mcu-lsp` | `hover`, `completion`, `signatureHelp`, `solver`, `iaeaNds`, `serverHandlers`, `lsp.integration` | 61 |

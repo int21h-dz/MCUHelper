@@ -15,6 +15,9 @@ const NUCLIDE_LINE_EXCLUDED_HEADS = new Set([
   "UCX", "UCY", "UCZ", "PLG", "PLX", "PLY", "PLZ", "SLA", "SLB", "REC",
   "TRC", "ARB", "SBOX", "SHEX", "HEXG", "QUAD", "TRANSF", "UPOLY",
   "EMES", "EPRO", "SRCD", "SRC", "RGS", "REGD", "PTYPE", "TTYPE", "NRET", "SPNT",
+  "DELN", "NEUT", "EGRC", "KEFF", "RCT", "ZRCT", "ORCT", "MRCT", "ENERG", "ENERGY",
+  "ACEPT", "ACERR", "PHOT", "WPHO", "IWPHN", "EGPH", "ELEC", "EGEL", "PSIN", "PSGR",
+  "MATFIL", "MATPRN", "SIPRN", "DEFPRN", "MATWGT", "MATREP",
 ]);
 
 function isExcludedNuclideLikeLine(text: string): boolean {

@@ -101,6 +101,15 @@ export const EXTRA_CARD_DESCRIPTIONS: ExtraCard[] = [
     description: "Элементы, для которых разложение ICE не выполняется (остаются как ICENOT AAAA).",
     fragment: "physical",
   },
+  {
+    label: "DELN",
+    title: "Режим запаздывающих нейтронов",
+    syntax: "DELN valdeln",
+    description:
+      "Управляющий параметр физического модуля (§8.6 UserGuide): режим расчёта запаздывающих нейтронов. valdeln=0 — без разделения на мгновенные и запаздывающие, энергия всех нейтронов разыгрывается по спектру мгновенных. valdeln=1 — разделение включено, энергия запаздывающих нейтронов — по спектру запаздывающих. Целое число.",
+    defaults: "valdeln=0",
+    fragment: "physical",
+  },
   // --- Источники (SPNT / сложный) ---
   {
     label: "ENSO",
@@ -251,7 +260,7 @@ export const EXTRA_CARD_DESCRIPTIONS: ExtraCard[] = [
     title: "Ценности по объектам",
     syntax: "INPO V1 V2 …",
     description: "Ценности для регистрационных объектов; недостающие позиции заполняются единицами.",
-    fragment: "calculationControl",
+    fragment: "trajectory",
   },
   {
     label: "XYZ0",
@@ -259,35 +268,35 @@ export const EXTRA_CARD_DESCRIPTIONS: ExtraCard[] = [
     syntax: "XYZ0 x y z | XYZ0 x y",
     description:
       "Центр сферической (3 числа) или ось цилиндрической (2 числа) системы для весового окна по геометрии.",
-    fragment: "calculationControl",
+    fragment: "trajectory",
   },
   {
     label: "RADS",
     title: "Радиусы слоёв весового окна",
     syntax: "RADS r1 r2 …",
     description: "Возрастающие радиусы слоёв r1<r2<… для разбиения пространства весового окна.",
-    fragment: "calculationControl",
+    fragment: "trajectory",
   },
   {
     label: "INPM",
     title: "Ценности VE по радиусу и энергии",
     syntax: "INPM …",
     description: "Матрица NR×NE ценностей VEij (по строкам) для весового окна; NR — число слоёв RADS, NE — WWEN.",
-    fragment: "calculationControl",
+    fragment: "trajectory",
   },
   {
     label: "SANG",
     title: "Разбиение по углу (косинусы)",
     syntax: "SANG s1 s2 …",
     description: "Границы -1<s1<s2<…<1 по косинусу угла для угловой зависимости весового окна.",
-    fragment: "calculationControl",
+    fragment: "trajectory",
   },
   {
     label: "INRA",
     title: "Ценности по радиусу и углу",
     syntax: "INRA …",
     description: "Матрица NR×NA ценностей VA для углового разбиения SANG (опционально).",
-    fragment: "calculationControl",
+    fragment: "trajectory",
   },
   {
     label: "SETT",
@@ -295,7 +304,7 @@ export const EXTRA_CARD_DESCRIPTIONS: ExtraCard[] = [
     syntax: "SETT N|PH|EL|PO",
     description:
       "К какому типу частиц относятся следующие карты неаналогового моделирования (N/PH/EL/PO). По умолчанию N.",
-    fragment: "calculationControl",
+    fragment: "trajectory",
   },
   {
     label: "SERIES",

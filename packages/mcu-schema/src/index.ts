@@ -392,7 +392,7 @@ export const EXTENDED_CARDS: CardSchema[] = [
     title: "Число батчей",
     syntax: "NBATCH n",
     description: "Число батчей (пакетов историй) на серию. Краткая метка: NBAT.",
-    fragment: "calculationControl",
+    fragment: "trajectory",
     example: "NBATCH 3",
   },
   {
@@ -401,7 +401,7 @@ export const EXTENDED_CARDS: CardSchema[] = [
     syntax: "NTOT n",
     description:
       "Число частиц в поколении (историй на серию). Суммарно по варианту: NTOT × MAXSER историй.",
-    fragment: "calculationControl",
+    fragment: "trajectory",
   },
   {
     label: "BURN",
@@ -518,8 +518,8 @@ export const EXTENDED_CARDS: CardSchema[] = [
     title: "Объёмы материалов",
     syntax: "VOL V1 V2 ... Vnmat",
     description:
-      "Объёмы материалов (см³) по порядку номеров MATR. Нужны для работы модуля выгорания вместе с BURALL/BMAX.",
-    fragment: "burnupRegistration",
+      "Объёмы материалов (см³) по порядку номеров MATR. Допустимы в физическом модуле (§8.6) и в регистрации для выгорания (с BURALL/BMAX).",
+    fragment: "physical",
     example: "VOL 0.45 0.17 0.76 0.02",
   },
   {
@@ -728,7 +728,9 @@ export {
   MCU_LABEL_ALIASES,
   MCU_LABELS_BY_FRAGMENT,
   detectFragmentFromLabel,
+  fragmentsForLabel,
   isKnownMcuLabel,
+  labelAllowedInFragment,
   listAllMcuLabels,
   normalizeMcuLabel,
 } from "./keywords";

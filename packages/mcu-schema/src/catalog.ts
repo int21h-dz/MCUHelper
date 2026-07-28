@@ -160,9 +160,12 @@ function cardToItem(
 }
 
 function labelsForFragment(fragmentId: FragmentId): string[] {
-  const labels = new Set<string>(MCU_LABELS_BY_FRAGMENT[fragmentId]);
-  if (fragmentId !== "burnup") {
-    labels.add("FINISH");
+  const labels = new Set<string>([
+    ...MCU_LABELS_BY_FRAGMENT[fragmentId],
+    ...MCU_LABELS_BY_FRAGMENT.shared,
+  ]);
+  if (fragmentId === "burnup") {
+    labels.delete("FINISH");
   }
   return [...labels].sort((a, b) => a.localeCompare(b));
 }

@@ -401,6 +401,48 @@ describe("fragment order", () => {
     assert.ok(phys!.endLine >= 304, "DELN/FINISH still in physical");
     assert.ok(geo!.startLine <= 305, "HEAD starts geometry");
   });
+
+  it("DELN in registration keeps fragment and warns card-wrong-fragment", () => {
+    const text = "RGS 1 0\nKEFF\nDELN 0\nEND\nFINISH";
+    const ast = parseDocument(text, { uri: "reg-deln.mcu" });
+    const deln = ast.statements.find((s) => s.label === "DELN");
+    assert.strictEqual(deln?.fragment, "registration");
+    const diag = ast.diagnostics.find((d) => d.code === "card-wrong-fragment" && d.message.includes("DELN"));
+    assert.ok(diag, ast.diagnostics.map((d) => d.message).join("; "));
+    assert.strictEqual(diag!.severity, "error");
+  });
+
+  it("NTOT in trajectory is allowed; DELN in trajectory is error", () => {
+    const text = "TRJD\nNTOT 1000\nDELN 0\nFINISH";
+    const ast = parseDocument(text, { uri: "trj.mcu" });
+    assert.ok(!ast.diagnostics.some((d) => d.code === "card-wrong-fragment" && d.message.includes("NTOT")));
+    assert.ok(ast.diagnostics.some((d) => d.code === "card-wrong-fragment" && d.message.includes("DELN")));
+  });
+
+  it("geometry zones named like registration cards are not card-wrong-fragment", () => {
+    const text = [
+      "HEAD 3 0",
+      "CONT T T",
+      "RPP A 0 1 0 1 0 1",
+      "RPP B 0 2 0 2 0 2",
+      "END",
+      "FVOID A /1:1",
+      "GROU B -A /2:2",
+      "GZAZI A /3:3",
+      "GZAZO B /4:4",
+      "CROD A /5:5",
+      "GRIN B /6:6",
+      "END",
+      "FINISH",
+    ].join("\n");
+    const ast = parseDocument(text, { uri: "zone-homonym.mcu" });
+    assert.ok(ast.zones.some((z) => z.name === "GROU"));
+    assert.ok(ast.zones.some((z) => z.name === "CROD"));
+    assert.ok(
+      !ast.diagnostics.some((d) => d.code === "card-wrong-fragment"),
+      ast.diagnostics.filter((d) => d.code === "card-wrong-fragment").map((d) => d.message).join("; ")
+    );
+  });
 });
 
 describe("nuclideIaea", () => {
@@ -1243,6 +1285,13 @@ describe("nuclide parameter hints", () => {
     const line = "R003 3 -4 -G3 /1:1";
     const hover = getCompositionLineParameterHover(line, line.indexOf("G3") + 1);
     assert.strictEqual(hover, null);
+  });
+
+  it("does not treat DELN card line as nuclide dens hover", () => {
+    const line = "DELN 0.01";
+    const help = getParameterSignatureHelp(line, line.indexOf("0"));
+    assert.ok(!help || !help.parameters.some((p) => p.label === "dens"));
+    assert.strictEqual(getCompositionLineParameterHover(line, line.indexOf("DELN")), null);
   });
 
   it("highlights GROUP on MATR header", () => {

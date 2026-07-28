@@ -8,31 +8,13 @@ type FragmentId =
   | "calculationControl"
   | "burnup";
 
-/** Канонические имена карт MCU-NR (как в UserGuide 220519) + распространённые варианты из RUNTEST */
+/**
+ * Канонические имена карт MCU-NR по фрагментам (UserGuide 220519 + RUNTEST).
+ * `shared` — только универсальные маркеры (FINISH/END/STOP/SHOW).
+ * Метки в нескольких модулях (VOL, BUCL, WWEN, …) перечисляются в каждом списке явно.
+ */
 export const MCU_LABELS_BY_FRAGMENT: Record<FragmentId | "shared", readonly string[]> = {
-  shared: [
-    "FINISH",
-    "END",
-    "STOP",
-    "SHOW",
-    "V01",
-    "VOL",
-    "STEP",
-    "LIST",
-    "TYPE",
-    "LATT",
-    "BOUN",
-    "ROOT",
-    "NORM",
-    "FUNC",
-    "ENDL",
-    "ENDXCL",
-    "LISTEL",
-    "PARM",
-    "LFIXSO",
-    "LBLACK",
-    "TRANSF",
-  ],
+  shared: ["FINISH", "END", "STOP", "SHOW", "EQU", "SET"],
   physical: [
     "PIN",
     "MATR",
@@ -64,31 +46,31 @@ export const MCU_LABELS_BY_FRAGMENT: Record<FragmentId | "shared", readonly stri
     "EGPH",
     "ELEC",
     "EGEL",
-    "EMES",
-    "EPRO",
-    "EDIS",
-    "ECUP",
+    "VOL",
   ],
   geometry: [
     "HEAD",
     "CONT",
     "MIR",
     "CNTAND",
-    "EQU",
-    "SET",
     "CELL",
     "NET",
     "LCELL",
+    "LATT",
     "LISTEL",
     "PARM",
     "LFIXSO",
     "LBLACK",
     "V01",
+    "ENDL",
+    "ENDXCL",
+    "TRANSF",
   ],
   source: [
     "SRCD",
     "SRC",
     "SPNT",
+    "TYPE",
     "ENSO",
     "ESET",
     "SPEC",
@@ -245,6 +227,7 @@ export const MCU_LABELS_BY_FRAGMENT: Record<FragmentId | "shared", readonly stri
     "POWER",
     "DPOW",
     "FLUX",
+    "STEP",
     "DSTP",
     "COLI",
     "EPSM",
@@ -264,7 +247,6 @@ export const MCU_LABELS_BY_FRAGMENT: Record<FragmentId | "shared", readonly stri
     "ZONPRI",
     "SUMZ",
     "SUMZON",
-    "CONT",
     "CONTEN",
     "ACTI",
     "FISP",
@@ -322,6 +304,17 @@ export function normalizeMcuLabel(label: string): string {
   return MCU_LABEL_ALIASES[u] ?? u;
 }
 
+const FRAGMENT_ORDER: readonly FragmentId[] = [
+  "physical",
+  "geometry",
+  "source",
+  "registration",
+  "burnupRegistration",
+  "trajectory",
+  "calculationControl",
+  "burnup",
+];
+
 const FRAGMENT_LABEL_MAP: { id: FragmentId; labels: readonly string[] }[] = [
   { id: "physical", labels: MCU_LABELS_BY_FRAGMENT.physical },
   { id: "geometry", labels: MCU_LABELS_BY_FRAGMENT.geometry },
@@ -333,18 +326,32 @@ const FRAGMENT_LABEL_MAP: { id: FragmentId; labels: readonly string[] }[] = [
   { id: "burnup", labels: MCU_LABELS_BY_FRAGMENT.burnup },
 ];
 
-const _fragmentByLabel = new Map<string, FragmentId>();
-for (const { id, labels } of FRAGMENT_LABEL_MAP) {
-  for (const raw of labels) {
-    const u = raw.toUpperCase();
-    _fragmentByLabel.set(u, id);
-    const canon = MCU_LABEL_ALIASES[u];
-    if (canon) _fragmentByLabel.set(canon, id);
+/** label → все фрагменты, где метка допустима (без shared). */
+const _fragmentsByLabel = new Map<string, FragmentId[]>();
+
+function addLabelFragment(raw: string, id: FragmentId): void {
+  const u = raw.toUpperCase();
+  const canon = MCU_LABEL_ALIASES[u] ?? u;
+  for (const key of new Set([u, canon])) {
+    const list = _fragmentsByLabel.get(key) ?? [];
+    if (!list.includes(id)) list.push(id);
+    _fragmentsByLabel.set(key, list);
   }
 }
+
+for (const { id, labels } of FRAGMENT_LABEL_MAP) {
+  for (const raw of labels) addLabelFragment(raw, id);
+}
 for (const [alias, canon] of Object.entries(MCU_LABEL_ALIASES)) {
-  const frag = _fragmentByLabel.get(canon);
-  if (frag) _fragmentByLabel.set(alias.toUpperCase(), frag);
+  const frags = _fragmentsByLabel.get(canon);
+  if (frags) _fragmentsByLabel.set(alias.toUpperCase(), [...frags]);
+}
+
+/** Первичный фрагмент метки (для переключения вперёд при current=null). */
+const _primaryFragmentByLabel = new Map<string, FragmentId>();
+for (const [label, frags] of _fragmentsByLabel) {
+  const ordered = FRAGMENT_ORDER.filter((f) => frags.includes(f));
+  if (ordered.length) _primaryFragmentByLabel.set(label, ordered[0]);
 }
 
 /** Явные маркеры начала фрагмента (приоритетные) */
@@ -372,13 +379,44 @@ const FRAGMENT_STARTERS: Record<string, FragmentId> = {
   BURD: "burnup",
   BURNUP: "burnup",
 };
+/** Фрагменты, в которых допустима карта (пустой — неизвестная метка). Shared → все. */
+export function fragmentsForLabel(label: string): readonly FragmentId[] {
+  const u = label.toUpperCase();
+  const canon = normalizeMcuLabel(u);
+  if ((MCU_LABELS_BY_FRAGMENT.shared as readonly string[]).includes(u) ||
+      (MCU_LABELS_BY_FRAGMENT.shared as readonly string[]).includes(canon)) {
+    return FRAGMENT_ORDER;
+  }
+  return _fragmentsByLabel.get(canon) ?? _fragmentsByLabel.get(u) ?? [];
+}
+
+/** Допустима ли карта в текущем фрагменте. */
+export function labelAllowedInFragment(label: string, fragment: FragmentId | null): boolean {
+  if (fragment == null) return true;
+  const u = label.toUpperCase();
+  const canon = normalizeMcuLabel(u);
+  if ((MCU_LABELS_BY_FRAGMENT.shared as readonly string[]).includes(u) ||
+      (MCU_LABELS_BY_FRAGMENT.shared as readonly string[]).includes(canon)) {
+    return true;
+  }
+  const frags = fragmentsForLabel(label);
+  return frags.includes(fragment);
+}
 
 export function detectFragmentFromLabel(label: string, current: FragmentId | null): FragmentId | null {
   const u = label.toUpperCase();
   if (FRAGMENT_STARTERS[u]) return FRAGMENT_STARTERS[u];
-  const mapped = _fragmentByLabel.get(u);
-  if (mapped) return mapped;
   if (u.startsWith("BUR") || u === "FINAL" || u === "DELAY") return "burnup";
+
+  const frags = fragmentsForLabel(u);
+  if (!frags.length) return current;
+  // Multi-home / родная карта текущего модуля — не переключаем.
+  if (current != null && frags.includes(current)) return current;
+
+  const primary = _primaryFragmentByLabel.get(normalizeMcuLabel(u)) ?? frags[0];
+  if (current == null) return primary;
+  // Чужая карта: переключение только «вперёд» (NPS после geometry → source; DELN в RGS → stay).
+  if (FRAGMENT_ORDER.indexOf(primary) > FRAGMENT_ORDER.indexOf(current)) return primary;
   return current;
 }
 

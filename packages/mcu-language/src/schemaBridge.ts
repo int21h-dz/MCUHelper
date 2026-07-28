@@ -8,9 +8,12 @@ export const schemaIndex = require("../../mcu-schema/dist/index") as typeof impo
 export const {
   ALL_MCU_LABELS,
   detectFragmentFromLabel,
+  fragmentsForLabel,
   isKnownMcuLabel,
+  labelAllowedInFragment,
   listAllMcuLabels,
   normalizeMcuLabel,
+  MCU_LABELS_BY_FRAGMENT,
 } = schemaKeywords;
 
 export const {
@@ -23,6 +26,7 @@ export const {
   MODS_VALUES,
   parseSyntaxRequiredPart,
   parseCardArgContext,
+  FRAGMENT_DISPLAY,
 } = schemaIndex;
 
 export type { CardArgEnumValue } from "@mcuhelper/mcu-schema";

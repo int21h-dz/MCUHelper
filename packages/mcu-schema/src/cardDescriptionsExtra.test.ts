@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 import { EXTRA_CARD_DESCRIPTIONS } from "./cardDescriptionsExtra";
+import { getCardByLabel } from "./index";
 
 describe("cardDescriptionsExtra", () => {
   it("includes SPNT related cards", () => {
@@ -15,5 +16,16 @@ describe("cardDescriptionsExtra", () => {
       assert.ok(card.label.length > 0);
       assert.ok(card.description.length > 10);
     }
+  });
+
+  it("DELN hover uses physical module description, not PIN optional cards list", () => {
+    const deln = getCardByLabel("DELN");
+    assert.ok(deln);
+    assert.strictEqual(deln!.fragment, "physical");
+    assert.strictEqual(deln!.syntax, "DELN valdeln");
+    assert.ok(deln!.description.includes("valdeln=0"));
+    assert.ok(deln!.description.includes("запаздывающ"));
+    assert.ok(!deln!.description.includes("[ACEPT]"));
+    assert.ok(!deln!.description.includes("[VOL"));
   });
 });

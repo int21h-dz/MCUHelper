@@ -1,10 +1,14 @@
 import {
   BOUNDARY_CODES,
+  FRAGMENT_DISPLAY,
   MODS_VALUES,
   formatCardHover,
+  fragmentsForLabel,
   getBodyByKey,
   getCardByLabel,
+  labelAllowedInFragment,
   type BodyTypeSchema,
+  type FragmentId,
 } from "@mcuhelper/mcu-schema";
 import {
   analyzeMaterialMassDensity,
@@ -21,7 +25,9 @@ import {
   getBurnupLoadAnalysis,
   getTotalHistoriesEstimate,
   findSourceSpectrumAtLine,
+  collectZoneBodyRefs,
   getCompositionLineParameterHover,
+  looksLikeZoneStatement,
   mcuNuclideAtomicWeight,
   mcuNuclideToIaeaElement,
   type DocumentIndex,
@@ -59,6 +65,11 @@ function numericTokenAtPosition(line: string, character: number): string | null 
   return null;
 }
 
+/** Хвост регистрации на текущей строке (#M=…, /reg:mat, …) — не body-ref. */
+function registrationTailStart(line: string): number {
+  return line.search(/(?:#|\/-\d+:|\/\d+:|\/\d+(?:\/\d+)?:|\/[BWMCR]\d|(?<![A-Za-z0-9]):\d+)/);
+}
+
 function findBodyByNumericZoneRef(
   index: DocumentIndex,
   line: string,
@@ -72,10 +83,13 @@ function findBodyByNumericZoneRef(
   const num = Math.abs(parseInt(token, 10));
   if (!Number.isFinite(num) || num <= 0) return null;
 
-  const zoneExprPos = line.indexOf(zone.expression);
-  if (zoneExprPos < 0) return null;
-  const zoneExprEnd = zoneExprPos + zone.expression.length;
-  if (pos.character < zoneExprPos || pos.character >= zoneExprEnd) return null;
+  // Многострочное выражение: полное zone.expression не обязано целиком лежать на текущей строке.
+  // Не цепляемся к номерам в хвосте регистрации (/reg:mat, #M=…).
+  const tailStart = registrationTailStart(line);
+  if (tailStart >= 0 && pos.character >= tailStart) return null;
+
+  const refs = collectZoneBodyRefs(zone.expression);
+  if (!refs.some((ref) => ref === String(num))) return null;
 
   const scope = zone.scope ?? "global";
   return (
@@ -119,6 +133,37 @@ function hoverForKeyword(word: string): string | null {
   return null;
 }
 
+function resolveFragmentAtLine(index: DocumentIndex | null, line: number): FragmentId | undefined {
+  if (!index) return undefined;
+  const fromStmt = index.ast.statements.find(
+    (s) => s.range.start.line <= line && s.range.end.line >= line
+  )?.fragment;
+  if (fromStmt) return fromStmt;
+  const span = index.ast.fragments.find((f) => f.startLine <= line && f.endLine >= line);
+  return span?.id;
+}
+
+/** Hover для карты не из текущего фрагмента — без чужого описания. */
+function formatWrongFragmentHover(cardLabel: string, fragmentAtLine: FragmentId): string {
+  const allowed = fragmentsForLabel(cardLabel)
+    .map((f) => FRAGMENT_DISPLAY[f] ?? f)
+    .join(", ");
+  const lineFrag = FRAGMENT_DISPLAY[fragmentAtLine] ?? fragmentAtLine;
+  return [
+    `**${cardLabel}** — карта другого модуля`,
+    "",
+    `Недопустима во «${lineFrag}».`,
+    allowed ? `Допустима: ${allowed}.` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function cardHoverAllowed(word: string, fragmentAtLine: FragmentId | undefined): boolean {
+  if (fragmentAtLine == null) return true;
+  return labelAllowedInFragment(word, fragmentAtLine);
+}
+
 const HISTORY_CARD_LABELS = new Set(["NTOT", "MAXS", "MAXSER"]);
 const BURNUP_LOAD_LABELS = new Set(["POWER", "POWE", "STEP"]);
 const VOL_LABELS = new Set(["VOL"]);
@@ -149,10 +194,17 @@ function appendSourceSpectrumToHover(base: string, index: DocumentIndex, line: n
   return base + formatSourceSpectrumHover(block);
 }
 
-function appendKeywordExtrasToHover(base: string, index: DocumentIndex, word: string, line: number): string {
+function appendKeywordExtrasToHover(
+  base: string,
+  index: DocumentIndex,
+  word: string,
+  line: number,
+  fragmentAtLine: FragmentId | undefined
+): string {
+  if (fragmentAtLine != null && !labelAllowedInFragment(word, fragmentAtLine)) return base;
   let out = appendBurnupLoadToKeywordHover(appendTotalHistoriesToKeywordHover(base, index, word), index, word);
   out = appendVolToKeywordHover(out, index, word);
-  if (SOURCE_SPECTRUM_LABELS.has(word.toUpperCase())) {
+  if (SOURCE_SPECTRUM_LABELS.has(word.toUpperCase()) && (fragmentAtLine == null || fragmentAtLine === "source")) {
     out = appendSourceSpectrumToHover(out, index, line);
   }
   return out;
@@ -255,8 +307,7 @@ export function getHoverContent(
 ): string | null {
   const line = fullLine(doc, pos);
   const rawWord = wordAtPosition(line, pos.character);
-  const fragmentAtLine =
-    index?.ast.statements.find((s) => s.range.start.line <= pos.line && s.range.end.line >= pos.line)?.fragment;
+  const fragmentAtLine = resolveFragmentAtLine(index, pos.line);
 
   if (!rawWord && index) {
     const numericHover = getHover(doc, pos, index);
@@ -265,7 +316,7 @@ export function getHoverContent(
 
   if (index && rawWord) {
     const nuclHit = findNuclideAtPosition(index, pos, rawWord);
-    if (nuclHit) {
+    if (nuclHit && (fragmentAtLine === "physical" || fragmentAtLine == null)) {
       const nuclName = rawWord.toUpperCase();
       const base = formatNuclideHoverLocal(nuclName, nuclHit, index);
       if (options.enableIaeaNuclide === false) return base;
@@ -291,7 +342,8 @@ export function getHoverContent(
   }
 
   let paramHover =
-    fragmentAtLine === "physical" || fragmentAtLine == null
+    !(rawWord && isOnStatementKeyword(line, pos.character, rawWord) && getCardByLabel(rawWord)) &&
+    fragmentAtLine === "physical"
       ? getCompositionLineParameterHover(line, pos.character)
       : null;
   if (paramHover && index && /GROUP/i.test(paramHover)) {
@@ -342,32 +394,60 @@ export function getHover(
   }
   const word = rawWord.toUpperCase();
   const onKeyword = isOnStatementKeyword(line, pos.character, rawWord);
+  const fragmentAtLine = resolveFragmentAtLine(index, pos.line);
 
   const contextual = hoverContextual(line, word);
-  if (contextual) return contextual;
+  if (contextual) {
+    if (word === "MODS" || /MODS\s*=/i.test(line)) {
+      if (fragmentAtLine != null && fragmentAtLine !== "physical") return null;
+    }
+    if (/\bCONT\b/i.test(line) && BOUNDARY_CODES.some((b) => b.code === word)) {
+      if (fragmentAtLine != null && fragmentAtLine !== "geometry") return null;
+    }
+    return contextual;
+  }
+
+  if (
+    onKeyword &&
+    getCardByLabel(word) &&
+    fragmentAtLine != null &&
+    !cardHoverAllowed(word, fragmentAtLine) &&
+    !(fragmentAtLine === "geometry" && looksLikeZoneStatement(line))
+  ) {
+    return formatWrongFragmentHover(word, fragmentAtLine);
+  }
 
   if (onKeyword) {
     const kw = hoverForKeyword(word);
     if (kw) {
       if (index && getBodyByKey(word)) {
-        const bodyOnLine = index.ast.bodies.find((b) => b.range.start.line === pos.line);
-        if (bodyOnLine) {
-          const vol = computeBodyVolumeCm3FromAst(bodyOnLine, index.ast);
-          if (vol != null) {
-            return `${kw}\n\nОбъём тела **${bodyOnLine.name}**: **${formatBodyVolumeCm3(vol)}**`;
+        if (fragmentAtLine != null && fragmentAtLine !== "geometry") {
+          // Тип тела как keyword вне геометрии — не показываем body-схему.
+          if (getCardByLabel(word)) {
+            /* fall through to card hover below */
+          } else {
+            return null;
+          }
+        } else {
+          const bodyOnLine = index.ast.bodies.find((b) => b.range.start.line === pos.line);
+          if (bodyOnLine) {
+            const vol = computeBodyVolumeCm3FromAst(bodyOnLine, index.ast);
+            if (vol != null) {
+              return `${kw}\n\nОбъём тела **${bodyOnLine.name}**: **${formatBodyVolumeCm3(vol)}**`;
+            }
           }
         }
       }
-      return index ? appendKeywordExtrasToHover(kw, index, word, pos.line) : kw;
+      return index ? appendKeywordExtrasToHover(kw, index, word, pos.line, fragmentAtLine) : kw;
     }
-  } else {
+  } else if (fragmentAtLine == null || fragmentAtLine === "geometry") {
     const body = getBodyByKey(word);
     if (body) return formatBodyHover(body);
   }
 
   if (index) {
     const specBlock = findSourceSpectrumAtLine(index.ast, pos.line);
-    if (specBlock && !onKeyword) {
+    if (specBlock && !onKeyword && (fragmentAtLine == null || fragmentAtLine === "source")) {
       const base =
         hoverForKeyword("EMES") ??
         `**Спектр источника**\n\nУзлы **EMES** (энергия, эВ) и **EPRO** (вероятности).`;
@@ -414,13 +494,18 @@ export function getHover(
   }
 
   const nuclHit = findNuclideAtPosition(index, pos, rawWord);
-  if (nuclHit) {
+  if (nuclHit && (fragmentAtLine === "physical" || fragmentAtLine == null)) {
     return formatNuclideHoverLocal(word, nuclHit, index);
   }
 
   if (!onKeyword) {
     const card = getCardByLabel(word);
-    if (card) return formatCardHover(card);
+    if (card) {
+      if (fragmentAtLine != null && !cardHoverAllowed(word, fragmentAtLine)) {
+        return formatWrongFragmentHover(word, fragmentAtLine);
+      }
+      return formatCardHover(card);
+    }
   }
 
   return null;

@@ -6,6 +6,7 @@ import {
   MODS_VALUES,
   formatCardHover,
   getCardByLabel,
+  labelAllowedInFragment,
   parseCardArgContext,
   type CardArgContext,
   type CardArgEnumValue,
@@ -89,9 +90,8 @@ function matchesKeywordPrefix(label: string, prefix: string): boolean {
 }
 
 function cardAllowedInFragment(card: CardSchema, fragment: FragmentId | null): boolean {
-  if (card.label === "FINISH") return true;
-  if (!fragment || !card.fragment) return true;
-  return card.fragment === fragment;
+  if (!fragment) return true;
+  return labelAllowedInFragment(card.label, fragment);
 }
 
 function firstLineToken(prefix: string): string {
