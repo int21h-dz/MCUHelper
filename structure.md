@@ -16,8 +16,8 @@ McuHelper/
 │   └── MCU-NR_UserGuide_220519.txt   # полный текст PDF для grep/Read агентами
 ├── extension/                 # VS Code extension
 │   ├── src/extension.ts       # активация, LSP client, Webview sidebar, команды
-│   ├── src/sidebarView.ts     # WebviewView: каталог + 7 навигационных панелей
-│   ├── src/navData.ts         # buildNavTree — деревья из LSP getIndex (Объекты: клики по зонам, objNum при дубликатах имён)
+│   ├── src/sidebarView.ts     # WebviewView: каталог + 9 пользовательских панелей
+│   ├── src/navData.ts         # buildNavTree — деревья из LSP getIndex (в т.ч. Фрагменты по ast.fragments; Объекты: клики по зонам, objNum при дубликатах имён)
 │   ├── src/catalogBridge.ts   # buildCatalogPayload (mcu-schema vendor)
 │   ├── src/templateInsert.ts  # вставка шаблонов, DocumentDropEditProvider
 │   ├── media/sidebar/         # sidebar.css, sidebarIcons.js, sidebarShell.js (design system)
@@ -65,16 +65,17 @@ McuHelper/
 | `@mcuhelper/mcu-lsp` | LSP server, solver bridge (INPUT + .LST) |
 
 ## LSP capabilities
-- Diagnostics (табы в коде — `no-tabs`; в `**`/`C=` и после `;` допустимы, порядок фрагментов, ссылки на тела, MATR gaps, **matr-param-empty** / **matr-param-value** (`matrCardValidation.ts`), **matr-nuclide-syntax**, **matr-nuclide-extra**, **matr-nuclide-param**, **matr-nuclide-dup**, zone refs, **ENERGY**, **физические величины** ≥ 0)
+- Diagnostics (табы в коде — `no-tabs`; в `**`/`C=` и после `;` допустимы, порядок фрагментов, ссылки на тела, MATR gaps, **matr-param-empty** / **matr-param-value** (`matrCardValidation.ts`), **matr-nuclide-extra**, **matr-nuclide-param**, **matr-nuclide-dup**, **matr-nuclide-conc**, **unknown-statement** для мусорных строк вне комментариев/служебных данных, zone refs, **ENERGY**, **физические величины** ≥ 0)
 - Completion (все карты `ALL_CARDS` + алиасы; **аргументы карт** — `SUMZON`→SUMB…ZONG, `CONTEN`→DENS…SPNU, `CODE`→RSTP…; markdown как в hover)
 - **Signature Help** — подсказка активного параметра при вводе тел (`RCC`, `RCZ`, …), карт (`MATR`, `POWER`, `STEP`, `SUMZON`, `SPNT`, …), **строк нуклидов** (`name`, `dens`, `MODS=…`); `parameterHints.ts`, `bodyParamGroups.ts`, `cardLineParamGroups.ts`, `nuclideLineParamGroups.ts`
 - **body-params-extra** — лишние токены в строке тела (`bodyParamValidation.ts`): лимит по числу полей тела; пробелы и запятые взаимозаменяемы (UserGuide §7.1, §9.1.3)
 - Hover (из schema + символы документа)
-- Definition, DocumentSymbol, **FoldingRange** (крупные фрагменты PIN/HEAD/… + блоки MATR), **DocumentLink** (`#include` → клик по имени файла; includes собираются из исходного текста до `expandIncludes`)
+- Definition, DocumentSymbol, **FoldingRange** (крупные фрагменты PIN/HEAD/… + блоки MATR + **LCELL…ENDL** + **LATT…LISTEL/PARM/LFIXSO**), **DocumentLink** (`#include` → клик по имени файла; includes собираются из исходного текста до `expandIncludes`)
 - Custom: `mcuhelper/getIndex`, `mcuhelper/getGeometry`, `mcuhelper/queryPoint`, `mcuhelper/getSlice`, `mcuhelper/validateInput`
 - **Hover** (LSP): описания из UserGuide (`userGuideCards.generated.ts`) + `cardDescriptionsExtra.ts` + ручные карты; **без** заглушек «см. UserGuide»
 - **extract-cards**: `npm run extract-cards --prefix packages/mcu-schema` — перегенерация карт из `docs/MCU-NR_UserGuide_220519.txt`
 - `npm run build` в корне — также копирует esbuild-бандл LSP в `extension/server/server.js` (VSIX и Extension Development Host)
+- Сборка пакетов с публикуемым/тестируемым `dist` должна начинаться с очистки `dist`, иначе `node --test dist/**/*.test.js` и копирование vendor могут подхватить stale-артефакты удалённых модулей
 - **IAEA NDS** … bundled fallback (`bundledNaturalAbundance.ts`); expand **не ждёт** CSV — bundled сразу, IAEA в фоне
 - **Hover нуклидов**: локальные данные (концентрация, ρ, атомная масса) — сразу; IAEA — из кэша + prefetch; **природный элемент** — кнопка «Разложить на изотопы (ICE)» в hover
 - **POWER/STEP**: hover — **SVG-график** (мощность Q, сетка шагов/подшагов, ∫Q·dt), таблица POWER, **энерговыработка**, **МВт·сут/кг** при наличии VOL; `burnupLoad.ts` + `burnupLoadChart.ts`
@@ -82,25 +83,33 @@ McuHelper/
 - **VOL**: объёмы материалов (см³) по номерам MATR → массы m=ρ·V; таблица в hover VOL/POWER/STEP, TreeView материалов; `materialVolumes.ts`
 - **ENERGY/ENERG**: семантика — нижние границы ≥ 0, 0 явно; список строго по возрастанию (0, E1, …) или по убыванию (…, 0); `energyGroups.ts`
 - **Физические величины**: TEMPR, MATR (T, DENS*, концентрации), VOL, POWER, STEP/DSTP, TIMP/TSEC/TMIN/THOU/TDAY/TYEA — значения ≥ 0 (константы EQU/SET тоже при подстановке); `positiveQuantities.ts`
-- **EQU/SET и выражения**: неинициализированные имена в EQU/SET, параметрах тел, картах с числами; `variableRefs.ts` (`var-undef`, `expr-syntax`)
+- **EQU/SET и выражения**: неинициализированные имена в EQU/SET, параметрах тел, картах с числами; `variableRefs.ts` (`var-undef`, `expr-syntax`). `PI` не является встроенной константой MCU для плагина: это обычное имя, которое должно быть задано пользователем через `EQU/SET`, иначе будет `var-undef`.
 - **Подсветка**: TextMate (`syntaxes/mcunr.tmLanguage.json`) — карты, тела, зоны; **маркеры разделов** (`PIN`, `HEAD`, `FINISH`, …) — scope `markup.heading.section.*.mcunr`, жирный + фон (`editor.tokenColorCustomizations` в extension); семантические токены LSP отключены (UI freeze)
 
 ## Команды extension
 - `MCU-NR: Validate (INPUT)` — опциональный запуск солвера
 - `MCU-NR: Экспорт диагностик` — список Problems в Output + буфер обмена
+- **Навигация по диагностикам:** Alt+F7/F8 — лексер / все LSP; `diagnosticNavigation.ts`
+- **Боковая панель «Диагностика»** (`mcuhelper.lexerErrors`): запрос `mcuhelper/getDiagnostics` к LSP (не `vscode.languages.getDiagnostics`); только строки исходного файла; строка «Источник LSP · N шт.»; до 500 пунктов в списке
+- **matr-param-empty:** пробел после `=` не считается пустым значением (`T= 313` — OK)
 - `MCU-NR: Визуализация геометрии` — WebView: срезы XY/XZ/YZ (растр по зонам), зум колёсиком, автообновление при правке файла; запрос зоны в точке (клик)
-- **Боковая панель MCU-NR (Webview, единый стиль):** … один `getIndex` на refresh (`refreshSidebarsCoalesced`); движение курсора обновляет только **Константы** (180 ms debounce); правка документа — все панели (350 ms)
+- **Боковая панель MCU-NR (Webview, единый стиль):** … один `getIndex` на refresh (`refreshSidebarsCoalesced`); панель **Фрагменты** строится по `ast.fragments` + `ast.statements`: верхний уровень — фрагменты, второй — полезные карты/операторы внутри фрагмента; шумные строки данных (`U235...` в `MATR`, картограммы `T01/P01/O01/M01`, `END`/`FINISH`) отфильтрованы; движение курсора обновляет только **Константы** (180 ms debounce); правка документа — все панели (350 ms)
 - Зоны: `/reg:mat[/obj]`, `/:mat`, `:mat`, `#M=… Z=… O=…` — **неуказанные reg/obj → 1**; `/reg[/obj]` наследует mat; `zoneRegistration.ts`
 
 ## Семантика (scope)
 - Тела и зоны в разных `LCELL`/`CELL` имеют отдельные scope (`lcell:NAME`, `cell:NAME`); дубликаты имён между scope — норма. `geometryScope.ts` — переходы scope; у `CELL` первый `END` только закрывает раздел тел (UserGuide §9.2.2, рис. А.49).
-- Строки состава MATR (нуклиды) не парсятся как зоны; опечатки в числе (`U238 owl.…`) → `matr-nuclide-syntax`; лишние токены → `matr-nuclide-extra`; неверные `MODS`/`DTEM`/`ACE`/`PHT` → `matr-nuclide-param`; повтор имени в одном материале → `matr-nuclide-dup` (`nuclideParamValidation.ts`); hover/signature по параметрам строки нуклида
+- Строки состава MATR (нуклиды) не парсятся как зоны; dens — число / EQU / выражение (`2*DENSU`); нераспознанная концентрация → `matr-nuclide-conc`; лишние токены → `matr-nuclide-extra`; неверные `MODS`/`DTEM`/`ACE`/`PHT` → `matr-nuclide-param`; повтор имени в одном материале → `matr-nuclide-dup` (`nuclideParamValidation.ts`); карты со спец-аргументами (`SUMZON`, `CONTEN`, `CODE`, `TYPE`, … через `getCardArgSpec`) системно исключаются из эвристики `nuclide dens`, чтобы не ломать signature help; hover/signature по параметрам строки нуклида
+- **ρ материала** (`materialDensity.ts`): `analyzeMaterialMassDensity` — пропускает нуклиды с плохой концентрацией/неизвестной A, считает по остальным; hover показывает пометку о пропущенных; EQU в dens учитываются через `buildScopedVars`
 - После `MATR` KDMK может вставлять строку `** densaa …` (плотности) — парсер пропускает (`isMatrAuxLine`), нуклиды читаются дальше.
 - `zone-mat` только если в файле есть PIN/MATR.
 - Зоны парсятся **только** во фрагменте `geometry`; имена вроде GRBL/ZRTB с хвостом `/reg:mat` — зоны, а не смена фрагмента. Зона-носитель сети: `Z (NETNAME) тела…`; `(NETNAME)` не входит в булево выражение тел.
+- **Смена фрагмента:** `NPS 1` / `PROB 1` после `FINISH` геометрии → `source` (не зона); удержание geometry только при сильном признаке зоны (хвост `/reg:mat` или булево выражение тел)
 - `;` до конца строки — комментарий (лексер + `mergeStatementLines`).
 - Визуализация: viewer в `extension/media/geometry/` (только срезы); `buildSliceGrid` + `queryPoint` в `mcu-geometry`.
 - **Сложная геометрия в срезах:** `queryPoint` — приоритет LATT (GLTL) → NET (зона-носитель `(NETNAME)`) → глобальные зоны; имена зон с префиксом `C.K`, `NET[1,2].ZPE`.
+- **NET:** картограммы `T**` (типы, префикс `N*` у прототипа), `P**` (регистрации), `O**` (объекты), `M**` (материалы, `56*1` = 56 раз номер 1); строки `O0156`/`M0156` — не зоны геометрии
+- **LATT GLTL:** `LATT GLTL <зоны>` + `LISTEL` + `PARM [/n] x,y,z…` (UserGuide §9.2.6.1); после PARM — опционально **`LFIXSO` / `LBLACK`** (накопление источника: пары объектных номеров → поверхность накопления/поглощения; не зоны). См. `MCU-NR_Reference.md`
+- **Выражения в параметрах тел:** операнд, оканчивающийся на `*` (`DF-1* DELT`), склеивается со следующим токеном → `DF-1*DELT`; запятая = пробел при подсчёте параметров (`body-params-extra`)
 - `zone-body`/`transf-ref` — только тела того же scope; **первая ссылка `0`** в зоне — всё пространство (UserGuide §9.1.4, `zoneBodyRefs.ts`), не тело N0
 - Scope `global` для контейнера; `lcell:NAME` / `cell:NAME` для прототипов решётки/сети; **EQU/SET в прототипе** — локальные имена (UserGuide txt 3264–3268, 3541–3545), перекрытие global по имени без ошибки `const-redef`.
 - Карты других модулей — `packages/mcu-schema/src/keywords.ts` (~229 меток).
@@ -117,7 +126,7 @@ McuHelper/
 - **Диагностики LSP:** debounce 250 ms на `didChange`; open/save — сразу
 - **Semantic tokens:** capability **отключена** в LSP (не только `editor.semanticHighlighting.enabled: false`) — VS Code блокировал UI ~25 с при первом вводе при применении decorations; TextMate-подсветка остаётся
 - **Прогрев (первый символ):** `warmup.ts` — completion + diagnostics при `onInitialize`; extension — `buildCatalogPayload()` + `getIndex` после LSP Running
-- **Sidebar webview:** `ready` → `scheduleRefresh()` (без N×`pushState` на resolve)
+- **Sidebar webview:** `ready` → `scheduleRefresh()` (без N×`pushState` на resolve); состояние раскрытия секций/модулей хранится в webview state: **первый запуск — всё свёрнуто**, далее восстанавливается последнее состояние пользователя
 - **Sidebar:** `refreshSidebarsCoalesced` — single-flight + merge scope; при вводе selection-refresh отключён 600 ms; debounce all 500 ms; полный refresh отменяет constants-only
 - **Профилирование:** `MCUHELPER_PROFILE=1` — лог времени parse в stderr LSP
 - **Geometry panel:** debounce 800 ms + `geometryGeneration` (отмена устаревших `getGeometry`)
@@ -158,7 +167,7 @@ npm run coverage:check    # gate: lines/statements ≥95%, branches ≥80%, func
 | Пакет | Скрипт | Тест-файлы (src) | ~тестов |
 |-------|--------|------------------|---------|
 | `mcu-schema` | `npm run test --prefix packages/mcu-schema` | `keywords`, `catalog`, `bodyParamGroups`, `cardLineParamGroups`, `nuclideLineParamGroups`, `moduleCards`, `index.smoke`, `cardDescriptionsExtra`, `userGuideCards.smoke`, `cardArgEnums` | 47 |
-| `mcu-language` | `npm run test --prefix packages/mcu-language` | unit: `lexer`, `preprocessor`, `expression`, `document`, `constants`, `schemaBridge`, `otherModules`, `bodyVolume`, `calculationControl`, `materialVolumes`, `materialDensity`, `semantic`, `energyGroups`; integration: `integration/fixtures` | 175 |
+| `mcu-language` | `npm run test --prefix packages/mcu-language` | unit: `lexer`, `preprocessor`, `expression`, `document`, `encodingDetect`, `constants`, `schemaBridge`, `otherModules`, `bodyVolume`, `calculationControl`, `materialVolumes`, `materialDensity`, `semantic`, `energyGroups`; integration: `integration/fixtures` | 183 |
 | `mcu-geometry` | `npm run test --prefix packages/mcu-geometry` | `geometry`, `netQuery`, `gltl`, `primitives`, `hex2d`, `bodyRefs`, `colors`, `pointInBody`, `query`, `buildScene` | 71 |
 | `mcu-lsp` | `npm run test --prefix packages/mcu-lsp` | `hover`, `completion`, `signatureHelp`, `solver`, `iaeaNds`, `serverHandlers`, `lsp.integration` | 61 |
 | `extension` | `npm run test --prefix extension` | `navData`, `catalogBridge`, `contentDetect`, `expandNaturalIsotope` | 20 |
@@ -189,5 +198,6 @@ npm run coverage:check    # gate: lines/statements ≥95%, branches ≥80%, func
 - Language id: `mcunr`
 - Расширения `.mcu`/`.mcunr` — подсказка VS Code, **не обязательны**
 - **Автоопределение по содержимому:** `packages/mcu-language/src/detect.ts` — эвристика по картам (`PIN` без обязательных value1/value2, `MATR`, `HEAD`, …); комментарии `**`/`C=` пропускаются; скан до 2 МБ (+ до 8 МБ при нехватке score). Расширение: `setTextDocumentLanguage('mcunr')` при `mcuhelper.autoDetectLanguage=true` и `languageId` из `autoDetectFromLanguages` (по умолчанию incl. `ini`).
+- **Автоопределение кодировки:** `packages/mcu-language/src/encodingDetect.ts` — UTF-8 / Windows-1251 / CP866 / KOI8-R по score (MCU-карты + кириллица в `**`/`C=`); `#include` через `readTextFileWithDetectedEncoding` в `preprocessor.ts`. Расширение: `maybeFixDocumentEncoding` до языка; настройка `mcuhelper.autoDetectEncoding`; команда `MCU-NR: Определить кодировку`; для `[mcunr]` включён `files.autoGuessEncoding`.
 - Команда: `MCU-NR: Определить язык по содержимому`
-- Настройки: `mcuhelper.autoDetectLanguage`, `mcuhelper.autoDetectFromLanguages`
+- Настройки: `mcuhelper.autoDetectLanguage`, `mcuhelper.autoDetectFromLanguages`, `mcuhelper.autoDetectEncoding`

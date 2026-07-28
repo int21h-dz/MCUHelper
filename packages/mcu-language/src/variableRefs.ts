@@ -19,16 +19,16 @@ function checkExpression(
     const list = undef.map((n) => `«${n}»`).join(", ");
     return {
       code: "var-undef",
-      message: `Неинициализированная константа/переменная ${list}${context ? ` (${context})` : ""}`,
+      message: `Неинициализированное имя ${list}${context ? ` (${context})` : ""}`,
     };
   }
 
   if (collectVariableReferences(trimmed).length === 0 && evaluateExpression(trimmed, vars) === null) {
-    return { code: "expr-syntax", message: `Некорректное выражение «${trimmed}»${context ? ` (${context})` : ""}` };
+    return { code: "expr-syntax", message: `Ошибка в выражении «${trimmed}»${context ? ` (${context})` : ""}` };
   }
 
   if (evaluateExpression(trimmed, vars) === null && collectVariableReferences(trimmed).length > 0) {
-    return { code: "expr-syntax", message: `Не удалось вычислить «${trimmed}»${context ? ` (${context})` : ""}` };
+    return { code: "expr-syntax", message: `Не удалось вычислить выражение «${trimmed}»${context ? ` (${context})` : ""}` };
   }
 
   return null;
@@ -126,12 +126,7 @@ export function analyzeUndefinedVariables(ast: DocumentAst): DiagnosticMessage[]
     }
   }
 
-  for (const mat of ast.materials) {
-    const vars = buildScopedVars(ast.constants, mat.range.offset, "global");
-    for (const n of mat.nuclides) {
-      pushExprDiag(diags, n.density, vars, n.range, `MATR ${mat.number}: ${n.name}`);
-    }
-  }
+  // Концентрации нуклидов MATR — отдельно: analyzeNuclideConcentrations (matr-nuclide-conc).
 
   return diags;
 }

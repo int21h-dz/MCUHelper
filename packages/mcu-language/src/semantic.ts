@@ -149,7 +149,8 @@ export function analyzeSemantics(ast: DocumentAst): DiagnosticMessage[] {
   for (const net of ast.nets) {
     const cellNames = new Set(ast.cells.map((c) => c.name));
     for (const row of net.typeMap) {
-      for (const cell of row) {
+      for (const raw of row) {
+        const cell = netPrototypeName(raw);
         if (cell && !cellNames.has(cell)) {
           diags.push({
             severity: "warning",
@@ -157,6 +158,27 @@ export function analyzeSemantics(ast: DocumentAst): DiagnosticMessage[] {
             code: "net-cell",
             range: net.range,
           });
+        }
+      }
+    }
+
+    if (net.matMaps && matNumbers.size > 0) {
+      const seen = new Set<number>();
+      for (const layer of net.matMaps) {
+        for (const row of layer) {
+          for (const cell of row) {
+            const n = Number(cell);
+            if (!Number.isFinite(n) || n <= 0 || seen.has(n)) continue;
+            seen.add(n);
+            if (!matNumbers.has(n)) {
+              diags.push({
+                severity: "warning",
+                message: `NET ${net.name}: материальный номер ${n} в картограмме M** не описан (MATR)`,
+                code: "net-mat",
+                range: net.range,
+              });
+            }
+          }
         }
       }
     }
@@ -274,7 +296,8 @@ export function buildSummaries(ast: DocumentAst): {
 } {
   const volumes = parseMaterialVolumes(ast);
   const materials: MaterialSummary[] = ast.materials.map((m) => {
-    const massDensityGcm3 = computeMaterialMassDensityGcm3(m);
+    const vars = buildScopedVars(ast.constants, m.range.offset, "global");
+    const massDensityGcm3 = computeMaterialMassDensityGcm3(m, vars);
     const volumeCm3 = materialVolumeCm3(volumes, m.number);
     const massG =
       volumeCm3 != null && massDensityGcm3 != null && massDensityGcm3 > 0

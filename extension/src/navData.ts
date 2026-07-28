@@ -16,6 +16,33 @@ export interface NavTreeNode {
 }
 
 export interface IndexPayload {
+  fragments?: Array<{
+    id:
+      | "physical"
+      | "geometry"
+      | "source"
+      | "registration"
+      | "burnupRegistration"
+      | "trajectory"
+      | "calculationControl"
+      | "burnup";
+    startLine: number;
+    endLine: number;
+  }>;
+  statements?: Array<{
+    label: string;
+    text: string;
+    fragment:
+      | "physical"
+      | "geometry"
+      | "source"
+      | "registration"
+      | "burnupRegistration"
+      | "trajectory"
+      | "calculationControl"
+      | "burnup";
+    range: SourceRange;
+  }>;
   summaries: {
     materials: Array<{
       number: number;
@@ -88,6 +115,7 @@ export interface IndexPayload {
 }
 
 export type NavViewId =
+  | "fragments"
   | "materials"
   | "constants"
   | "bodies"
@@ -95,6 +123,19 @@ export type NavViewId =
   | "lattices"
   | "zones"
   | "objects";
+
+const FRAGMENT_META = {
+  physical: { label: "PIN", title: "Физический модуль" },
+  geometry: { label: "HEAD", title: "Геометрия" },
+  source: { label: "SRC", title: "Источник" },
+  registration: { label: "REG", title: "Регистрация" },
+  burnupRegistration: { label: "BRG", title: "Регистрация выгорания" },
+  trajectory: { label: "TRJ", title: "Траектории" },
+  calculationControl: { label: "CAL", title: "Управление расчётом" },
+  burnup: { label: "BURN", title: "Выгорание" },
+} as const;
+
+const MATR_BLOCK_STOP_LABELS = new Set(["MATR", "END", "FINISH", "DEF", "TEMPR", "PIN"]);
 
 function formatBodyScope(scope?: string): string {
   if (!scope || scope === "global") return "Общие";
@@ -149,6 +190,78 @@ function formatConstValue(value: number | null): string {
 function formatNetGrid(net: IndexPayload["summaries"]["nets"][number]): string {
   const dims = net.layers ? `${net.cols}×${net.rows}×${net.layers}` : `${net.cols}×${net.rows}`;
   return `${dims} · root ${net.root}`;
+}
+
+function trimPreview(text: string, maxLen = 72): string {
+  if (text.length <= maxLen) return text;
+  return `${text.slice(0, maxLen - 1)}…`;
+}
+
+function isDataRowLabel(label: string): boolean {
+  return (
+    /^T\d+/i.test(label) ||
+    /^P\d+/i.test(label) ||
+    /^O\d+/i.test(label) ||
+    /^M\d+/i.test(label) ||
+    /^E-?\d+/i.test(label) ||
+    /^I-?\d+/i.test(label) ||
+    /^F-?\d+/i.test(label)
+  );
+}
+
+function isFragmentChildStatement(
+  stmt: NonNullable<IndexPayload["statements"]>[number],
+  inMatrBlock: boolean
+): boolean {
+  const label = stmt.label.toUpperCase();
+  if (!label) return false;
+  if (label === "END" || label === "FINISH") return false;
+  if (!/^[A-Za-z]/.test(label)) return false;
+  if (inMatrBlock && !MATR_BLOCK_STOP_LABELS.has(label)) return false;
+  if (isDataRowLabel(label)) return false;
+  return true;
+}
+
+export function buildFragmentsTree(index: IndexPayload, uri: string): NavTreeNode[] {
+  return (index.fragments ?? []).map((fragment, i) => {
+    const meta = FRAGMENT_META[fragment.id];
+    const startLine = fragment.startLine + 1;
+    const endLine = fragment.endLine + 1;
+    let inMatrBlock = false;
+    const children = (index.statements ?? [])
+      .filter((stmt) => stmt.fragment === fragment.id)
+      .flatMap((stmt, si) => {
+        const label = stmt.label.toUpperCase();
+        const keep = isFragmentChildStatement(stmt, inMatrBlock);
+        if (label === "MATR") {
+          inMatrBlock = true;
+        } else if (MATR_BLOCK_STOP_LABELS.has(label)) {
+          inMatrBlock = false;
+        }
+        if (!keep) return [];
+        const text = stmt.text.trim();
+        const rest = text.slice(stmt.label.length).trim();
+        const suffix = rest ? ` · ${trimPreview(rest)}` : "";
+        return [{
+          id: `fragstmt-${fragment.id}-${i}-${si}`,
+          label: stmt.label,
+          description: `строка ${stmt.range.start.line + 1}${suffix}`,
+          uri,
+          range: stmt.range,
+        }];
+      });
+    return {
+      id: `frag-${fragment.id}-${i}`,
+      label: meta?.label ?? fragment.id,
+      description: `${meta?.title ?? fragment.id} · строки ${startLine}-${endLine}`,
+      uri,
+      range: {
+        start: { line: fragment.startLine, character: 0 },
+        end: { line: fragment.endLine, character: 0 },
+      },
+      children,
+    };
+  });
 }
 
 export function buildMaterialsTree(index: IndexPayload, uri: string): NavTreeNode[] {
@@ -395,6 +508,8 @@ export function buildLatticesTree(index: IndexPayload, uri: string): NavTreeNode
 
 export function buildNavTree(viewId: NavViewId, index: IndexPayload, uri: string): NavTreeNode[] {
   switch (viewId) {
+    case "fragments":
+      return buildFragmentsTree(index, uri);
     case "materials":
       return buildMaterialsTree(index, uri);
     case "zones":

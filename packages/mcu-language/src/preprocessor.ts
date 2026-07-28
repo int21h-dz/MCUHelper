@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import { readTextFileWithDetectedEncoding } from "./encodingDetect";
 import { parseIncludeLine, resolveIncludeFilePath } from "./includeResolve";
 
 export function expandIncludes(text: string, baseDir: string): { text: string; includes: string[]; errors: string[] } {
@@ -20,7 +21,7 @@ export function expandIncludes(text: string, baseDir: string): { text: string; i
           out.push(line);
           continue;
         }
-        const incText = fs.readFileSync(fsPath, "utf8");
+        const incText = readTextFileWithDetectedEncoding(fsPath);
         if (/#include\s+(?:<|\S)/i.test(incText)) {
           errors.push(`Вложенный #include запрещён: ${incPath}`);
         }

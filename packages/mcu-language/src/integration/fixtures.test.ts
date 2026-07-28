@@ -63,6 +63,26 @@ describe("lexer", () => {
     const { diagnostics } = lexDocument("MATR\t1 T=300; ok");
     assert.ok(diagnostics.some((d) => d.code === "no-tabs"));
   });
+
+  it("skips line-length in ** comment lines", () => {
+    const { diagnostics } = lexDocument("** " + "x".repeat(250));
+    assert.ok(!diagnostics.some((d) => d.code === "line-length"));
+  });
+
+  it("skips line-length in C= comment lines", () => {
+    const { diagnostics } = lexDocument("C=" + "note ".repeat(80));
+    assert.ok(!diagnostics.some((d) => d.code === "line-length"));
+  });
+
+  it("skips line-length in text after semicolon", () => {
+    const { diagnostics } = lexDocument("PIN 1;" + "x".repeat(250));
+    assert.ok(!diagnostics.some((d) => d.code === "line-length"));
+  });
+
+  it("warns when code before semicolon exceeds 200 chars", () => {
+    const { diagnostics } = lexDocument("PIN " + "1".repeat(200));
+    assert.ok(diagnostics.some((d) => d.code === "line-length"));
+  });
 });
 
 describe("preprocessor", () => {
@@ -359,12 +379,13 @@ describe("matr nuclide ranges", () => {
     const ast = parseDocument(text, { uri: "matr_typo.mcu" });
     const m4 = ast.materials.find((m) => m.number === 4);
     assert.ok(m4);
-    assert.strictEqual(m4!.nuclides.length, 3);
-    assert.ok(!m4!.nuclides.some((n) => n.name === "U238"));
-    const diag = ast.diagnostics.find((d) => d.code === "matr-nuclide-syntax");
-    assert.ok(diag, "expected matr-nuclide-syntax diagnostic");
-    assert.ok(diag!.message.includes("U238"));
-    assert.ok(diag!.message.includes("owl"));
+    assert.ok(m4!.nuclides.some((n) => n.name === "U238"));
+    const syntax = ast.diagnostics.find((d) => d.code === "matr-nuclide-syntax");
+    assert.ok(!syntax, "typo dens goes to semantic matr-nuclide-conc, not parser syntax");
+    const diags = analyzeSemantics(ast).filter((d) => d.code === "matr-nuclide-conc");
+    assert.ok(diags.some((d) => d.message.includes("U238") && d.message.includes("owl")));
+    const rho = computeMaterialMassDensityGcm3(m4!);
+    assert.ok(rho != null && rho > 0, "ρ from remaining U isotopes");
   });
 });
 
@@ -708,6 +729,23 @@ FINISH`;
     assert.strictEqual(diags.length, 0, diags.map((d) => d.message).join("; "));
   });
 
+  it("reports garbage standalone line in source block", () => {
+    const text = `PTYPE 1
+TTYPE 1
+ENERGY 0.0 0.1 0.4 5000
+SPECTR 1
+OFLU 1-3
+RCT 3,18,918
+АшЯФ
+END
+FINISH`;
+    const ast = parseDocument(text, { uri: "energy-garbage.mcu" });
+    assert.ok(
+      ast.diagnostics.some((d) => d.code === "unknown-statement" && d.message.includes("АшЯФ")),
+      ast.diagnostics.map((d) => `${d.code}: ${d.message}`).join("; ")
+    );
+  });
+
   it("rejects non-monotonic sequence", () => {
     const issues = validateEnergyGroupValues([100, 50, 50, 0]);
     assert.ok(issues.some((i) => i.code === "energy-order"));
@@ -973,6 +1011,22 @@ describe("parameter signature help", () => {
     assert.ok(help!.parameters.some((p) => p.label === "ZONB"));
   });
 
+  it("CONTEN suggests enum tokens instead of nuclide params", () => {
+    const line = "CONTEN DENS ";
+    const help = getParameterSignatureHelp(line, line.length);
+    assert.ok(help);
+    assert.ok(help!.parameters.some((p) => p.label === "SIGM"));
+    assert.ok(!help!.parameters.some((p) => p.label === "dens"));
+  });
+
+  it("CODE keeps single-value enum signature", () => {
+    const line = "CODE RSTP";
+    const help = getParameterSignatureHelp(line, line.length);
+    assert.ok(help);
+    assert.ok(help!.parameters.some((p) => p.label === "RSTP"));
+    assert.ok(!help!.parameters.some((p) => p.label === "ACE=ace"));
+  });
+
   it("SPNT shows coordinates only", () => {
     const line = "SPNT 2.99 ";
     const help = getParameterSignatureHelp(line, line.length);
@@ -1103,6 +1157,27 @@ describe("nuclide parameter excess", () => {
     const diags = analyzeSemantics(ast).filter((d) => d.code === "matr-nuclide-dup");
     assert.strictEqual(diags.length, 1);
   });
+
+  it("reports unparseable nuclide concentration (matr-nuclide-conc)", () => {
+    const text = `${pin}MATR 1\nU235 BADCONC\nZR 0.04273\nFINISH`;
+    const ast = parseDocument(text, { uri: "pin.mcu" });
+    const diags = analyzeSemantics(ast).filter((d) => d.code === "matr-nuclide-conc");
+    assert.ok(diags.some((d) => d.message.includes("U235") && d.message.includes("BADCONC")));
+    assert.strictEqual(
+      diags.filter((d) => d.message.includes("ZR")).length,
+      0,
+      "ZR with numeric dens should not warn"
+    );
+    const rho = computeMaterialMassDensityGcm3(ast.materials[0]!);
+    assert.ok(rho != null && rho > 6, "density from remaining ZR");
+  });
+
+  it("accepts EQU name as nuclide concentration", () => {
+    const text = `${pin}EQU CZR = 0.04273\nMATR 1\nZR CZR\nFINISH`;
+    const ast = parseDocument(text, { uri: "pin.mcu" });
+    const diags = analyzeSemantics(ast).filter((d) => d.code === "matr-nuclide-conc");
+    assert.strictEqual(diags.length, 0, diags.map((d) => d.message).join("; "));
+  });
 });
 
 describe("MATR card validation", () => {
@@ -1131,6 +1206,15 @@ describe("MATR card validation", () => {
     );
     assert.strictEqual(bad.length, 0);
   });
+
+  it("accepts MATR header with spaces after =", () => {
+    const text = `${pin}MATR 1 T= 313 GROUP= 1 NAME= MCU\nU235 1.E-3\nFINISH`;
+    const ast = parseDocument(text, { uri: "pin.mcu" });
+    const bad = analyzeSemantics(ast).filter((d) =>
+      ["matr-param-empty", "matr-param-value"].includes(d.code ?? "")
+    );
+    assert.strictEqual(bad.length, 0);
+  });
 });
 
 describe("nuclide parameter hints", () => {
@@ -1153,6 +1237,12 @@ describe("nuclide parameter hints", () => {
     const hover = getCompositionLineParameterHover(line, line.length);
     assert.ok(hover);
     assert.ok(hover!.includes("яд/см"));
+  });
+
+  it("does not treat geometry zone line as nuclide parameter hover", () => {
+    const line = "R003 3 -4 -G3 /1:1";
+    const hover = getCompositionLineParameterHover(line, line.indexOf("G3") + 1);
+    assert.strictEqual(hover, null);
   });
 
   it("highlights GROUP on MATR header", () => {

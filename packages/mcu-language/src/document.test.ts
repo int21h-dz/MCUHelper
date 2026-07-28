@@ -49,6 +49,17 @@ describe("document", () => {
     assert.strictEqual(getDocumentParseCount(), 1);
   });
 
+  it("caches expanded and source parses separately", () => {
+    clearDocument(uri);
+    resetDocumentParseCount();
+    const text = "PIN 1 0\nFINISH";
+    analyzeDocument(uri, text, 1, { expandInclude: false });
+    analyzeDocument(uri, text, 1, { expandInclude: true });
+    assert.strictEqual(getDocumentParseCount(), 2);
+    assert.ok(getDocumentIndex(uri, false));
+    assert.ok(getDocumentIndex(uri, true));
+  });
+
   it("analyzeDocument preserves includes when expandInclude inlines file", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-doc-inc-"));
     const incPath = path.join(dir, "confpd.mcu");

@@ -69,7 +69,7 @@ export class GeometryPanel {
 
     if (!editor || !isMcunrDocument(editor.document)) {
 
-      vscode.window.showWarningMessage("Откройте файл варианта MCU-NR");
+      vscode.window.showWarningMessage("Откройте файл MCU-NR");
 
       return;
 
@@ -85,7 +85,7 @@ export class GeometryPanel {
 
     if (!scene) {
 
-      vscode.window.showErrorMessage("Не удалось построить геометрию");
+      vscode.window.showErrorMessage("Не удалось построить сечение геометрии");
 
       return;
 
@@ -105,7 +105,7 @@ export class GeometryPanel {
 
         "mcuhelper.geometry",
 
-        "MCU-NR Сечения",
+        "MCU-NR: Сечения",
 
         vscode.ViewColumn.Beside,
 

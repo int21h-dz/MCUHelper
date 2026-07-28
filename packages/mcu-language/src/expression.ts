@@ -1,6 +1,23 @@
 const DEG = Math.PI / 180;
 const BUILTIN_FUNCS = new Set(["SIN", "COS", "TG", "SQRT", "LN", "LOG", "FUNH"]);
 
+/**
+ * Параметр, оканчивающийся на `*` (DF-1*, 2*), и следующий токен — один операнд умножения.
+ * «DF-1* DELT» → «DF-1*DELT» (DF − 1·DELT).
+ */
+export function mergeTrailingMultiplyOperands(params: readonly string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < params.length; i++) {
+    let p = params[i]!;
+    while (/.+\*$/.test(p) && !p.endsWith("**") && i + 1 < params.length) {
+      i++;
+      p += params[i]!;
+    }
+    out.push(p);
+  }
+  return out;
+}
+
 export function evaluateExpression(expr: string, vars: Map<string, number>): number | null {
   try {
     return evalExpr(expr.replace(/\s+/g, ""), vars);
@@ -202,7 +219,7 @@ export function parseNumbers(
   vars: Map<string, number>
 ): number[] {
   const out: number[] = [];
-  for (const p of params) {
+  for (const p of mergeTrailingMultiplyOperands(params)) {
     const cleaned = p.replace(/,/g, " ").trim();
     if (!cleaned) continue;
     const parts = cleaned.split(/\s+/);

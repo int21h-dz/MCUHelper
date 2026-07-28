@@ -1,4 +1,5 @@
 export * from "./detect";
+export * from "./encodingDetect";
 export * from "./constantScope";
 export * from "./materialDensity";
 export * from "./materialVolumes";

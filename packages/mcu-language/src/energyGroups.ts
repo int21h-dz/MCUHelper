@@ -55,7 +55,7 @@ export function validateEnergyGroupValues(values: number[]): EnergyGroupValidati
   if (!values.length) {
     issues.push({
       code: "energy-empty",
-      message: "ENERGY: пустой список нижних границ энергетических групп",
+      message: "ENERGY: список нижних границ пуст",
     });
     return issues;
   }
@@ -65,7 +65,7 @@ export function validateEnergyGroupValues(values: number[]): EnergyGroupValidati
     if (!Number.isFinite(v)) {
       issues.push({
         code: "energy-non-finite",
-        message: `ENERGY: нечисловое значение в позиции ${i + 1}`,
+        message: `ENERGY: в позиции ${i + 1} ожидается число`,
       });
     } else if (v < 0) {
       issues.push({
@@ -89,13 +89,13 @@ export function validateEnergyGroupValues(values: number[]): EnergyGroupValidati
     if (values[0] !== 0) {
       issues.push({
         code: "energy-missing-zero",
-        message: "ENERGY: при возрастающем списке первая нижняя граница должна быть явно задана как 0",
+        message: "ENERGY: в возрастающем списке первая граница должна быть 0",
       });
     }
   } else if (values[values.length - 1] !== 0) {
     issues.push({
       code: "energy-missing-zero",
-      message: "ENERGY: при убывающем списке последняя нижняя граница должна быть явно задана как 0",
+      message: "ENERGY: в убывающем списке последняя граница должна быть 0",
     });
   }
 

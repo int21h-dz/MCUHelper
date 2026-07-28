@@ -203,6 +203,18 @@ function isFullCommentLine(raw: string): boolean {
   return t.length > 0 && (t[0] === "*" || t.startsWith("C=") || t.startsWith("C=C"));
 }
 
+/** Строка-продолжение комментария (` C=…`). */
+function isCommentContinuationLine(raw: string): boolean {
+  return raw.startsWith(" C=") || raw.startsWith(" C=C");
+}
+
+/** Строка без комментария (для лимита 200 символов кода). */
+function codePartLength(raw: string): number {
+  if (isFullCommentLine(raw) || isCommentContinuationLine(raw)) return 0;
+  const semi = raw.indexOf(";");
+  return semi >= 0 ? semi : raw.length;
+}
+
 /** Табуляция в этой позиции строки допустима (комментарий). */
 function isTabInCommentArea(raw: string, tabIdx: number): boolean {
   if (isFullCommentLine(raw)) return true;
@@ -239,16 +251,17 @@ export function lexDocument(text: string): { lines: LineInfo[]; diagnostics: imp
       }
     }
 
-    if (raw.length > 200) {
+    if (codePartLength(raw) > 200) {
+      const codeLen = codePartLength(raw);
       diagnostics.push({
         severity: "warning",
         message: "Строка длиннее 200 символов — хвост будет проигнорирован",
         code: "line-length",
         range: {
           start: { line: lineNo, character: 200 },
-          end: { line: lineNo, character: raw.length },
+          end: { line: lineNo, character: codeLen },
           offset: offset + 200,
-          endOffset: offset + raw.length,
+          endOffset: offset + codeLen,
         },
       });
     }

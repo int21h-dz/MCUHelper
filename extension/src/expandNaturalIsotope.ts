@@ -62,7 +62,7 @@ export function registerExpandNaturalIsotope(
       async (raw: ExpandNaturalIsotopeArgs | ExpandNaturalIsotopeArgs[]) => {
         const args = Array.isArray(raw) ? raw[0] : raw;
         if (!args?.uri) {
-          vscode.window.showWarningMessage("Нет контекста для разложения на изотопы");
+          vscode.window.showWarningMessage("Не удалось определить контекст для разложения");
           return;
         }
 
@@ -90,7 +90,7 @@ export function registerExpandNaturalIsotope(
 
         if (!isotopes?.length) {
           vscode.window.showWarningMessage(
-            "Нет данных о природном составе (нужен доступ к IAEA NDS или встроенный справочник)"
+            "Нет данных о природном составе. Нужен IAEA NDS или встроенный справочник."
           );
           return;
         }
@@ -105,7 +105,7 @@ export function registerExpandNaturalIsotope(
         const ok = await editor.edit((eb) => eb.replace(range, replacement));
         if (ok) {
           vscode.window.setStatusBarMessage(
-            `MCU-NR: ${args.nuclideName} → ${isotopes.length} изотоп(ов)`,
+            `MCU-NR: ${args.nuclideName} → ${isotopes.length} изотопов`,
             3000
           );
         }

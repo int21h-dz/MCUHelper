@@ -13,6 +13,10 @@ export interface DocumentIndex {
 
 const cache = new Map<string, DocumentIndex>();
 
+function cacheKey(uri: string, expandInclude: boolean): string {
+  return `${uri}#${expandInclude ? "expanded" : "source"}`;
+}
+
 /** Счётчик полных parse (для профилирования MCUHELPER_PROFILE=1). */
 let parseCount = 0;
 
@@ -45,20 +49,23 @@ export function analyzeDocument(
   options?: Partial<ParseOptions>
 ): DocumentIndex {
   const hash = crypto.createHash("sha256").update(text).digest("hex");
-  const cached = cache.get(uri);
+  const expanded = options?.expandInclude !== false;
+  const key = cacheKey(uri, expanded);
+  const cached = cache.get(key);
   if (cached && cached.version === version && cached.hash === hash) {
     return cached;
   }
 
   const index = buildIndex(uri, text, version, hash, options);
-  cache.set(uri, index);
+  cache.set(key, index);
   return index;
 }
 
-export function getDocumentIndex(uri: string): DocumentIndex | undefined {
-  return cache.get(uri);
+export function getDocumentIndex(uri: string, expanded = true): DocumentIndex | undefined {
+  return cache.get(cacheKey(uri, expanded));
 }
 
 export function clearDocument(uri: string): void {
-  cache.delete(uri);
+  cache.delete(cacheKey(uri, true));
+  cache.delete(cacheKey(uri, false));
 }

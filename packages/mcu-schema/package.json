@@ -4,7 +4,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json",
     "extract-cards": "npm run build && node scripts/extract-userguide-cards.mjs",
     "test": "npm run build && node --test dist/**/*.test.js"
   }

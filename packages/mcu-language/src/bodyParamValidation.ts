@@ -1,14 +1,18 @@
 import type { BodyNode, DiagnosticMessage, DocumentAst } from "./ast";
 import { getBodyParamCount } from "./constants";
+import { mergeTrailingMultiplyOperands } from "./expression";
 import { getBodyParamGroups } from "./schemaBridge";
 
 function tokensAfterBodyKeyword(text: string, bodyType: string): string[] {
-  const parts = text.trim().replace(/;.*/, "").split(/\s+/).filter(Boolean);
+  // Пробелы и запятые равнозначны; `DF-1* DELT` — одно выражение (склейка *).
+  const parts = text.trim().replace(/;.*/, "").split(/[\s,]+/).filter(Boolean);
   if (!parts.length) return [];
   const u = bodyType.toUpperCase();
-  if (parts[0].toUpperCase() === u) return parts.slice(1);
-  if (parts.length > 1 && parts[1].toUpperCase() === u) return parts.slice(2);
-  return [];
+  let raw: string[];
+  if (parts[0].toUpperCase() === u) raw = parts.slice(1);
+  else if (parts.length > 1 && parts[1].toUpperCase() === u) raw = parts.slice(2);
+  else return [];
+  return mergeTrailingMultiplyOperands(raw);
 }
 
 /**

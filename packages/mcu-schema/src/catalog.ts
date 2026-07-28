@@ -87,7 +87,9 @@ export const CARD_SNIPPETS: Record<string, string> = {
   CELL: "CELL ${1:name}",
   NET: "NET ${1:name} ${2:root} ${3:cols} ${4:rows}",
   LCELL: "LCELL ${1:name}",
-  LATT: "LATT ${1:GLTL}",
+  LATT: "LATT ${1:GLTL} ${2:ZL}",
+  LFIXSO: "LFIXSO ${1:2,1}",
+  LBLACK: "LBLACK ${1:0,1}",
   ZONE: "${1:ZON1} ${2:BODY} # m=${3:1} z=${4:1} o=${5:1}",
 };
 

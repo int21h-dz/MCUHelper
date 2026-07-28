@@ -32,6 +32,8 @@ describe("serverHandlers integration", () => {
     const { uri, getDoc } = setupFixture("full_variant");
     const result = handleGetIndex(uri, getDoc);
     assert.ok(result);
+    assert.ok(result!.fragments?.length);
+    assert.ok(result!.statements?.length);
     assert.ok(result!.summaries.materials.length > 0);
     assert.ok(result!.hash.length === 64);
   });

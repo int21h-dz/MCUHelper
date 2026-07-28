@@ -12,6 +12,7 @@ import {
   buildDocumentLinks,
   buildSemanticTokenData,
   collectDiagnostics,
+  handleGetDiagnostics,
   handleGetIndex,
   handleGetSlice,
   handleValidateInput,
@@ -81,6 +82,40 @@ describe("serverHandlers extended", () => {
     assert.ok(diags.some((d) => d.message === "solver error"));
   });
 
+  it("collectDiagnostics ignores expanded #include ghost lines", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-diag-inc-"));
+    fs.writeFileSync(path.join(dir, "frag.mcu"), "MATR 1 T=\nU235 1.E-3\nFINISH", "utf8");
+    const mainText = "#include frag\nFINISH\n";
+    const mainPath = path.join(dir, "main.mcu");
+    fs.writeFileSync(mainPath, mainText, "utf8");
+    const uri = `file:///${mainPath.replace(/\\/g, "/")}`;
+    const doc = TextDocument.create(uri, "mcunr", 1, mainText);
+    const expanded = analyzeDocument(uri, mainText, 1, { baseDir: dir, expandInclude: true });
+    const published = collectDiagnostics(doc);
+    assert.ok(expanded.ast.diagnostics.some((d) => d.code === "matr-param-empty"));
+    assert.ok(!published.some((d) => d.code === "matr-param-empty"));
+    for (const d of published) {
+      assert.ok(d.range.start.line < doc.lineCount);
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("handleGetDiagnostics matches collectDiagnostics without include ghosts", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-diag-get-"));
+    fs.writeFileSync(path.join(dir, "frag.mcu"), "MATR 1 T=\nU235 1.E-3\nFINISH", "utf8");
+    const mainText = "#include frag\nFINISH\n";
+    const mainPath = path.join(dir, "main.mcu");
+    fs.writeFileSync(mainPath, mainText, "utf8");
+    const uri = `file:///${mainPath.replace(/\\/g, "/")}`;
+    const doc = TextDocument.create(uri, "mcunr", 1, mainText);
+    const getDoc = (u: string) => (u === uri ? doc : undefined);
+    const published = collectDiagnostics(doc);
+    const payload = handleGetDiagnostics(uri, getDoc);
+    assert.equal(payload.length, published.length);
+    assert.ok(!payload.some((d) => d.code === "matr-param-empty"));
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
   it("handleGetSlice returns grid for trx", () => {
     const text = fs.readFileSync(path.join(fixtures, "trx_geometry.mcu"), "utf8");
     const uri = "file:///fixtures/trx_geometry.mcu";
@@ -140,6 +175,48 @@ describe("serverHandlers extended", () => {
     assert.ok(ranges.some((r) => r.startLine === 6 && r.endLine === 7));
   });
 
+  it("buildFoldingRanges folds LCELL…ENDL and LATT…LFIXSO", () => {
+    const text = `HEAD 3 0
+CONT T T
+RCZ CNT 0 0 0 10 5
+END
+ZL CNT /1:1
+END
+LCELL A
+RPP N1 0 1 0 1 0 1
+END
+Z1 1 /1:1
+END
+ENDL
+LCELL B
+RPP N1 0 1 0 1 0 1
+END
+ENDL
+LATT GLTL ZL
+LISTEL A B
+PARM /1 0,0,0
+/2 25,0,0
+LFIXSO 2,1
+FINISH`;
+    const uri = "file:///fold-latt.mcu";
+    const index = analyzeDocument(uri, text, 1);
+    const ranges = buildFoldingRanges(index);
+    const lcellA = index.ast.statements.find((s) => /^LCELL\s+A\b/i.test(s.text))!;
+    const endlA = index.ast.statements.find(
+      (s) => s.label.toUpperCase() === "ENDL" && s.range.start.line > lcellA.range.start.line
+    )!;
+    assert.ok(
+      ranges.some((r) => r.startLine === lcellA.range.start.line && r.endLine === endlA.range.start.line),
+      `expected LCELL A fold ${lcellA.range.start.line}..${endlA.range.start.line}, got ${JSON.stringify(ranges)}`
+    );
+    const latt = index.ast.statements.find((s) => s.label.toUpperCase() === "LATT")!;
+    const lfixso = index.ast.statements.find((s) => s.label.toUpperCase() === "LFIXSO")!;
+    assert.ok(
+      ranges.some((r) => r.startLine === latt.range.start.line && r.endLine === lfixso.range.start.line),
+      `expected LATT fold ${latt.range.start.line}..${lfixso.range.start.line}, got ${JSON.stringify(ranges)}`
+    );
+  });
+
   it("buildDocumentLinks resolves #include target", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-link-"));
     const mainPath = path.join(dir, "main.mcu");
@@ -179,6 +256,8 @@ FINISH`;
     const getDoc = (u: string) => (u === uri ? doc : undefined);
     const result = handleGetIndex({ uri, line: 4, character: 5 }, getDoc);
     assert.ok(result);
+    assert.ok(result!.fragments?.some((f) => f.id === "geometry"));
+    assert.ok(result!.statements?.some((s) => s.label === "LCELL"));
     assert.ok(result!.editorContext);
     assert.ok(result!.editorContext!.scope.includes("P1"));
     const hall = result!.summaries.constants.find((c) => c.name === "HALL");

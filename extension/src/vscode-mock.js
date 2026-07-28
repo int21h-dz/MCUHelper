@@ -27,5 +27,21 @@ module.exports = {
   Uri: {
     parse: (s) => ({ toString: () => s, fsPath: s.replace("file://", "") }),
   },
+  DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
+  Diagnostic: class Diagnostic {
+    constructor(range, message, severity = 0) {
+      this.range = range;
+      this.message = message;
+      this.severity = severity;
+      this.source = undefined;
+      this.code = undefined;
+    }
+  },
+  Range: class Range {
+    constructor(startLine, startChar, endLine, endChar) {
+      this.start = { line: startLine, character: startChar };
+      this.end = { line: endLine, character: endChar };
+    }
+  },
   ExtensionContext: class {},
 };

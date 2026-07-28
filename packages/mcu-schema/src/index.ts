@@ -53,7 +53,7 @@ export const PIN_CARDS: CardSchema[] = [
     title: "Заголовок физического модуля",
     syntax: "PIN [value1 value2]",
     description:
-      "Начало фрагмента физического модуля. value1 — печать карт (0/1), value2 — отладочная печать (0–5).",
+      "Начало физического модуля. value1 включает печать карт (0/1), value2 задаёт уровень отладочной печати (0-5).",
     defaults: "value1=0, value2=0",
     fragment: "physical",
   },
@@ -62,7 +62,7 @@ export const PIN_CARDS: CardSchema[] = [
     title: "Описание материала",
     syntax: "MATR number [T=t GROUP=group NAME=type DENSAA=...] nuclide dens ...",
     description:
-      "Задаёт материал с порядковым номером, температурой, составом нуклидов и опциональными параметрами плотности.",
+      "Задаёт номер материала, температуру, состав нуклидов и параметры плотности.",
     fragment: "physical",
     example: "MATR 1\nU235 1.10E-03\nH 0.0001 MODS=G",
   },
@@ -71,7 +71,7 @@ export const PIN_CARDS: CardSchema[] = [
     title: "Конец блока",
     syntax: "END",
     description:
-      "Окончание текущего блока: состав MATR (PIN), секция CELL/LCELL (геометрия), раздел регистратора (после PTYPE…). Перед следующим MATR или FINISH может быть пропущен.",
+      "Закрывает текущий блок: состав MATR, секцию CELL/LCELL или раздел регистратора. Перед следующим MATR или FINISH может отсутствовать.",
     example: "END",
   },
   {
@@ -93,7 +93,7 @@ export const PIN_CARDS: CardSchema[] = [
     title: "Конец фрагмента",
     syntax: "FINISH [commentary]",
     description:
-      "Обязательный признак окончания ввода данных текущего фрагмента: PIN, геометрия, источники, регистрация, BRG, BURN и др.",
+      "Обязательное завершение текущего фрагмента: PIN, геометрия, источники, регистрация, BRG, BURN и др.",
     example: "FINISH",
   },
   {
@@ -118,7 +118,7 @@ export const GEO_CARDS: CardSchema[] = [
     title: "Заголовок геометрии",
     syntax: "HEAD [print [trace [listSize]]]",
     description:
-      "print: 0–4 (печать на вводе). trace: трассировка. listSize: размер списков поиска (по умолчанию 400).",
+      "print: 0-4 для печати на вводе, trace включает трассировку, listSize задаёт размер списков поиска (по умолчанию 400).",
     fragment: "geometry",
   },
   {
@@ -126,7 +126,7 @@ export const GEO_CARDS: CardSchema[] = [
     title: "Контейнер и граничные условия",
     syntax: "CONT <BC...> [S<angle>] [PRS<angle>]",
     description:
-      "Контейнер — первое тело в секции тел. BC: B (чёрная), W (белое), M (зеркало), C (цилиндр.), T (трансляция).",
+      "Первое тело в секции тел считается контейнером. BC: B - чёрная, W - белая, M - зеркальная, C - цилиндрическая, T - трансляционная граница.",
     fragment: "geometry",
   },
   {
@@ -141,7 +141,7 @@ export const GEO_CARDS: CardSchema[] = [
     title: "Константа (без переопределения)",
     syntax: "EQU <name> = <expression>",
     description:
-      "Присвоение имени числовому выражению (+−*/(), SIN/COS/TG/SQRT/FUNH/LN; углы тригонометрии в градусах).",
+      "Присваивает имя числовому выражению. Поддерживаются + - * / (), SIN/COS/TG/SQRT/FUNH/LN; углы задаются в градусах.",
     fragment: "geometry",
   },
   {
@@ -175,9 +175,27 @@ export const GEO_CARDS: CardSchema[] = [
   {
     label: "LATT",
     title: "Решётка",
-    syntax: "LATT <type> <zone> LISTEL ... PARM ...",
-    description: "Размещение элементов решётки в зоне-носителе.",
+    syntax: "LATT <type> <zone> LISTEL ... PARM ... [LFIXSO ...] [LBLACK ...]",
+    description: "Размещение элементов решётки в зоне-носителе (GLTL / G2AR / G2MP).",
     fragment: "geometry",
+  },
+  {
+    label: "LFIXSO",
+    title: "Поверхность накопления источника",
+    syntax: "LFIXSO <пары объектных номеров>",
+    description:
+      "Задаёт поверхность накопления источника парами объектных номеров. На первом этапе используется только LFIXSO, на промежуточных - вместе с LBLACK.",
+    fragment: "geometry",
+    example: "LFIXSO 2,1",
+  },
+  {
+    label: "LBLACK",
+    title: "Поверхность поглощения (накопление источника)",
+    syntax: "LBLACK <пары объектных номеров>",
+    description:
+      "Задаёт поверхность поглощения по тем же парам объектных номеров, что и LFIXSO. На последнем этапе используется только LBLACK, на промежуточных - вместе с LFIXSO.",
+    fragment: "geometry",
+    example: "LBLACK 0,1  1,2",
   },
   {
     label: "TRANSF",

@@ -21,10 +21,12 @@ import type {
   ZoneTailLegacy,
 } from "./ast";
 import { lexDocument, type LineInfo } from "./lexer";
+import { mergeTrailingMultiplyOperands } from "./expression";
+import { expandCartogramTokens } from "./netCartogram";
 import { collectIncludesFromSource } from "./includeResolve";
 import { expandIncludes, expandRepeats } from "./preprocessor";
 import { applyGeometryScopeTransition, initialGeometryScopeState } from "./geometryScope";
-import { isG2mpCartogramRow, looksLikeZoneStatement } from "./zoneStatement";
+import { isG2mpCartogramRow, looksLikeZoneOverridingFragment, looksLikeZoneStatement } from "./zoneStatement";
 import { detectFragmentFromLabel, isKnownMcuLabel } from "./schemaBridge";
 
 const BODY_KEYS = new Set([
@@ -32,6 +34,12 @@ const BODY_KEYS = new Set([
   "UCX", "UCY", "UCZ", "PLG", "PLX", "PLY", "PLZ", "SLA", "SLB", "REC",
   "TRC", "ARB", "SBOX", "SHEX", "HEXG", "QUAD", "TRANSF", "UPOLY",
 ]);
+
+/**
+ * dens: число, имя EQU/SET или выражение без пробелов (`2*DENSU`).
+ * Не захватывает `/` — разделитель нескольких нуклидов на строке (`U235 1 /U238 2`).
+ */
+const NUCLIDE_DENS_TOKEN = String.raw`[^\s/]+`;
 
 function rangeFromLine(line: LineInfo, startCol = 0, endCol?: number): SourceRange {
   const end = endCol ?? line.text.length;
@@ -66,7 +74,13 @@ function mergeStatementLines(lines: LineInfo[], start: number): { text: string; 
 
 function detectFragment(label: string, current: FragmentId | null, stmtText: string): FragmentId | null {
   const next = detectFragmentFromLabel(label, current);
-  if (current === "geometry" && next !== "geometry" && next !== null && looksLikeZoneStatement(stmtText)) {
+  // Зона с именем-картой (GRBL … /1:2) остаётся в geometry; NPS 1 / PROB 1 — карты источника.
+  if (
+    current === "geometry" &&
+    next !== "geometry" &&
+    next !== null &&
+    looksLikeZoneOverridingFragment(stmtText)
+  ) {
     return "geometry";
   }
   return next;
@@ -150,13 +164,18 @@ function parseMaterial(stmt: string, range: SourceRange): MaterialNode | null {
   const densM = rest.match(/(DENSAA|DENSWA|DENSAW|DENSWW)\s*=\s*([\d.Ee+-]+)/i);
 
   const nuclides: NuclideEntry[] = [];
-  const lines = stmt.split(/\n|(?=\/)/);
-  const nuclideRe = /([A-Za-z][A-Za-z0-9]{0,5})\s+([\d.Ee+-]+)/g;
+  const nuclideRe = new RegExp(`\\/?([A-Za-z][A-Za-z0-9]{0,5})\\s+(${NUCLIDE_DENS_TOKEN})`, "g");
   let nm: RegExpExecArray | null;
   const body = stmt.replace(/^MATR\s+\d+[^\n]*/i, "");
   while ((nm = nuclideRe.exec(body))) {
-    if (["MODS", "ACE", "DTEM", "PHT", "T", "GROUP", "NAME", "DENSAA", "DENSWA", "DENSAW", "DENSWW", "BUR", "VOL"].some((x) => nm![1].toUpperCase().startsWith(x))) continue;
-    const mods = body.match(new RegExp(nm[1] + `\\s+[\\d.Ee+-]+\\s+MODS=(\\S+)`, "i"));
+    if (
+      ["MODS", "ACE", "DTEM", "PHT", "T", "GROUP", "NAME", "DENSAA", "DENSWA", "DENSAW", "DENSWW", "BUR", "VOL"].some(
+        (x) => nm![1].toUpperCase().startsWith(x)
+      )
+    ) {
+      continue;
+    }
+    const mods = body.match(new RegExp(nm[1] + `\\s+${NUCLIDE_DENS_TOKEN}\\s+MODS=(\\S+)`, "i"));
     nuclides.push({
       name: nm[1],
       density: nm[2],
@@ -216,7 +235,9 @@ function parseBody(stmt: string, range: SourceRange): BodyNode | null {
     paramsStart = 2;
   }
 
-  const params = parts.slice(paramsStart).join(" ").split(/[\s,]+/).filter(Boolean);
+  const params = mergeTrailingMultiplyOperands(
+    parts.slice(paramsStart).join(" ").split(/[\s,]+/).filter(Boolean)
+  );
   return { kind: "body", bodyType, name, params, range };
 }
 
@@ -276,29 +297,18 @@ function isExcludedNuclideLikeLine(text: string): boolean {
   return false;
 }
 
-/** Строка состава MATR: U235 1.10E-03. */
+/** Строка состава MATR: U235 1.10E-03 | ZR CZR | U238 owl.… (опечатка → matr-nuclide-conc). */
 function isNuclideLine(text: string): boolean {
   const t = text.trim();
   if (isExcludedNuclideLikeLine(t)) return false;
-  return /^[A-Za-z][A-Za-z0-9]{0,5}\s+[\d.Ee+-]+/.test(t);
+  return new RegExp(`^[A-Za-z][A-Za-z0-9]{0,5}\\s+${NUCLIDE_DENS_TOKEN}`).test(t);
 }
 
-/** Похожа на нуклид, но концентрация может быть с опечаткой (U238 owl.20836E-01). */
+/** Похожа на нуклид (имя + dens-токен). */
 function looksLikeNuclideLine(text: string): boolean {
   const t = text.trim();
   if (!t || isExcludedNuclideLikeLine(t)) return false;
-  return /^[A-Za-z][A-Za-z0-9]{0,5}\s+\S+/.test(t);
-}
-
-function tokenSubrange(text: string, range: SourceRange, token: string): SourceRange {
-  const idx = text.indexOf(token);
-  if (idx < 0) return range;
-  return {
-    start: { line: range.start.line, character: range.start.character + idx },
-    end: { line: range.start.line, character: range.start.character + idx + token.length },
-    offset: range.offset + idx,
-    endOffset: range.offset + idx + token.length,
-  };
+  return isNuclideLine(t);
 }
 
 function parseNuclidesFromLine(
@@ -307,26 +317,17 @@ function parseNuclidesFromLine(
 ): { nuclides: NuclideEntry[]; diagnostic?: DiagnosticMessage } {
   const nuclides: NuclideEntry[] = [];
   if (!isNuclideLine(text)) {
-    const head = text.trim().match(/^([A-Za-z][A-Za-z0-9]{0,5})\s+(\S+)/);
-    if (!head || NUCLIDE_INLINE_KEYWORDS.has(head[1].toUpperCase())) {
-      return { nuclides };
-    }
-    return {
-      nuclides,
-      diagnostic: {
-        severity: "error",
-        message: `MATR: неверный формат концентрации для ${head[1]}: «${head[2]}»`,
-        code: "matr-nuclide-syntax",
-        range: tokenSubrange(text, range, head[2]),
-      },
-    };
+    return { nuclides };
   }
 
-  const nuclideRe = /([A-Za-z][A-Za-z0-9]{0,5})\s+([\d.Ee+-]+)/g;
+  // Опциональный `/` перед именем — разделитель на одной строке
+  const nuclideRe = new RegExp(`\\/?([A-Za-z][A-Za-z0-9]{0,5})\\s+(${NUCLIDE_DENS_TOKEN})`, "g");
   let nm: RegExpExecArray | null;
   while ((nm = nuclideRe.exec(text))) {
     if (NUCLIDE_INLINE_KEYWORDS.has(nm[1].toUpperCase())) continue;
-    const mods = text.match(new RegExp(nm[1] + `\\s+[\\d.Ee+-]+\\s+MODS=(\\S+)`, "i"));
+    const mods = text.match(
+      new RegExp(nm[1] + `\\s+${NUCLIDE_DENS_TOKEN}\\s+MODS=(\\S+)`, "i")
+    );
     nuclides.push({ name: nm[1], density: nm[2], mods: mods?.[1], range });
   }
   return { nuclides };
@@ -520,7 +521,9 @@ export function parseDocument(text: string, options: ParseOptions): DocumentAst 
       inMaterialBlock = false;
     }
 
-    if (BODY_KEYS.has(label) || stmt.text.match(/^TRANSF/i) || BODY_KEYS.has(stmt.text.split(/\s+/)[1]?.toUpperCase() ?? "")) {
+    const isBodyStmt =
+      BODY_KEYS.has(label) || stmt.text.match(/^TRANSF/i) || BODY_KEYS.has(stmt.text.split(/\s+/)[1]?.toUpperCase() ?? "");
+    if (isBodyStmt) {
       const body = parseBody(stmt.text, stmt.range);
       if (body) {
         body.scope = currentScope;
@@ -628,16 +631,21 @@ export function parseDocument(text: string, options: ParseOptions): DocumentAst 
       label === "PARM" ||
       label === "LISTEL" ||
       label === "LATT" ||
+      label === "LFIXSO" ||
+      label === "LBLACK" ||
       ((inMaterialBlock || currentFragment === "physical") && looksLikeNuclideLine(stmt.text)) ||
       currentFragment !== "geometry" ||
       (isKnownMcuLabel(label) && !looksLikeZoneStatement(stmt.text)) ||
       /^T\d+/i.test(label) ||
       /^P\d+/i.test(label) ||
+      /^O\d+/i.test(label) ||
+      /^M\d+/i.test(label) ||
       /^E-?\d+/i.test(label) ||
       /^I-?\d+/i.test(label) ||
       /^F-?\d+/i.test(label) ||
       (inG2mpCartogram && isG2mpCartogramRow(label));
-    if (!BODY_KEYS.has(label) && /^[A-Za-z]/.test(label) && !skipAsZone) {
+    const isZoneStmt = !BODY_KEYS.has(label) && /^[A-Za-z]/.test(label) && !skipAsZone;
+    if (isZoneStmt) {
       const zone = parseZone(stmt.text, stmt.range);
       if (zone && zone.expression.length > 0) {
         zone.scope = currentScope;
@@ -645,15 +653,47 @@ export function parseDocument(text: string, options: ParseOptions): DocumentAst 
       }
     }
 
-    // NET cartograms T01, P0101, O0101
+    // NET cartograms T01, P0101, O0101, M0156
     if (/^T\d+/i.test(label) && nets.length > 0) {
       const vals = stmt.text.split(/\s+/).slice(1);
       nets[nets.length - 1].typeMap.push(vals);
     }
     if (/^P\d+/i.test(label) && nets.length > 0) {
-      const vals = stmt.text.split(/\s+/).slice(1).map(Number);
+      const vals = expandCartogramTokens(stmt.text.split(/\s+/).slice(1));
       if (!nets[nets.length - 1].regMaps) nets[nets.length - 1].regMaps = [];
-      nets[nets.length - 1].regMaps!.push([vals.map(String)]);
+      nets[nets.length - 1].regMaps!.push([vals]);
+    }
+    if (/^O\d+/i.test(label) && nets.length > 0) {
+      const vals = expandCartogramTokens(stmt.text.split(/\s+/).slice(1));
+      if (!nets[nets.length - 1].objMaps) nets[nets.length - 1].objMaps = [];
+      nets[nets.length - 1].objMaps!.push([vals]);
+    }
+    if (/^M\d+/i.test(label) && nets.length > 0) {
+      const vals = expandCartogramTokens(stmt.text.split(/\s+/).slice(1));
+      if (!nets[nets.length - 1].matMaps) nets[nets.length - 1].matMaps = [];
+      nets[nets.length - 1].matMaps!.push([vals]);
+    }
+
+    const isKnownSpecialLine =
+      isKnownMcuLabel(label) ||
+      isBodyStmt ||
+      isZoneStmt ||
+      isIgnorableAuxLine(stmt.text) ||
+      ((inMaterialBlock || currentFragment === "physical") && looksLikeNuclideLine(stmt.text)) ||
+      /^T\d+/i.test(label) ||
+      /^P\d+/i.test(label) ||
+      /^O\d+/i.test(label) ||
+      /^M\d+/i.test(label) ||
+      /^E-?\d+/i.test(label) ||
+      /^I-?\d+/i.test(label) ||
+      /^F-?\d+/i.test(label);
+    if (label && !isKnownSpecialLine) {
+      diagnostics.push({
+        severity: "error",
+        message: `Неизвестная строка: ${stmt.text}`,
+        code: "unknown-statement",
+        range: stmt.range,
+      });
     }
 
     i = stmt.end + 1;

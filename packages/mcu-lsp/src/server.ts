@@ -30,6 +30,7 @@ import {
   handleQueryPoint,
   handleGetSlice,
   handleValidateInput,
+  handleGetDiagnostics,
   syncSettingsFromInitialize,
   applyServerSettings,
   type McuServerSettings,
@@ -221,6 +222,20 @@ connection.onRequest("mcuhelper/getGeometry", (uri: string) => handleGetGeometry
 connection.onRequest("mcuhelper/queryPoint", (args) => handleQueryPoint(args, getDoc));
 
 connection.onRequest("mcuhelper/getSlice", (args) => handleGetSlice(args, getDoc));
+
+connection.onRequest("mcuhelper/getDiagnostics", (args: { uri: string }) => {
+  const extra = solverDiagnostics.get(args.uri) ?? [];
+  return handleGetDiagnostics(args.uri, getDoc, extra);
+});
+
+connection.onRequest("mcuhelper/revalidateAllOpen", () => {
+  let count = 0;
+  for (const doc of documents.all()) {
+    void validateTextDocument(doc);
+    count++;
+  }
+  return count;
+});
 
 connection.onRequest("mcuhelper/validateInput", async (args) => {
   const result = await handleValidateInput(args, globalSettings, getDoc);

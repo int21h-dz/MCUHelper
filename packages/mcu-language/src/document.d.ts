@@ -9,5 +9,5 @@ export interface DocumentIndex {
     summaries: ReturnType<typeof buildSummaries>;
 }
 export declare function analyzeDocument(uri: string, text: string, version: number, options?: Partial<ParseOptions>): DocumentIndex;
-export declare function getDocumentIndex(uri: string): DocumentIndex | undefined;
+export declare function getDocumentIndex(uri: string, expanded?: boolean): DocumentIndex | undefined;
 export declare function clearDocument(uri: string): void;

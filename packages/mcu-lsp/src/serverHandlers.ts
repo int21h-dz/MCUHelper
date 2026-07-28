@@ -59,7 +59,7 @@ const PROFILE_PARSE = process.env.MCUHELPER_PROFILE === "1";
 /** Единая точка получения индекса: version-cache в analyzeDocument + проверка version. */
 export function ensureDocumentIndex(doc: TextDocument): DocumentIndex {
   const uri = doc.uri;
-  const cached = getDocumentIndex(uri);
+  const cached = getDocumentIndex(uri, true);
   if (cached && cached.version === doc.version) {
     return cached;
   }
@@ -78,13 +78,54 @@ export function collectDiagnostics(
   doc: TextDocument,
   extraSolverDiags: Diagnostic[] = []
 ): Diagnostic[] {
-  const index = ensureDocumentIndex(doc);
-  const diags = index.ast.diagnostics.map(toLspDiagnostic);
+  const baseDir = uriToBaseDir(doc.uri);
+  const index = analyzeDocument(doc.uri, doc.getText(), doc.version, { baseDir, expandInclude: false });
+  const lineCount = doc.lineCount;
+  const diags = index.ast.diagnostics
+    .map(toLspDiagnostic)
+    .filter((d) => d.range.start.line < lineCount);
   const cached = getCachedSolverResult(index.hash);
   if (cached) {
-    diags.push(...cached.diagnostics.map(toLspDiagnostic));
+    diags.push(
+      ...cached.diagnostics.map(toLspDiagnostic).filter((d) => d.range.start.line < lineCount)
+    );
   }
-  return [...diags, ...extraSolverDiags];
+  return [...diags, ...extraSolverDiags.filter((d) => d.range.start.line < lineCount)];
+}
+
+export interface McuDiagnosticPayload {
+  severity: number;
+  message: string;
+  code?: string;
+  source: string;
+  range: {
+    start: { line: number; character: number };
+    end: { line: number; character: number };
+  };
+}
+
+function lspDiagnosticCode(code: Diagnostic["code"]): string | undefined {
+  if (code == null) return undefined;
+  if (typeof code === "string" || typeof code === "number") return String(code);
+  const obj = code as { value?: string | number };
+  return obj.value != null ? String(obj.value) : undefined;
+}
+
+/** Диагностики только по тексту открытого файла (без развёрнутого #include). */
+export function handleGetDiagnostics(
+  uri: string,
+  getDoc: (uri: string) => TextDocument | undefined,
+  extraSolverDiags: Diagnostic[] = []
+): McuDiagnosticPayload[] {
+  const doc = getDoc(uri);
+  if (!doc) return [];
+  return collectDiagnostics(doc, extraSolverDiags).map((d) => ({
+    severity: d.severity ?? DiagnosticSeverity.Error,
+    message: d.message,
+    code: lspDiagnosticCode(d.code),
+    source: d.source ?? "mcuhelper",
+    range: d.range,
+  }));
 }
 
 export function buildSemanticTokenData(doc: TextDocument): number[] {
@@ -169,6 +210,34 @@ export function buildDocumentSymbols(index: DocumentIndex, uri: string): SymbolI
 
 const MATERIAL_BLOCK_STOP_LABELS = new Set(["MATR", "END", "FINISH", "DEF", "TEMPR", "PIN"]);
 
+/** Конец блока LATT (не LISTEL/PARM/LFIXSO и не строки /n картограммы). */
+const LATT_BLOCK_STOP_LABELS = new Set([
+  "FINISH",
+  "LATT",
+  "LCELL",
+  "CELL",
+  "NET",
+  "HEAD",
+  "CONT",
+  "PIN",
+  "SRCD",
+  "SRC",
+  "SPNT",
+  "RGS",
+  "REGD",
+  "REG",
+  "BRG",
+  "BRGD",
+  "NTOT",
+  "NAMVAR",
+  "NAMV",
+  "BURN",
+  "BURD",
+  "V01",
+  "SHOW",
+  "STOP",
+]);
+
 function buildMaterialFoldingRanges(index: DocumentIndex): FoldingRange[] {
   const physicalStatements = index.ast.statements
     .filter((stmt) => stmt.fragment === "physical")
@@ -198,6 +267,53 @@ function buildMaterialFoldingRanges(index: DocumentIndex): FoldingRange[] {
   return ranges;
 }
 
+/** Сворачивание LCELL…ENDL и LATT…(LISTEL/PARM/LFIXSO/LBLACK). */
+function buildLatticeFoldingRanges(index: DocumentIndex): FoldingRange[] {
+  const stmts = index.ast.statements
+    .filter((stmt) => stmt.fragment === "geometry")
+    .sort((a, b) => a.range.start.line - b.range.start.line);
+
+  const ranges: FoldingRange[] = [];
+
+  for (let i = 0; i < stmts.length; i++) {
+    const label = stmts[i]!.label.toUpperCase();
+    const startLine = stmts[i]!.range.start.line;
+
+    if (label === "LCELL") {
+      let endLine = startLine;
+      for (let j = i + 1; j < stmts.length; j++) {
+        const nextLabel = stmts[j]!.label.toUpperCase();
+        endLine = stmts[j]!.range.end.line;
+        if (nextLabel === "ENDL") break;
+        if (nextLabel === "LCELL" || nextLabel === "LATT" || nextLabel === "FINISH") {
+          endLine = stmts[j]!.range.start.line - 1;
+          break;
+        }
+      }
+      if (endLine > startLine) {
+        ranges.push({ startLine, endLine, kind: FoldingRangeKind.Region });
+      }
+      continue;
+    }
+
+    if (label === "LATT") {
+      let endLine = startLine;
+      for (let j = i + 1; j < stmts.length; j++) {
+        const nextLabel = stmts[j]!.label.toUpperCase();
+        if (LATT_BLOCK_STOP_LABELS.has(nextLabel)) {
+          break;
+        }
+        endLine = stmts[j]!.range.end.line;
+      }
+      if (endLine > startLine) {
+        ranges.push({ startLine, endLine, kind: FoldingRangeKind.Region });
+      }
+    }
+  }
+
+  return ranges;
+}
+
 export function buildFoldingRanges(index: DocumentIndex): FoldingRange[] {
   const ranges: FoldingRange[] = [];
   for (const fragment of index.ast.fragments) {
@@ -209,6 +325,7 @@ export function buildFoldingRanges(index: DocumentIndex): FoldingRange[] {
     });
   }
   ranges.push(...buildMaterialFoldingRanges(index));
+  ranges.push(...buildLatticeFoldingRanges(index));
   return ranges.sort((a, b) => a.startLine - b.startLine || a.endLine - b.endLine);
 }
 
@@ -256,7 +373,14 @@ export function handleGetIndex(
     summaries.constants = listVisibleConstants(index.ast.constants, scope, line, char);
   }
 
-  return { summaries, hash: index.hash, editorContext };
+  const statements = index.ast.statements.map((stmt) => ({
+    label: stmt.label,
+    text: stmt.text,
+    fragment: stmt.fragment,
+    range: stmt.range,
+  }));
+
+  return { summaries, fragments: index.ast.fragments, statements, hash: index.hash, editorContext };
 }
 
 export function handleGetGeometry(uri: string, getDoc: (uri: string) => TextDocument | undefined) {

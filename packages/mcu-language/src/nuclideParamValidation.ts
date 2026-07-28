@@ -1,5 +1,7 @@
 import type { DiagnosticMessage, DocumentAst, SourceRange, StatementNode } from "./ast";
-import { MODS_VALUES } from "./schemaBridge";
+import { buildScopedVars } from "./constantScope";
+import { resolveNuclideConcentration } from "./materialDensity";
+import { getCardArgSpec, MODS_VALUES } from "./schemaBridge";
 
 const NUCLIDE_OPTIONAL_PARAMS = new Set(["ACE", "MODS", "DTEM", "PHT"]);
 const DENSITY_RE = /^[\d.Ee+-]+$/;
@@ -33,19 +35,39 @@ function looksLikeNuclideLine(text: string): boolean {
   return /^[A-Za-z][A-Za-z0-9]{0,5}\s+\S+/.test(t);
 }
 
+function isOptionalParamTokenOrPrefix(token: string, allowBarePrefix: boolean): boolean {
+  const key = token.match(/^([A-Za-z]+)=/)?.[1]?.toUpperCase();
+  if (key) return NUCLIDE_OPTIONAL_PARAMS.has(key);
+  if (!allowBarePrefix || !/^[A-Za-z]+$/.test(token)) return false;
+  const upper = token.toUpperCase();
+  return OPTIONAL_PARAM_KEYS.some((k) => k.startsWith(upper));
+}
+
 export function isNuclideCompositionLinePrefix(prefix: string): boolean {
   const code = prefix.replace(/;.*/, "");
   const trimmed = code.trim();
   if (!trimmed || trimmed.startsWith("*") || trimmed.startsWith("C=")) return false;
   if (isExcludedNuclideLikeLine(trimmed)) return false;
 
-  const tokens = trimmed.split(/\s+/).filter(Boolean);
+  const segment = trimmed.split("/").pop()?.trim() ?? trimmed;
+  const tokens = segment.split(/\s+/).filter(Boolean);
   if (!tokens.length || !/^[A-Za-z][A-Za-z0-9]{0,5}$/.test(tokens[0])) return false;
-  if (NUCLIDE_LINE_EXCLUDED_HEADS.has(tokens[0].toUpperCase())) return false;
+  const head = tokens[0].toUpperCase();
+  if (NUCLIDE_LINE_EXCLUDED_HEADS.has(head)) return false;
+  // Системно исключаем карты со специальными аргументами (SUMZON/CONTEN/CODE/...),
+  // иначе строка вида `CARD TOKEN` ошибочно маскируется под `nuclide dens`.
+  if (getCardArgSpec(head)) return false;
 
   if (tokens.length === 1) return /\s$/.test(code);
-  if (/^[\d.Ee+-]+$/.test(tokens[1])) return true;
-  return /\b(ACE|MODS|DTEM|PHT)=/i.test(trimmed);
+  if (/^(ACE|MODS|DTEM|PHT)=/i.test(tokens[1])) return false;
+  if (tokens.length === 2) return true;
+
+  const endsWithSpace = /\s$/.test(code);
+  for (let i = 2; i < tokens.length; i++) {
+    const allowBarePrefix = i === tokens.length - 1 && !endsWithSpace;
+    if (!isOptionalParamTokenOrPrefix(tokens[i], allowBarePrefix)) return false;
+  }
+  return true;
 }
 
 function isIgnorableAuxLine(text: string): boolean {
@@ -221,6 +243,37 @@ export function analyzeDuplicateNuclides(ast: DocumentAst): DiagnosticMessage[] 
   return diags;
 }
 
+/**
+ * Концентрации нуклидов, которые нельзя вычислить как число (литерал / EQU).
+ * Код: matr-nuclide-conc — чтобы в Problems было видно, какие строки выпали из ρ.
+ */
+export function analyzeNuclideConcentrations(ast: DocumentAst): DiagnosticMessage[] {
+  const diags: DiagnosticMessage[] = [];
+  for (const mat of ast.materials) {
+    const vars = buildScopedVars(ast.constants, mat.range.offset, "global");
+    for (const n of mat.nuclides) {
+      const trimmed = n.density.trim();
+      if (!trimmed) {
+        diags.push({
+          severity: "warning",
+          message: `MATR ${mat.number}: у нуклида ${n.name} не указана концентрация`,
+          code: "matr-nuclide-conc",
+          range: n.range,
+        });
+        continue;
+      }
+      if (resolveNuclideConcentration(trimmed, vars) != null) continue;
+      diags.push({
+        severity: "warning",
+        message: `MATR ${mat.number}: концентрация ${n.name} «${trimmed}» не распознана как число`,
+        code: "matr-nuclide-conc",
+        range: n.range,
+      });
+    }
+  }
+  return diags;
+}
+
 export function analyzeNuclideParameterCounts(ast: DocumentAst): DiagnosticMessage[] {
   const diags: DiagnosticMessage[] = [];
   for (const { stmt, matNumber } of collectNuclideCompositionLines(ast)) {
@@ -229,6 +282,7 @@ export function analyzeNuclideParameterCounts(ast: DocumentAst): DiagnosticMessa
     diags.push(...validateNuclideLineOptionalParams(stmt.text, stmt.range, matNumber));
   }
   diags.push(...analyzeDuplicateNuclides(ast));
+  diags.push(...analyzeNuclideConcentrations(ast));
   return diags;
 }
 

@@ -3,6 +3,7 @@ import assert from "node:assert";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import iconv from "iconv-lite";
 import { expandIncludes, expandRepeats } from "./preprocessor";
 
 describe("preprocessor", () => {
@@ -54,5 +55,15 @@ describe("preprocessor", () => {
     const result = expandIncludes("PIN 1 0\nFINISH", "/tmp");
     assert.strictEqual(result.text, "PIN 1 0\nFINISH");
     assert.strictEqual(result.includes.length, 0);
+  });
+
+  it("expandIncludes reads cp1251 include with Cyrillic comments", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-inc-"));
+    const incPath = path.join(dir, "frag.mcu");
+    fs.writeFileSync(incPath, iconv.encode("MATR 1\n** материал\nU235 1.E-3", "win1251"));
+    const result = expandIncludes("#include <frag.mcu>", dir);
+    assert.ok(result.text.includes("материал"));
+    assert.strictEqual(result.errors.length, 0);
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 });

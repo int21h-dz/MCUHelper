@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { evaluateExpression, findUndefinedVariables } from "./expression";
+import { evaluateExpression, findUndefinedVariables, mergeTrailingMultiplyOperands } from "./expression";
 
 describe("expression edge cases", () => {
   it("evaluates nested SQRT and LN", () => {
@@ -29,5 +29,27 @@ describe("expression edge cases", () => {
 
   it("evaluates scientific notation literal", () => {
     assert.strictEqual(evaluateExpression("1.5E2", new Map()), 150);
+  });
+
+  it("merges split multiply operands in body params", () => {
+    assert.deepStrictEqual(mergeTrailingMultiplyOperands(["LG2", "LG2", "DF-1*", "DELT"]), [
+      "LG2",
+      "LG2",
+      "DF-1*DELT",
+    ]);
+    const vars = new Map([
+      ["DF", 5],
+      ["DELT", 2],
+    ]);
+    assert.strictEqual(evaluateExpression("DF-1*DELT", vars), 3);
+  });
+
+  it("treats PI as ordinary user variable", () => {
+    assert.strictEqual(evaluateExpression("PI/4", new Map()), null);
+    assert.deepStrictEqual(findUndefinedVariables("COS(PI/4)", new Map()), ["PI"]);
+
+    const vars = new Map([["PI", 3.1415926]]);
+    const v = evaluateExpression("SIN(SQRT(17.5*COS(PI/4)))", vars);
+    assert.ok(v !== null && Number.isFinite(v));
   });
 });

@@ -55,6 +55,22 @@ FINISH`,
     }
   });
 
+  it("buildMaterialMassRows resolves EQU nuclide concentration", () => {
+    const equAst = parseDocument(
+      `PIN 1 0
+EQU CZR = 0.04273
+MATR 1
+ZR CZR
+VOL 10
+FINISH`,
+      { uri: "vol-equ" }
+    );
+    const rows = buildMaterialMassRows(equAst);
+    assert.strictEqual(rows.length, 1);
+    assert.ok(rows[0]!.massDensityGcm3 != null && rows[0]!.massDensityGcm3! > 6.3 && rows[0]!.massDensityGcm3! < 6.7);
+    assert.ok(rows[0]!.massG != null && rows[0]!.massG! > 63 && rows[0]!.massG! < 67);
+  });
+
   it("formatMassG and totalMaterialMassG", () => {
     assert.ok(formatMassG(500).includes("г"));
     assert.ok(formatMassG(5000).includes("кг"));

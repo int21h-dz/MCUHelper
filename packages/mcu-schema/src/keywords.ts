@@ -29,6 +29,8 @@ export const MCU_LABELS_BY_FRAGMENT: Record<FragmentId | "shared", readonly stri
     "ENDXCL",
     "LISTEL",
     "PARM",
+    "LFIXSO",
+    "LBLACK",
     "TRANSF",
   ],
   physical: [
@@ -79,6 +81,8 @@ export const MCU_LABELS_BY_FRAGMENT: Record<FragmentId | "shared", readonly stri
     "LCELL",
     "LISTEL",
     "PARM",
+    "LFIXSO",
+    "LBLACK",
     "V01",
   ],
   source: [

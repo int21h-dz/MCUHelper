@@ -52,7 +52,12 @@ export function buildMaterialMassRows(ast: DocumentAst): MaterialMassRow[] {
   for (let n = 1; n <= limit; n++) {
     const mat = ast.materials.find((m) => m.number === n);
     const volumeCm3 = materialVolumeCm3(volumes, n);
-    const massDensityGcm3 = mat ? computeMaterialMassDensityGcm3(mat) : null;
+    const vars = new Map<string, number>();
+    for (const c of ast.constants) {
+      const v = evaluateExpression(c.expression, vars);
+      if (v !== null) vars.set(c.name, v);
+    }
+    const massDensityGcm3 = mat ? computeMaterialMassDensityGcm3(mat, vars) : null;
     const massG =
       volumeCm3 != null && massDensityGcm3 != null && massDensityGcm3 > 0
         ? volumeCm3 * massDensityGcm3

@@ -37,6 +37,8 @@
       '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M8 3v10" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="2" fill="currentColor"/></svg>',
     object:
       '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="5" width="10" height="8" rx="1" stroke="currentColor" fill="none" stroke-width="1.3"/><path d="M6 5V3.5A2 2 0 0110 3.5V5" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>',
+    fragment:
+      '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5h10v3H3zM3 7h10v2H3zM3 11.5h10V14H3z" fill="currentColor" opacity=".85"/></svg>',
     folder:
       '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4.5A1 1 0 013 3.5h3l1.5 1.5H13A1 1 0 0114 6v6.5a1 1 0 01-1 1H3a1 1 0 01-1-1V4.5z" fill="currentColor" opacity=".85"/></svg>',
     nuclide:
@@ -45,10 +47,16 @@
       '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1.5" stroke="currentColor" fill="none" stroke-width="1.3"/><path d="M4 7h8M4 10h5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
     empty:
       '<svg class="mcu-icon mcu-icon-empty" viewBox="0 0 48 48" aria-hidden="true"><rect x="10" y="6" width="28" height="36" rx="3" stroke="currentColor" fill="none" stroke-width="2" opacity=".35"/><path d="M16 16h16M16 24h12M16 32h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity=".25"/></svg>',
+    error:
+      '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="#ef4444" fill="none" stroke-width="1.4"/><path d="M8 4.5v4M8 11h.01" stroke="#ef4444" stroke-width="1.6" stroke-linecap="round"/></svg>',
+    warning:
+      '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5l6.5 11H1.5L8 2.5z" stroke="#fbbf24" fill="none" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 6.5v3M8 11.5h.01" stroke="#fbbf24" stroke-width="1.5" stroke-linecap="round"/></svg>',
   };
 
   const PANELS = {
     "mcuhelper.catalog": { title: "Каталог модулей", icon: "catalog", accent: "#e8913a", hint: "Перетащите карточку или модуль в редактор" },
+    "mcuhelper.lexerErrors": { title: "Диагностика", icon: "error", accent: "#ef4444", hint: "Напрямую из LSP (исходный файл) — клик для перехода", searchPh: "Фильтр диагностик…" },
+    "mcuhelper.fragments": { title: "Фрагменты", icon: "fragment", accent: "#94a3b8", hint: "Клик — переход к началу фрагмента", searchPh: "Фильтр фрагментов…" },
     "mcuhelper.materials": { title: "Материалы", icon: "material", accent: "#e8913a", hint: "Клик — переход к определению в файле", searchPh: "Фильтр материалов…" },
     "mcuhelper.zones": { title: "Зоны", icon: "zone", accent: "#4a9eff", hint: "Клик — переход к зоне", searchPh: "Фильтр зон…" },
     "mcuhelper.bodies": { title: "Тела", icon: "body", accent: "#4a9eff", hint: "Клик — переход к телу", searchPh: "Фильтр тел…" },
@@ -84,7 +92,15 @@
     if (id.startsWith("net-")) return "net";
     if (id.startsWith("latt-")) return "lattice";
     if (id.startsWith("obj-")) return "object";
+    if (id.startsWith("frag-")) return "fragment";
     if (id.startsWith("scope-")) return "folder";
+    if (id.startsWith("diag-errors") || id.startsWith("diag-warn") || id.startsWith("diag-other")) return "folder";
+    if (id.startsWith("diag-")) {
+      if ((node.badges || []).includes("line-length")) return "warning";
+      if ((node.badges || []).includes("warning")) return "warning";
+      return "error";
+    }
+    if (id.startsWith("lex-errors") || id.startsWith("lex-warn") || id.startsWith("lex-other")) return "folder";
     if (node.children && node.children.length) return "folder";
     return "card";
   }

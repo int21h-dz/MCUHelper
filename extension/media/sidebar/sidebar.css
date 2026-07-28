@@ -465,6 +465,14 @@ body {
 .mcu-nav-card {
   cursor: pointer;
   --mod-accent: var(--panel-accent, var(--mcu-accent));
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.mcu-nav-card .mcu-card-title,
+.mcu-nav-card .mcu-card-desc {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .mcu-nav-card:hover {

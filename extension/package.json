@@ -1,12 +1,12 @@
 {
   "name": "mcuhelper-vscode",
   "displayName": "MCU-NR Helper",
-  "description": "Language Server для исходных данных MCU-NR: диагностика, автодополнение, навигация, визуализация геометрии",
+  "description": "Подсветка, диагностика, hover и навигация для исходных данных MCU-NR",
   "version": "0.4.0",
   "publisher": "mcuhelper",
   "engines": { "vscode": "^1.85.0" },
   "categories": ["Programming Languages"],
-  "activationEvents": ["onStartupFinished", "onLanguage:mcunr", "onCommand:mcuhelper.showGeometry", "onCommand:mcuhelper.detectLanguage"],
+  "activationEvents": ["onStartupFinished"],
   "main": "./dist/extension.js",
   "contributes": {
     "languages": [
@@ -62,12 +62,12 @@
         "mcuhelper.enableSolverValidation": {
           "type": "boolean",
           "default": false,
-          "description": "Автоматически запускать INPUT (не рекомендуется — долго)"
+          "description": "Автоматически запускать INPUT после правок"
         },
         "mcuhelper.enableIaeaNuclideHover": {
           "type": "boolean",
           "default": true,
-          "description": "Дополнять hover по нуклидам справочными данными IAEA NDS (ENDF, распад)"
+          "description": "Дополнять hover по нуклидам данными IAEA NDS"
         },
         "mcuhelper.trace.server": {
           "type": "string",
@@ -77,13 +77,18 @@
         "mcuhelper.autoDetectLanguage": {
           "type": "boolean",
           "default": true,
-          "description": "Автоматически определять MCU-NR по содержимому файла (PIN, MATR, HEAD, …) и переключать язык редактора"
+          "description": "Определять MCU-NR по содержимому и переключать язык редактора"
         },
         "mcuhelper.autoDetectFromLanguages": {
           "type": "array",
           "items": { "type": "string" },
           "default": ["plaintext", "txt", "log", "text", "ansi", "ini"],
-          "description": "С каких language id переключать на mcunr при совпадении содержимого (не трогает уже размеченные языки)"
+          "description": "С каких language id переключать на mcunr при совпадении содержимого"
+        },
+        "mcuhelper.autoDetectEncoding": {
+          "type": "boolean",
+          "default": true,
+          "description": "Определять кодировку legacy-файлов и при необходимости переоткрывать документ"
         }
       }
     },
@@ -92,6 +97,16 @@
         "command": "mcuhelper.showCatalog",
         "title": "MCU-NR: Каталог модулей",
         "icon": "$(library)"
+      },
+      {
+        "command": "mcuhelper.showLexerErrors",
+        "title": "MCU-NR: Диагностика",
+        "icon": "$(warning)"
+      },
+      {
+        "command": "mcuhelper.showFragments",
+        "title": "MCU-NR: Показать фрагменты",
+        "icon": "$(symbol-namespace)"
       },
       {
         "command": "mcuhelper.showMaterials",
@@ -149,9 +164,34 @@
         "icon": "$(output)"
       },
       {
+        "command": "mcuhelper.nextLexerError",
+        "title": "MCU-NR: Следующая ошибка лексера",
+        "icon": "$(arrow-down)"
+      },
+      {
+        "command": "mcuhelper.prevLexerError",
+        "title": "MCU-NR: Предыдущая ошибка лексера",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "mcuhelper.nextDiagnostic",
+        "title": "MCU-NR: Следующая диагностика",
+        "icon": "$(arrow-down)"
+      },
+      {
+        "command": "mcuhelper.prevDiagnostic",
+        "title": "MCU-NR: Предыдущая диагностика",
+        "icon": "$(arrow-up)"
+      },
+      {
         "command": "mcuhelper.detectLanguage",
         "title": "MCU-NR: Определить язык по содержимому",
         "icon": "$(search)"
+      },
+      {
+        "command": "mcuhelper.detectEncoding",
+        "title": "MCU-NR: Определить кодировку",
+        "icon": "$(file-binary)"
       },
       {
         "command": "mcuhelper.expandNaturalIsotope",
@@ -166,6 +206,8 @@
     "views": {
       "mcuhelper": [
         { "type": "webview", "id": "mcuhelper.catalog", "name": "Каталог", "visibility": "visible" },
+        { "type": "webview", "id": "mcuhelper.lexerErrors", "name": "Диагностика", "visibility": "visible" },
+        { "type": "webview", "id": "mcuhelper.fragments", "name": "Фрагменты" },
         { "type": "webview", "id": "mcuhelper.materials", "name": "Материалы" },
         { "type": "webview", "id": "mcuhelper.constants", "name": "Константы" },
         { "type": "webview", "id": "mcuhelper.bodies", "name": "Тела" },
@@ -183,11 +225,56 @@
     "menus": {
       "view/title": [
         { "command": "mcuhelper.refreshIndex", "when": "view =~ /^mcuhelper\\./", "group": "navigation" }
+      ],
+      "editor/context": [
+        {
+          "command": "mcuhelper.nextDiagnostic",
+          "when": "editorLangId == mcunr",
+          "group": "navigation@1"
+        },
+        {
+          "command": "mcuhelper.prevDiagnostic",
+          "when": "editorLangId == mcunr",
+          "group": "navigation@1"
+        },
+        {
+          "command": "mcuhelper.nextLexerError",
+          "when": "editorLangId == mcunr",
+          "group": "navigation@2"
+        },
+        {
+          "command": "mcuhelper.prevLexerError",
+          "when": "editorLangId == mcunr",
+          "group": "navigation@2"
+        }
       ]
-    }
+    },
+    "keybindings": [
+      {
+        "command": "mcuhelper.nextDiagnostic",
+        "key": "alt+f8",
+        "when": "editorLangId == mcunr"
+      },
+      {
+        "command": "mcuhelper.prevDiagnostic",
+        "key": "alt+shift+f8",
+        "when": "editorLangId == mcunr"
+      },
+      {
+        "command": "mcuhelper.nextLexerError",
+        "key": "alt+f7",
+        "when": "editorLangId == mcunr"
+      },
+      {
+        "command": "mcuhelper.prevLexerError",
+        "key": "alt+shift+f7",
+        "when": "editorLangId == mcunr"
+      }
+    ]
   },
   "configurationDefaults": {
     "[mcunr]": {
+      "files.autoGuessEncoding": true,
       "editor.semanticHighlighting.enabled": false,
       "editor.tokenColorCustomizations": {
         "textMateRules": [
@@ -229,7 +316,7 @@
     ]
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json",
     "watch": "tsc -w -p tsconfig.json",
     "package": "vsce package --allow-missing-repository",
     "test": "npm run build && node --test -r ./src/test-setup.js dist/**/*.test.js"

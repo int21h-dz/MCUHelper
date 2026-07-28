@@ -4,9 +4,12 @@ import { LanguageClient } from "vscode-languageclient/node";
 import { isMcunrDocument } from "./contentDetect";
 import { buildNavTree, type IndexPayload, type NavViewId } from "./navData";
 import { goToSymbol, insertTemplate } from "./templateInsert";
+import { applyDiagnosticsToSidebar } from "./diagnosticNavigation";
 
 export type SidebarViewId =
   | "mcuhelper.catalog"
+  | "mcuhelper.lexerErrors"
+  | "mcuhelper.fragments"
   | "mcuhelper.materials"
   | "mcuhelper.constants"
   | "mcuhelper.bodies"
@@ -16,6 +19,7 @@ export type SidebarViewId =
   | "mcuhelper.objects";
 
 const NAV_VIEW_MAP: Record<string, NavViewId> = {
+  "mcuhelper.fragments": "fragments",
   "mcuhelper.materials": "materials",
   "mcuhelper.constants": "constants",
   "mcuhelper.bodies": "bodies",
@@ -69,6 +73,20 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     return this.viewId === "mcuhelper.catalog";
   }
 
+  get isLexerErrors(): boolean {
+    return this.viewId === "mcuhelper.lexerErrors";
+  }
+
+  applyLexerErrors(): void {
+    if (!this.view || !this.isLexerErrors) return;
+    void applyDiagnosticsToSidebar(
+      this.view.webview,
+      this.viewId,
+      vscode.window.activeTextEditor?.document,
+      this.client
+    );
+  }
+
   resolveWebviewView(
     webviewView: vscode.WebviewView,
     _ctx: vscode.WebviewViewResolveContext,
@@ -93,6 +111,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       }
       if (msg.type === "goTo" && msg.uri && msg.range) {
         await goToSymbol(msg.uri, msg.range);
+        return;
+      }
+      if (msg.type === "copyText" && typeof msg.text === "string") {
+        await vscode.env.clipboard.writeText(msg.text);
       }
     });
   }
@@ -119,6 +141,11 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
+    if (this.isLexerErrors) {
+      this.applyLexerErrors();
+      return;
+    }
+
     const navId = NAV_VIEW_MAP[this.viewId];
     if (!navId) return;
 
@@ -127,7 +154,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       webview.postMessage({
         type: "empty",
         panel: this.viewId,
-        message: "Откройте файл MCU-NR (.mcu) для навигации по варианту",
+        message: "Откройте файл MCU-NR для навигации",
       });
       return;
     }
@@ -137,7 +164,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       webview.postMessage({
         type: "empty",
         panel: this.viewId,
-        message: emptyMessage ?? "Индекс пуст — дождитесь анализа LSP",
+        message: emptyMessage ?? "Индекс пока недоступен — дождитесь анализа LSP",
       });
       return;
     }
@@ -150,6 +177,11 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
 
     if (this.isCatalog) {
       this.applyIndex(null);
+      return;
+    }
+
+    if (this.isLexerErrors) {
+      this.applyLexerErrors();
       return;
     }
 
@@ -167,9 +199,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         line: pos.line,
         character: pos.character,
       });
-      this.applyIndex(index, "Не удалось загрузить индекс");
+      this.applyIndex(index, "Не удалось получить индекс");
     } catch {
-      this.applyIndex(null, "Не удалось загрузить индекс");
+      this.applyIndex(null, "Не удалось получить индекс");
     }
   }
 }
@@ -180,6 +212,8 @@ export function createSidebarProviders(
 ): Map<SidebarViewId, SidebarViewProvider> {
   const ids: SidebarViewId[] = [
     "mcuhelper.catalog",
+    "mcuhelper.lexerErrors",
+    "mcuhelper.fragments",
     "mcuhelper.materials",
     "mcuhelper.constants",
     "mcuhelper.bodies",
@@ -209,6 +243,8 @@ export function refreshAllSidebars(providers: Map<SidebarViewId, SidebarViewProv
 }
 
 const NAV_PANELS: SidebarViewId[] = [
+  "mcuhelper.lexerErrors",
+  "mcuhelper.fragments",
   "mcuhelper.materials",
   "mcuhelper.constants",
   "mcuhelper.bodies",
@@ -263,8 +299,12 @@ async function refreshSidebarsOnce(
   const editor = vscode.window.activeTextEditor;
   if (!editor || !isMcunrDocument(editor.document)) {
     for (const id of NAV_PANELS) {
-      if (scope === "constants" && id !== "mcuhelper.constants") continue;
-      providers.get(id)?.applyIndex(null);
+      if (scope === "constants" && id !== "mcuhelper.constants" && id !== "mcuhelper.lexerErrors") continue;
+      if (id === "mcuhelper.lexerErrors") {
+        providers.get(id)?.applyLexerErrors();
+      } else {
+        providers.get(id)?.applyIndex(null);
+      }
     }
     return;
   }
@@ -280,11 +320,15 @@ async function refreshSidebarsOnce(
   try {
     index = await navProvider.fetchIndex(uri, pos.line, pos.character);
   } catch {
-    errorMsg = "Не удалось загрузить индекс";
+    errorMsg = "Не удалось получить индекс";
   }
 
   for (const id of NAV_PANELS) {
-    if (scope === "constants" && id !== "mcuhelper.constants") continue;
+    if (scope === "constants" && id !== "mcuhelper.constants" && id !== "mcuhelper.lexerErrors") continue;
+    if (id === "mcuhelper.lexerErrors") {
+      providers.get(id)?.applyLexerErrors();
+      continue;
+    }
     providers.get(id)?.applyIndex(index, errorMsg);
   }
 }

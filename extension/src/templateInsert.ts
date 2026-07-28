@@ -6,7 +6,7 @@ export type InsertFormat = "snippet" | "plain";
 export async function insertTemplate(text: string, format: InsertFormat = "plain"): Promise<boolean> {
   const editor = vscode.window.activeTextEditor;
   if (!editor || !isMcunrDocument(editor.document)) {
-    vscode.window.showWarningMessage("Откройте файл MCU-NR (.mcu) для вставки шаблона");
+    vscode.window.showWarningMessage("Откройте файл MCU-NR для вставки шаблона");
     return false;
   }
   const pos = editor.selection.active;

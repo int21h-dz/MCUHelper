@@ -7,8 +7,9 @@ import {
   type BodyTypeSchema,
 } from "@mcuhelper/mcu-schema";
 import {
+  analyzeMaterialMassDensity,
+  buildScopedVars,
   computeBodyVolumeCm3FromAst,
-  computeMaterialMassDensityGcm3,
   evaluateExpression,
   formatBodyVolumeCm3,
   buildZoneRegistrationMap,
@@ -45,6 +46,41 @@ export function wordAtPosition(line: string, character: number): string | null {
     if (character >= start && character < end) return match[0];
   }
   return null;
+}
+
+function numericTokenAtPosition(line: string, character: number): string | null {
+  const re = /-?\d+/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(line)) !== null) {
+    const start = match.index;
+    const end = start + match[0].length;
+    if (character >= start && character < end) return match[0];
+  }
+  return null;
+}
+
+function findBodyByNumericZoneRef(
+  index: DocumentIndex,
+  line: string,
+  pos: Position
+): DocumentIndex["ast"]["bodies"][number] | null {
+  const zone = index.ast.zones.find((z) => z.range.start.line <= pos.line && z.range.end.line >= pos.line);
+  if (!zone) return null;
+
+  const token = numericTokenAtPosition(line, pos.character);
+  if (!token) return null;
+  const num = Math.abs(parseInt(token, 10));
+  if (!Number.isFinite(num) || num <= 0) return null;
+
+  const zoneExprPos = line.indexOf(zone.expression);
+  if (zoneExprPos < 0) return null;
+  const zoneExprEnd = zoneExprPos + zone.expression.length;
+  if (pos.character < zoneExprPos || pos.character >= zoneExprEnd) return null;
+
+  const scope = zone.scope ?? "global";
+  return (
+    index.ast.bodies.find((b) => b.name.toUpperCase() === `N${num}` && (b.scope ?? "global") === scope) ?? null
+  );
 }
 
 /** Курсор на метке карты в начале строки (PIN, MATR, RCZ как тип тела, …). */
@@ -129,11 +165,11 @@ function hoverContextual(line: string, word: string): string | null {
   }
 
   if (MODS_VALUES.includes(word) && /MODS\s*=/i.test(line)) {
-    return `**MODS=${word}** — модель рассеяния в области термализации.`;
+    return `**MODS=${word}**\n\nМодель рассеяния в тепловой области.`;
   }
 
   if (word === "MODS") {
-    return `**MODS** — модель рассеяния в тепловой области:\n\n${MODS_VALUES.join(", ")}`;
+    return `**MODS**\n\nМодель рассеяния в тепловой области.\n\n${MODS_VALUES.join(", ")}`;
   }
 
   const hashHints: Record<string, string> = {
@@ -146,7 +182,7 @@ function hoverContextual(line: string, word: string): string | null {
     G: "g — группа материалов",
   };
   if (line.includes("#") && hashHints[word]) {
-    return `**#${word.toLowerCase()}=** — ${hashHints[word]}`;
+    return `**#${word.toLowerCase()}=**\n\n${hashHints[word]}`;
   }
 
   return null;
@@ -180,17 +216,29 @@ function formatNuclideHoverLocal(
   index: DocumentIndex
 ): string {
   const mat = index.ast.materials.find((m) => m.number === nuclHit.materialNumber);
-  const rho = mat ? computeMaterialMassDensityGcm3(mat) : null;
+  const vars = mat
+    ? buildScopedVars(index.ast.constants, mat.range.offset, "global")
+    : new Map<string, number>();
+  const density = mat ? analyzeMaterialMassDensity(mat, vars) : null;
   const aw = mcuNuclideAtomicWeight(word);
   const lines = [
     `Нуклид **${word}** в материале ${nuclHit.materialNumber}`,
-    `Ядерная концентрация: **${nuclHit.concentration}** яд/см³`,
+    `Концентрация: **${nuclHit.concentration}** яд/см³`,
   ];
   if (aw != null) {
-    lines.push(`Атомная масса ≈ **${aw}** а.е.м.`);
+    lines.push(`Атомная масса: **${aw}** а.е.м.`);
   }
-  if (rho != null) {
-    lines.push(`Массовая плотность материала ≈ **${formatMassDensityGcm3(rho)}**`);
+  if (density?.rho != null) {
+    let rhoLine = `Плотность материала: **${formatMassDensityGcm3(density.rho)}**`;
+    if (density.skipped.length) {
+      const badConc = density.skipped.filter((s) => s.reason === "bad-conc").map((s) => s.name);
+      const badMass = density.skipped.filter((s) => s.reason === "unknown-mass").map((s) => s.name);
+      const notes: string[] = [`по ${density.usedCount} из ${mat!.nuclides.length} нуклидов`];
+      if (badConc.length) notes.push(`без концентраций: ${badConc.join(", ")}`);
+      if (badMass.length) notes.push(`без атомных масс: ${badMass.join(", ")}`);
+      rhoLine += `\n\n_${notes.join("; ")}_`;
+    }
+    lines.push(rhoLine);
   }
   return lines.join("\n\n");
 }
@@ -207,6 +255,13 @@ export function getHoverContent(
 ): string | null {
   const line = fullLine(doc, pos);
   const rawWord = wordAtPosition(line, pos.character);
+  const fragmentAtLine =
+    index?.ast.statements.find((s) => s.range.start.line <= pos.line && s.range.end.line >= pos.line)?.fragment;
+
+  if (!rawWord && index) {
+    const numericHover = getHover(doc, pos, index);
+    if (numericHover) return numericHover;
+  }
 
   if (index && rawWord) {
     const nuclHit = findNuclideAtPosition(index, pos, rawWord);
@@ -235,15 +290,18 @@ export function getHoverContent(
     }
   }
 
-  let paramHover = getCompositionLineParameterHover(line, pos.character);
+  let paramHover =
+    fragmentAtLine === "physical" || fragmentAtLine == null
+      ? getCompositionLineParameterHover(line, pos.character)
+      : null;
   if (paramHover && index && /GROUP/i.test(paramHover)) {
     const known = [
       ...new Set(index.ast.materials.map((m) => m.group).filter((g): g is string => Boolean(g))),
     ].sort();
     if (known.length) {
-      paramHover += `\n\n**Уже в файле:** ${known.map((g) => `\`${g}\``).join(", ")}`;
+      paramHover += `\n\n**Уже используется:** ${known.map((g) => `\`${g}\``).join(", ")}`;
     } else {
-      paramHover += "\n\nПроизвольный идентификатор, напр. `fuel`, `MOD`, `clad`.";
+      paramHover += "\n\nПроизвольный идентификатор, например `fuel`, `MOD`, `clad`.";
     }
   }
   if (paramHover) return paramHover;
@@ -268,7 +326,20 @@ export function getHover(
 ): string | null {
   const line = fullLine(doc, pos);
   const rawWord = wordAtPosition(line, pos.character);
-  if (!rawWord) return null;
+  if (!rawWord) {
+    if (!index) return null;
+    const numericBodyNode = findBodyByNumericZoneRef(index, line, pos);
+    if (!numericBodyNode) return null;
+    const vol = computeBodyVolumeCm3FromAst(numericBodyNode, index.ast);
+    const lines = [
+      `Тело **${numericBodyNode.name}** типа ${numericBodyNode.bodyType}`,
+      `Параметры: ${numericBodyNode.params.join(", ")}`,
+    ];
+    if (vol != null) {
+      lines.push(`Объём ≈ **${formatBodyVolumeCm3(vol)}**`);
+    }
+    return lines.join("\n\n");
+  }
   const word = rawWord.toUpperCase();
   const onKeyword = isOnStatementKeyword(line, pos.character, rawWord);
 
@@ -283,7 +354,7 @@ export function getHover(
         if (bodyOnLine) {
           const vol = computeBodyVolumeCm3FromAst(bodyOnLine, index.ast);
           if (vol != null) {
-            return `${kw}\n\nОбъём **${bodyOnLine.name}** ≈ **${formatBodyVolumeCm3(vol)}**`;
+            return `${kw}\n\nОбъём тела **${bodyOnLine.name}**: **${formatBodyVolumeCm3(vol)}**`;
           }
         }
       }

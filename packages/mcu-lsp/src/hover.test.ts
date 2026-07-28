@@ -134,6 +134,65 @@ describe("getHover", () => {
     const hover = getHover(doc, { line: 1, character: 1 }, index);
     assert.ok(hover?.includes("NTOT") || hover?.includes("истор"));
   });
+
+  it("hover on zone label in geometry line prefers zone, not nuclide params", () => {
+    const text = [
+      "HEAD 3 0",
+      "CONT T T",
+      "RCZ N3 0 0 0 10 1",
+      "RCZ N4 0 0 0 10 2",
+      "RCZ G3 0 0 0 10 3",
+      "END",
+      "R003 3 -4 -G3 /1:1",
+      "END",
+      "FINISH",
+    ].join("\n");
+    const { doc, index } = openText(text);
+    const hover = getHoverContent(doc, { line: 6, character: 1 }, index, { enableIaeaNuclide: false });
+    assert.ok(hover?.includes("Зона **R003**"));
+    assert.ok(!hover?.includes("Параметр:"));
+  });
+
+  it("hover on body name inside zone expression prefers body, not nuclide params", () => {
+    const text = [
+      "HEAD 3 0",
+      "CONT T T",
+      "RCZ N3 0 0 0 10 1",
+      "RCZ N4 0 0 0 10 2",
+      "RCZ G3 0 0 0 10 3",
+      "END",
+      "R003 3 -4 -G3 /1:1",
+      "END",
+      "FINISH",
+    ].join("\n");
+    const { doc, index } = openText(text);
+    const line = text.split("\n")[6]!;
+    const hover = getHoverContent(
+      doc,
+      { line: 6, character: line.indexOf("G3") + 1 },
+      index,
+      { enableIaeaNuclide: false }
+    );
+    assert.ok(hover?.includes("Тело **G3**"));
+    assert.ok(hover?.includes("RCZ"));
+  });
+
+  it("hover on numeric body shorthand resolves to N-body", () => {
+    const text = [
+      "HEAD 3 0",
+      "CONT T T",
+      "RCZ N3 0 0 0 10 1",
+      "RCZ N4 0 0 0 10 2",
+      "END",
+      "R003 3 -4 /1:1",
+      "END",
+      "FINISH",
+    ].join("\n");
+    const { doc, index } = openText(text);
+    const hover = getHoverContent(doc, { line: 5, character: 5 }, index, { enableIaeaNuclide: false });
+    assert.ok(hover?.includes("Тело **N3**"));
+    assert.ok(hover?.includes("RCZ"));
+  });
 });
 
 describe("getHoverContent", () => {
@@ -151,6 +210,45 @@ describe("getHoverContent", () => {
     assert.ok(hover);
     assert.ok(hover!.includes(nucl.name.toUpperCase()));
     assert.ok(hover!.includes("концентрация") || hover!.includes("яд/см"));
+  });
+
+  it("shows approximate material density note when some nuclides are skipped", () => {
+    const text = [
+      "PIN 1 0",
+      "MATR 1",
+      "ZR 0.04273",
+      "U235 BADCONC",
+      "XYZZY 0.01",
+      "FINISH",
+    ].join("\n");
+    const { doc, index, uri } = openText(text);
+    const nucl = index.ast.materials[0]!.nuclides[0]!;
+    const hover = getHoverContent(
+      doc,
+      { line: nucl.range.start.line, character: 1 },
+      index,
+      { enableIaeaNuclide: false },
+      uri
+    );
+    assert.ok(hover?.includes("Плотность материала"));
+    assert.ok(hover?.includes("по 1 из 3 нуклидов"));
+    assert.ok(hover?.includes("без концентраций: U235"));
+    assert.ok(hover?.includes("без атомных масс: XYZZY"));
+  });
+
+  it("uses EQU concentration when computing nuclide hover density", () => {
+    const text = ["PIN 1 0", "EQU CZR = 0.04273", "MATR 1", "ZR CZR", "FINISH"].join("\n");
+    const { doc, index, uri } = openText(text);
+    const nucl = index.ast.materials[0]!.nuclides[0]!;
+    const hover = getHoverContent(
+      doc,
+      { line: nucl.range.start.line, character: 1 },
+      index,
+      { enableIaeaNuclide: false },
+      uri
+    );
+    assert.ok(hover?.includes("Плотность материала"));
+    assert.ok(hover?.includes("6."));
   });
 
   it("getHoverAsync delegates to getHoverContent", async () => {

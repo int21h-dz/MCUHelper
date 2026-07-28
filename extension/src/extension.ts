@@ -9,10 +9,12 @@ import {
 } from "vscode-languageclient/node";
 import { GeometryPanel } from "./geometryPanel";
 import { maybeSetMcunrLanguage, scoreMcunrContent, isMcunrDocument } from "./contentDetect";
+import { maybeFixDocumentEncoding, detectEncodingCommand } from "./encodingDetect";
 import { registerExpandNaturalIsotope, hoverMiddleware } from "./expandNaturalIsotope";
 import { createSidebarProviders, refreshSidebarsCoalesced, setSidebarReadyHandler, type SidebarViewId, type SidebarViewProvider } from "./sidebarView";
 import { registerTemplateInsert } from "./templateInsert";
 import { buildCatalogPayload } from "./catalogBridge";
+import { registerDiagnosticNavigation, fetchMcuDiagnostics } from "./diagnosticNavigation";
 
 const REFRESH_DEBOUNCE_MS = 500;
 const SELECTION_REFRESH_DEBOUNCE_MS = 300;
@@ -54,11 +56,12 @@ export function activate(context: vscode.ExtensionContext): void {
   const serverDir = path.dirname(serverModule);
 
   if (!fs.existsSync(serverModule)) {
-    const msg = `LSP server не найден: ${serverModule}. Выполните npm run build в корне проекта.`;
+    const msg = `Не найден LSP server: ${serverModule}. Выполните npm run build в корне проекта.`;
     output.appendLine(msg);
     vscode.window.showErrorMessage(msg);
     return;
   }
+  output.appendLine(`LSP server: ${serverModule}`);
 
   const serverOptions: ServerOptions = {
     run: { module: serverModule, transport: TransportKind.ipc, options: { cwd: serverDir } },
@@ -88,7 +91,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   });
   client.start().catch((err) => {
-    const msg = `Не удалось запустить MCU-NR LSP: ${err}`;
+    const msg = `Не удалось запустить LSP MCU-NR: ${err}`;
     output.appendLine(msg);
     vscode.window.showErrorMessage(msg);
   });
@@ -96,6 +99,7 @@ export function activate(context: vscode.ExtensionContext): void {
   geometryPanel = new GeometryPanel(context, client);
   registerExpandNaturalIsotope(context, client);
   registerTemplateInsert(context);
+  registerDiagnosticNavigation(context, () => client);
   sidebarProviders = createSidebarProviders(context, client);
   setSidebarReadyHandler(() => scheduleRefresh());
 
@@ -108,6 +112,8 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand("mcuhelper.refreshIndex", () => scheduleRefresh()),
     vscode.commands.registerCommand("mcuhelper.showCatalog", () => vscode.commands.executeCommand("mcuhelper.catalog.focus")),
+    vscode.commands.registerCommand("mcuhelper.showLexerErrors", () => vscode.commands.executeCommand("mcuhelper.lexerErrors.focus")),
+    vscode.commands.registerCommand("mcuhelper.showFragments", () => vscode.commands.executeCommand("mcuhelper.fragments.focus")),
     vscode.commands.registerCommand("mcuhelper.showMaterials", () => vscode.commands.executeCommand("mcuhelper.materials.focus")),
     vscode.commands.registerCommand("mcuhelper.showZones", () => vscode.commands.executeCommand("mcuhelper.zones.focus")),
     vscode.commands.registerCommand("mcuhelper.showObjects", () => vscode.commands.executeCommand("mcuhelper.objects.focus")),
@@ -119,6 +125,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("mcuhelper.validateInput", () => validateInput()),
     vscode.commands.registerCommand("mcuhelper.exportDiagnostics", () => exportDiagnostics(output)),
     vscode.commands.registerCommand("mcuhelper.detectLanguage", () => detectLanguage(output)),
+    vscode.commands.registerCommand("mcuhelper.detectEncoding", () => detectEncodingCommand(output)),
     vscode.window.onDidChangeActiveTextEditor(() => scheduleRefresh("all")),
     vscode.window.onDidChangeTextEditorSelection(() => {
       if (Date.now() - lastDocChangeAt < SELECTION_AFTER_EDIT_QUIET_MS) return;
@@ -131,6 +138,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.workspace.onDidOpenTextDocument(async (doc) => {
+      await maybeFixDocumentEncoding(doc, output);
       if (await maybeSetMcunrLanguage(doc, output)) scheduleRefresh();
       else if (isMcunrDocument(doc)) scheduleRefresh();
     }),
@@ -144,6 +152,14 @@ export function activate(context: vscode.ExtensionContext): void {
           selectionRefreshTimer = undefined;
         }
         scheduleRefresh();
+      }
+    }),
+    vscode.languages.onDidChangeDiagnostics((e) => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || !isMcunrDocument(editor.document)) return;
+      const activeUri = editor.document.uri.toString();
+      if (e.uris.some((u) => u.toString() === activeUri)) {
+        sidebarProviders.get("mcuhelper.lexerErrors")?.applyLexerErrors();
       }
     })
   );
@@ -170,6 +186,7 @@ function scheduleRefresh(scope: "all" | "constants" = "all"): void {
 
 async function scanAllDocuments(output: vscode.OutputChannel): Promise<void> {
   for (const doc of vscode.workspace.textDocuments) {
+    await maybeFixDocumentEncoding(doc, output);
     await maybeSetMcunrLanguage(doc, output);
   }
 }
@@ -177,14 +194,14 @@ async function scanAllDocuments(output: vscode.OutputChannel): Promise<void> {
 async function detectLanguage(output: vscode.OutputChannel): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
-    vscode.window.showWarningMessage("Нет открытого редактора");
+    vscode.window.showWarningMessage("Нет активного редактора");
     return;
   }
   const doc = editor.document;
   const result = scoreMcunrContent(doc.getText());
   if (!result.isMcunr) {
     vscode.window.showInformationMessage(
-      `Не похоже на MCU-NR (score=${result.score}, нужно ≥4). Найдено: ${result.hits.join(", ") || "—"}`
+      `Похоже не на MCU-NR: score=${result.score}, нужно ≥4. Совпадения: ${result.hits.join(", ") || "—"}`
     );
     return;
   }
@@ -192,21 +209,21 @@ async function detectLanguage(output: vscode.OutputChannel): Promise<void> {
     await vscode.languages.setTextDocumentLanguage(doc, "mcunr");
     output.appendLine(`Язык MCU-NR установлен вручную: ${doc.uri.fsPath} (${result.hits.join(", ")})`);
   }
-  vscode.window.showInformationMessage(`MCU-NR: score=${result.score} (${result.hits.join(", ")})`);
+  vscode.window.showInformationMessage(`MCU-NR распознан: score=${result.score} (${result.hits.join(", ")})`);
   scheduleRefresh();
 }
 
 async function validateInput(): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (!editor || !isMcunrDocument(editor.document)) {
-    vscode.window.showWarningMessage("Откройте файл варианта MCU-NR");
+    vscode.window.showWarningMessage("Откройте файл MCU-NR");
     return;
   }
   const cfg = vscode.workspace.getConfiguration("mcuhelper");
   const mcuNrPath = cfg.get<string>("mcuNrPath") ?? "";
   const variantName = cfg.get<string>("variantName") ?? pathBasename(editor.document);
   if (!mcuNrPath) {
-    vscode.window.showErrorMessage("Укажите mcuhelper.mcuNrPath в настройках");
+    vscode.window.showErrorMessage("Укажите путь mcuhelper.mcuNrPath в настройках");
     return;
   }
   await vscode.window.withProgress(
@@ -220,7 +237,7 @@ async function validateInput(): Promise<void> {
       if (result.ok) {
         vscode.window.showInformationMessage(`INPUT завершён. Диагностик из LST: ${result.diagnosticCount}`);
       } else {
-        vscode.window.showWarningMessage(`INPUT завершён с ошибками. Диагностик: ${result.diagnosticCount}`);
+        vscode.window.showWarningMessage(`INPUT завершён с ошибками. Найдено диагностик: ${result.diagnosticCount}`);
       }
     }
   );
@@ -234,12 +251,23 @@ function pathBasename(doc: vscode.TextDocument): string {
 async function exportDiagnostics(output: vscode.OutputChannel): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (!editor || !isMcunrDocument(editor.document)) {
-    vscode.window.showWarningMessage("Откройте файл варианта MCU-NR");
+    vscode.window.showWarningMessage("Откройте файл MCU-NR");
+    return;
+  }
+
+  if (!client) {
+    vscode.window.showWarningMessage("LSP ещё не готов");
     return;
   }
 
   const uri = editor.document.uri;
-  const mcu = vscode.languages.getDiagnostics(uri).filter((d) => d.source === "mcuhelper");
+  let mcu: vscode.Diagnostic[];
+  try {
+    mcu = await fetchMcuDiagnostics(client, uri, "all", editor.document.lineCount);
+  } catch {
+    vscode.window.showWarningMessage("Не удалось получить диагностику из LSP");
+    return;
+  }
 
   const lines: string[] = [
     `# MCU-NR diagnostics: ${uri.fsPath}`,
@@ -248,7 +276,7 @@ async function exportDiagnostics(output: vscode.OutputChannel): Promise<void> {
   ];
 
   if (mcu.length === 0) {
-    lines.push("(нет диагностик — файл чист или LSP ещё не отработал)");
+    lines.push("(диагностик нет — файл чист или LSP ещё не завершил анализ)");
   } else {
     const sev = (s: vscode.DiagnosticSeverity) =>
       s === vscode.DiagnosticSeverity.Error ? "error" : s === vscode.DiagnosticSeverity.Warning ? "warning" : "info";
@@ -267,7 +295,7 @@ async function exportDiagnostics(output: vscode.OutputChannel): Promise<void> {
   output.appendLine(text);
   await vscode.env.clipboard.writeText(text);
   vscode.window.showInformationMessage(
-    `Диагностики скопированы в буфер (${mcu.length}). См. Output → MCU-NR Helper`
+    `Диагностика скопирована в буфер (${mcu.length}). См. Output → MCU-NR Helper`
   );
 }
 
@@ -278,6 +306,11 @@ export function deactivate(): Promise<void> | undefined {
 
 async function warmupExtensionAfterLspReady(): Promise<void> {
   if (!client) return;
+  try {
+    await client.sendRequest<number>("mcuhelper/revalidateAllOpen");
+  } catch {
+    // older server bundle without revalidate — ignore
+  }
   const editor = vscode.window.activeTextEditor;
   if (!editor || !isMcunrDocument(editor.document)) return;
   const uri = editor.document.uri.toString();
@@ -287,4 +320,5 @@ async function warmupExtensionAfterLspReady(): Promise<void> {
   } catch {
     // ignore warmup errors
   }
+  sidebarProviders.get("mcuhelper.lexerErrors")?.applyLexerErrors();
 }

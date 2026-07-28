@@ -25,16 +25,21 @@ export function validateMatrLineParams(
   const diags: DiagnosticMessage[] = [];
   const tail = matrTail(text);
 
-  const emptyRe = /(?:^|\s)(T|GROUP|NAME|DENSAA|DENSWA|DENSAW|DENSWW|VOL|BUR)\s*=\s*(?=\s|$)/gi;
-  let em: RegExpExecArray | null;
-  while ((em = emptyRe.exec(tail))) {
-    const token = `${em[1]}=`;
-    diags.push({
-      severity: "error",
-      message: `MATR ${matNumber}: параметр ${token} без значения`,
-      code: "matr-param-empty",
-      range: tokenSubrange(text, range, token),
-    });
+  const paramRe = /(?:^|\s)(T|GROUP|NAME|DENSAA|DENSWA|DENSAW|DENSWW|VOL|BUR)\s*=/gi;
+  let pm: RegExpExecArray | null;
+  while ((pm = paramRe.exec(tail))) {
+    const param = pm[1]!;
+    const token = `${param}=`;
+    const afterEq = tail.slice(pm.index + pm[0].length);
+    const hasValue = /^\s*\S/.test(afterEq);
+    if (!hasValue) {
+      diags.push({
+        severity: "error",
+        message: `MATR ${matNumber}: параметр ${token} без значения`,
+        code: "matr-param-empty",
+        range: tokenSubrange(text, range, token),
+      });
+    }
   }
 
   const nameM = tail.match(/NAME\s*=\s*(\S+)/i);

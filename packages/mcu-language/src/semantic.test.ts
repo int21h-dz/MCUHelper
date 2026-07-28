@@ -129,6 +129,186 @@ FINISH`;
     assert.ok(d.some((x) => x.code === "net-cell" && x.message.includes("GHOST")));
   });
 
+  it("reports PI as undefined unless user defines it", () => {
+    const bad = diags(`HEAD 3 0
+CONT T T
+EQU Rs = SIN(SQRT(17.5*COS(PI/4)))
+FINISH`);
+    assert.ok(bad.some((x) => x.code === "var-undef" && x.message.includes("PI")));
+
+    const ok = diags(`HEAD 3 0
+CONT T T
+EQU PI = 3.1415926
+EQU Rs = SIN(SQRT(17.5*COS(PI/4)))
+FINISH`);
+    assert.strictEqual(ok.filter((x) => x.code === "var-undef" && x.message.includes("PI")).length, 0);
+  });
+
+  it("accepts NET repeat prefix N*PROTOTYPE", () => {
+    const text = `HEAD 3 0
+CONT T T
+CELL CGRVA
+RPP A 0 1 0 1 0 1
+END
+END
+NET RBMK 0 0 0 1 1
+T01 23*CGRVA
+END
+FINISH`;
+    const d = diags(text);
+    assert.strictEqual(d.filter((x) => x.code === "net-cell").length, 0);
+  });
+
+  it("parses O-cartogram rows as NET objMaps, not zones", () => {
+    const text = `HEAD 3 0
+CONT T T
+END
+NET N1 0 0 0 2 2
+T01 A B
+O0156 1 2 3 4 5 6
+O0155 57 58 59
+END
+FINISH`;
+    const ast = parseDocument(text, { uri: "net-o.mcu" });
+    assert.ok(!ast.zones.some((z) => z.name === "O0156"), "O0156 is cartogram row, not zone");
+    assert.ok(ast.nets[0]?.objMaps?.length === 2);
+    const d = diags(text);
+    assert.strictEqual(d.filter((x) => x.code === "zone-body").length, 0);
+  });
+
+  it("accepts body param with multiply split across tokens (DF-1* DELT)", () => {
+    const text = `HEAD 3 0
+CONT T T
+EQU DF 5
+EQU DELT 2
+EQU LG2 1
+EQU FDIS 3
+EQU RWCI 4
+RCZ F21 LG2 LG2 DF-1* DELT, FDIS RWCI
+END
+FINISH`;
+    const ast = parseDocument(text, { uri: "rcz-mult.mcu" });
+    const body = ast.bodies.find((b) => b.name === "F21");
+    assert.ok(body?.params.includes("DF-1*DELT"), body?.params.join("|"));
+    const d = diags(text);
+    assert.strictEqual(d.filter((x) => x.code === "expr-syntax").length, 0);
+    assert.strictEqual(
+      d.filter((x) => x.code === "body-params-extra").length,
+      0,
+      d.filter((x) => x.code === "body-params-extra").map((x) => x.message).join("; ")
+    );
+  });
+
+  it("parses M-cartogram rows as NET matMaps, not zones", () => {
+    const text = `PIN 1 0
+MATR 1
+U235 1.E-3
+HEAD 3 0
+CONT T T
+END
+NET N1 0 0 0 2 2
+T01 A B
+M0156 56*1
+M0152 4*1 2 3
+END
+FINISH`;
+    const ast = parseDocument(text, { uri: "net-m.mcu" });
+    assert.ok(!ast.zones.some((z) => z.name === "M0156"), "M0156 is cartogram, not zone");
+    assert.ok(ast.nets[0]?.matMaps && ast.nets[0].matMaps.length >= 1);
+    const row0 = ast.nets[0]!.matMaps![0]![0]!;
+    assert.strictEqual(row0.length, 56);
+    assert.ok(row0.every((v) => v === "1"));
+    const d = diags(text);
+    assert.strictEqual(d.filter((x) => x.code === "zone-body").length, 0);
+  });
+
+  it("warns on unknown material number in M-cartogram", () => {
+    const text = `PIN 1 0
+MATR 1
+U235 1.E-3
+HEAD 3 0
+CONT T T
+END
+NET N1 0 0 0 1 1
+T01 0
+M01 99
+END
+FINISH`;
+    const d = diags(text);
+    assert.ok(d.some((x) => x.code === "net-mat" && x.message.includes("99")));
+  });
+
+  it("accepts NPS/PROB after geometry FINISH as source cards, not zones", () => {
+    const text = `HEAD 3 0
+CONT T T
+END
+NET N1 0 0 0 1 1
+T01 0
+M01 1
+END
+FINISH
+* sources
+NPS 1
+PROB 1
+FINISH`;
+    const ast = parseDocument(text, { uri: "src-nps.mcu" });
+    assert.ok(!ast.zones.some((z) => z.name === "NPS" || z.name === "PROB"));
+    assert.ok(ast.fragments.some((f) => f.id === "source"), "source fragment after NPS");
+    const d = diags(text);
+    assert.strictEqual(
+      d.filter((x) => x.code === "zone-body" && (x.message.includes("NPS") || x.message.includes("PROB"))).length,
+      0
+    );
+  });
+
+  it("keeps zone named like a card when registration tail present", () => {
+    const text = `HEAD 3 0
+CONT T T
+RPP A 0 1 0 1 0 1
+END
+NPS A /1:1
+END
+FINISH`;
+    const ast = parseDocument(text, { uri: "zone-nps.mcu" });
+    assert.ok(ast.zones.some((z) => z.name === "NPS"));
+    assert.ok(!ast.fragments.some((f) => f.id === "source"));
+  });
+
+  it("accepts GLTL LATT with LISTEL/PARM/LFIXSO as in UserGuide §9.2.6.1", () => {
+    const text = `HEAD 3 0
+CONT T T
+RCZ CNT 0 0 0 10 5
+END
+ZL CNT /1:1
+END
+LCELL Pogl20
+RPP A 0 1 0 1 0 1
+END
+ENDL
+LCELL TVS281
+RPP A 0 1 0 1 0 1
+END
+ENDL
+LCELL PustY2
+RPP A 0 1 0 1 0 1
+END
+ENDL
+LATT GLTL ZL
+LISTEL Pogl20 TVS281 PustY2
+PARM /2 0,0,0 /2 25,0,0 /3 50,25,0 /1 0,75,0
+LFIXSO 2,1
+LBLACK 0,1
+FINISH`;
+    const ast = parseDocument(text, { uri: "gltl-lfixso.mcu" });
+    assert.ok(ast.lattices.some((l) => l.latticeType === "GLTL" && l.zoneNames?.includes("ZL")));
+    assert.deepStrictEqual(ast.lattices[0]?.elements, ["Pogl20", "TVS281", "PustY2"]);
+    assert.ok(!ast.zones.some((z) => z.name === "LFIXSO"), "LFIXSO is lattice card, not zone");
+    assert.ok(!ast.zones.some((z) => z.name === "LBLACK"), "LBLACK is lattice card, not zone");
+    const d = diags(text);
+    assert.strictEqual(d.filter((x) => x.code === "zone-body").length, 0);
+    assert.strictEqual(d.filter((x) => x.code === "latt-el").length, 0);
+  });
+
   it("warns on LATT with unknown LCELL element", () => {
     const text = `HEAD 3 0
 CONT B B B

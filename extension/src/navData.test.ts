@@ -5,6 +5,7 @@ import * as path from "path";
 import { analyzeDocument } from "@mcuhelper/mcu-language";
 import {
   buildNavTree,
+  buildFragmentsTree,
   buildMaterialsTree,
   buildZonesTree,
   buildObjectsTree,
@@ -21,6 +22,20 @@ const range = { start: { line: 0, character: 0 }, end: { line: 0, character: 10 
 
 function richPayload(): IndexPayload {
   return {
+    fragments: [
+      { id: "physical", startLine: 0, endLine: 5 },
+      { id: "geometry", startLine: 6, endLine: 20 },
+    ],
+    statements: [
+      { label: "PIN", text: "PIN 1 0", fragment: "physical", range },
+      { label: "MATR", text: "MATR 1 fuel", fragment: "physical", range },
+      { label: "U235", text: "U235 1.E-3", fragment: "physical", range },
+      { label: "HEAD", text: "HEAD 1 0", fragment: "geometry", range },
+      { label: "RCZ", text: "RCZ FU 0 0 0 10 1", fragment: "geometry", range },
+      { label: "Z0", text: "Z0 FU :1", fragment: "geometry", range },
+      { label: "T01", text: "T01 A B C", fragment: "geometry", range },
+      { label: "END", text: "END", fragment: "geometry", range },
+    ],
     summaries: {
       materials: [
         {
@@ -122,11 +137,11 @@ function loadIndex(name: string) {
   const text = fs.readFileSync(path.join(fixtures, `${name}.mcu`), "utf8");
   const uri = `file:///fixtures/${name}.mcu`;
   const index = analyzeDocument(uri, text, 1);
-  return { summaries: index.summaries, uri };
+  return { summaries: index.summaries, fragments: index.ast.fragments, statements: index.ast.statements, uri };
 }
 
 describe("navData", () => {
-  const views = ["materials", "zones", "objects", "constants", "bodies", "nets", "lattices"] as const;
+  const views = ["fragments", "materials", "zones", "objects", "constants", "bodies", "nets", "lattices"] as const;
 
   for (const viewId of views) {
     it(`buildNavTree for ${viewId}`, () => {
@@ -142,6 +157,19 @@ describe("navData", () => {
     assert.ok(tree[0]!.badges?.length);
     assert.strictEqual(tree[0]!.children?.length, 2);
     assert.ok(tree[1]!.description?.includes("нукл."));
+  });
+
+  it("fragments tree formats ranges and labels", () => {
+    const tree = buildFragmentsTree(richPayload(), "file:///t.mcu");
+    assert.strictEqual(tree.length, 2);
+    assert.strictEqual(tree[0]!.label, "PIN");
+    assert.ok(tree[0]!.description?.includes("строки 1-6"));
+    assert.ok(tree[0]!.children?.some((c) => c.label === "MATR"));
+    assert.ok(!tree[0]!.children?.some((c) => c.label === "U235"));
+    assert.strictEqual(tree[1]!.label, "HEAD");
+    assert.ok(tree[1]!.children?.some((c) => c.label === "RCZ"));
+    assert.ok(!tree[1]!.children?.some((c) => c.label === "T01"));
+    assert.ok(!tree[1]!.children?.some((c) => c.label === "END"));
   });
 
   it("zones and objects trees format registration", () => {

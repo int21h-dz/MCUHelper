@@ -5,8 +5,29 @@
   const I = window.McuSidebarIcons;
 
   let state = { mode: "empty", catalog: null, tree: null, panel: "", filter: "" };
-  /** Раскрытые группы по панели (сохраняем при refresh LSP, по умолчанию пусто = свёрнуто). */
-  const expandedGroups = {};
+  /**
+   * Раскрытые группы по панели.
+   * Первый запуск: всё свёрнуто. Дальше восстанавливаем последнее состояние пользователя.
+   */
+  const expandedGroups = restoreExpandedGroups(vscode.getState());
+
+  function restoreExpandedGroups(savedState) {
+    const restored = {};
+    const groups = savedState && savedState.expandedGroups;
+    if (!groups || typeof groups !== "object") return restored;
+    for (const [panelId, keys] of Object.entries(groups)) {
+      if (Array.isArray(keys)) restored[panelId] = new Set(keys.filter((key) => typeof key === "string"));
+    }
+    return restored;
+  }
+
+  function persistUiState() {
+    const serialized = {};
+    for (const [panelId, keys] of Object.entries(expandedGroups)) {
+      serialized[panelId] = Array.from(keys);
+    }
+    vscode.setState({ expandedGroups: serialized });
+  }
 
   function esc(s) {
     if (!s) return "";
@@ -55,7 +76,7 @@
   }
 
   function catalogSearchHtml() {
-    return searchHtml("mcu-search", "Фильтр карт…");
+    return searchHtml("mcu-search", "Поиск карт…");
   }
 
   function navSearchHtml() {
@@ -85,10 +106,16 @@
     return (head + node.label + " " + (node.description || "") + " " + (node.badges || []).join(" ")).toLowerCase();
   }
 
+  function cardCopyText(node) {
+    const parts = [node.label, node.description].filter(Boolean);
+    return parts.join(" — ");
+  }
+
   function renderNavCard(node) {
     const clickable = node.uri && node.range;
     const pill = navPillLabel(node);
     const line = node.description || node.label;
+    const copyText = cardCopyText(node);
     const detail =
       node.description && node.description.length > 40
         ? '<div class="mcu-card-detail"><div class="mcu-card-desc">' +
@@ -108,6 +135,8 @@
       esc(node.range ? JSON.stringify(node.range) : "") +
       '" data-search="' +
       esc(nodeSearchText(node)) +
+      '" data-copy="' +
+      esc(copyText) +
       '">' +
       '<span class="mcu-card-label">' +
       esc(pill) +
@@ -172,7 +201,7 @@
       '<div class="mcu-empty">' +
       I.getIcon("empty") +
       "<div>" +
-      esc(message || "Откройте файл MCU-NR (.mcu)") +
+      esc(message || "Откройте файл MCU-NR") +
       "</div></div></div>";
   }
 
@@ -198,6 +227,10 @@
     return (state.panel || "") + ":" + nodeId;
   }
 
+  function stateIdForNode(nodeEl) {
+    return nodeEl.getAttribute("data-state-id") || nodeEl.getAttribute("data-group-id") || "";
+  }
+
   function isGroupExpanded(nodeId) {
     const set = expandedGroups[state.panel];
     return set ? set.has(groupKey(nodeId)) : false;
@@ -209,10 +242,11 @@
     const k = groupKey(nodeId);
     if (open) expandedGroups[state.panel].add(k);
     else expandedGroups[state.panel].delete(k);
+    persistUiState();
   }
 
   function toggleNode(nodeEl) {
-    const id = nodeEl.getAttribute("data-group-id");
+    const id = stateIdForNode(nodeEl);
     const willOpen = !nodeEl.classList.contains("open");
     nodeEl.classList.toggle("open");
     if (id) setGroupExpanded(id, willOpen);
@@ -245,8 +279,13 @@
     let body = '<div class="mcu-catalog-body">';
     for (const mod of modules) {
       const theme = I.MODULE_THEME[mod.id] || { color: "#e8913a", label: mod.marker };
+      const openCls = isGroupExpanded(mod.id) ? " open" : "";
       body +=
-        '<div class="mcu-accordion" data-module="' +
+        '<div class="mcu-accordion' +
+        openCls +
+        '" data-module="' +
+        esc(mod.id) +
+        '" data-state-id="' +
         esc(mod.id) +
         '" style="--mod-accent:' +
         esc(theme.color) +
@@ -422,6 +461,23 @@
       });
     });
   }
+
+  document.addEventListener("copy", (e) => {
+    const sel = window.getSelection()?.toString().trim();
+    if (sel) {
+      e.preventDefault();
+      vscode.postMessage({ type: "copyText", text: sel });
+      return;
+    }
+    const card = e.target?.closest?.(".mcu-nav-card");
+    if (card) {
+      const text = card.getAttribute("data-copy");
+      if (text) {
+        e.preventDefault();
+        vscode.postMessage({ type: "copyText", text });
+      }
+    }
+  });
 
   function renderTree(nodes) {
     if (!nodes || nodes.length === 0) {
