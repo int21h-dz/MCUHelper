@@ -252,7 +252,7 @@ npm run coverage:check
 
 | Ресурс | Описание |
 |--------|----------|
-| [mcuproject.ru](https://mcuproject.ru/rabout.html) | Официальный сайт семейства MCU |
+| [mcuproject.ru](https://mcuproject.ru/rabout.html) | Официальный сайт семейства программ MCU |
 
 ---
 
