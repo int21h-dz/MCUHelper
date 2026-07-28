@@ -17,6 +17,7 @@ coverage/
 docs/MCU-NR_Reference.md
 docs/MCU-NR_UserGuide_220519.txt
 MCU-NR_UserGuide_220519.pdf
+structure.md
 
 # Large RUNTEST cases (local solver regression data)
 RUNTEST/3l070626
