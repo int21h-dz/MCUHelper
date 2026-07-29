@@ -1,4 +1,5 @@
 import { normalizeMcuLabel, ALL_MCU_LABELS, detectFragmentFromLabel } from "./keywords";
+import { getBodyParamGroups } from "./bodyParamGroups";
 import { PHYSICAL_EXTRA_CARDS, REGISTRATION_EXTRA_CARDS, SOURCE_CARDS } from "./moduleCards";
 import { USER_GUIDE_CARDS } from "./userGuideCards.generated";
 import { EXTRA_CARD_DESCRIPTIONS } from "./cardDescriptionsExtra";
@@ -214,12 +215,12 @@ export const BODY_TYPES: BodyTypeSchema[] = [
   { key: "HEX", letter: "H", title: "Шестигранная призма OZ", paramCount: 3, paramNames: ["center", "vector", "optional"], description: "Центр нижнего основания и вектор «под ключ»+высота.", snippet: "HEX ${1:C} ${2:0,0,0} ${3:1.806,0,100}" },
   { key: "HEXX", letter: "H", title: "HEX альтернатива", paramCount: 4, paramNames: ["center", "H", "D", "f"], description: "Центр, высота, размер под ключ, угол поворота.", snippet: "HEXX ${1:C} ${2:0,0,0} ${3:100} ${4:1.806}" },
   { key: "HEXY", letter: "H", title: "HEX поворот 90°", paramCount: 4, paramNames: ["center", "H", "D", "f"], description: "Как HEXX, угол от OY.", snippet: "HEXY ${1:K} ${2:0,0,0} ${3:3} ${4:4}" },
-  { key: "BOX", letter: "B", title: "Произвольный параллелепипед", paramCount: 12, paramNames: ["vertex", "e1", "e2", "e3"], description: "Вершина и три ребра.", snippet: "BOX ${1:B} ${2:0,0,0} ${3:1,0,0} ${4:0,1,0} ${5:0,0,1}" },
+  { key: "BOX", letter: "B", title: "Произвольный параллелепипед", paramCount: 12, paramNames: ["B", "P1", "P2", "P3"], description: "Параллелепипед: вершина B и три вектора рёбер P1, P2, P3 из этой вершины. Четыре тройки чисел (x,y,z).", snippet: "BOX ${1:B} ${2:0,0,0} ${3:1,0,0} ${4:0,1,0} ${5:0,0,1}" },
   { key: "PLG", letter: "d", title: "Полупространство", paramCount: 4, paramNames: ["nx", "ny", "nz", "Q"], description: "(n,x) >= Q.", snippet: "PLG ${1:1} ${2:0},${3:1},${4:0} ${5:0}" },
   { key: "PLX", letter: "X", title: "X >= X0", paramCount: 1, paramNames: ["X0"], description: "Полупространство X>=X0.", snippet: "PLX ${1:0}" },
   { key: "PLY", letter: "Y", title: "Y >= Y0", paramCount: 1, paramNames: ["Y0"], description: "Полупространство Y>=Y0.", snippet: "PLY ${1:0}" },
   { key: "PLZ", letter: "Z", title: "Z >= Z0", paramCount: 1, paramNames: ["Z0"], description: "Полупространство Z>=Z0.", snippet: "PLZ ${1:0}" },
-  { key: "SBOX", letter: "X", title: "SBOX из начала координат", paramCount: 9, paramNames: ["e1", "e2", "e3"], description: "Параллелепипед с вершиной в 0.", snippet: "SBOX ${1:S} ${2:10},0,0 ${3:5},5,0 ${4:0},0,3" },
+  { key: "SBOX", letter: "X", title: "SBOX из начала координат", paramCount: 9, paramNames: ["P1", "P2", "P3"], description: "Параллелепипед с вершиной в начале координат. Три тройки чисел — векторы рёбер P1, P2, P3.", snippet: "SBOX ${1:S} ${2:10},0,0 ${3:5},5,0 ${4:0},0,3" },
   { key: "SHEX", letter: "I", title: "SHEX из начала", paramCount: 3, paramNames: ["S", "H", "f"], description: "Шестигранник, центр в 0, ось OZ.", snippet: "SHEX ${1:C} ${2:3} ${3:4} ${4:0}" },
   { key: "ARB", letter: "N", title: "Выпуклый многогранник", paramCount: "var", paramNames: ["vertices", "faces"], description: "До 8 вершин, грани после /.", snippet: "ARB ${1:1} ${2:-1,-1,0} ${3:1,-1,0} / ${4:1234}" },
   { key: "QUAD", letter: "Q", title: "Квадратичная форма", paramCount: 10, paramNames: ["coeffs"], description: "Неравенство квадратичной формы или / cx cy cz d.", snippet: "QUAD ${1:q} ${2:1} ${3:0} ${4:0} ${5:1} ${6:0} ${7:1} ${8:0} ${9:0} ${10:0} ${11:-1}" },
@@ -705,6 +706,24 @@ export function formatCardHover(card: CardSchema): string {
   }
   if (card.defaults) parts.push("", `По умолчанию: ${card.defaults}`);
   if (card.example) parts.push("", "Пример:", "```", card.example, "```");
+  return parts.join("\n");
+}
+
+export function formatBodyHover(body: BodyTypeSchema): string {
+  const groups = getBodyParamGroups(body.key);
+  const parts = [`**${body.title}** (\`${body.key}\`)`, "", body.description];
+  const args = groups?.filter((g) => g.label !== "name");
+  if (args?.length) {
+    parts.push("", "Параметры (тройки x,y,z — через запятую или пробел):");
+    for (const g of args) {
+      parts.push(`- **${g.label}** — ${g.documentation}`);
+    }
+  } else if (body.paramNames.length) {
+    parts.push("", `Параметры: ${body.paramNames.join(", ")}`);
+  }
+  if (body.key === "BOX") {
+    parts.push("", "Пример:", "`BOX B 0,0,0 1,0,0 0,1,0 0,0,1`");
+  }
   return parts.join("\n");
 }
 

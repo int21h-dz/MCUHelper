@@ -27,4 +27,13 @@ describe("bodyParamGroups", () => {
     assert.ok(BODY_PARAM_GROUPS.PLG);
     assert.ok(BODY_PARAM_GROUPS.QUAD);
   });
+
+  it("BOX uses four coordinate triplets B, P1, P2, P3", () => {
+    const groups = getBodyParamGroups("BOX")!;
+    assert.strictEqual(groups.length, 5);
+    assert.ok(groups[1].label.includes("B"));
+    assert.ok(groups[2].label.includes("P1"));
+    assert.ok(groups[3].label.includes("P2"));
+    assert.ok(groups[4].label.includes("P3"));
+  });
 });

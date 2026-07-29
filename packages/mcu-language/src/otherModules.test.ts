@@ -40,6 +40,9 @@ describe("otherModules", () => {
     assert.strictEqual(classifyOtherModule(mk("RGS")), "registration");
     assert.strictEqual(classifyOtherModule(mk("NTOT")), "trajectory");
     assert.strictEqual(classifyOtherModule(mk("NAMVAR")), "calculationControl");
+    assert.strictEqual(classifyOtherModule(mk("XYZ0")), "calculationControl");
+    assert.strictEqual(classifyOtherModule(mk("INPO")), "calculationControl");
+    assert.strictEqual(classifyOtherModule(mk("SETT")), "calculationControl");
     assert.strictEqual(classifyOtherModule(mk("CODE")), "burnup");
     assert.strictEqual(classifyOtherModule(mk("FUEL")), null);
   });

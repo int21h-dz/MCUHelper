@@ -30,6 +30,7 @@ import {
   handleQueryPoint,
   handleGetSlice,
   handleValidateInput,
+  handleRunMcuStep,
   handleGetDiagnostics,
   syncSettingsFromInitialize,
   applyServerSettings,
@@ -41,6 +42,7 @@ const documents = new TextDocuments(TextDocument);
 
 let globalSettings: McuServerSettings = {
   mcuNrPath: "",
+  mcuConstantsLibPath: "",
   enableSolverValidation: false,
   variantName: "NAME",
   enableIaeaNuclideHover: true,
@@ -249,6 +251,40 @@ connection.onRequest("mcuhelper/validateInput", async (args) => {
     await validateTextDocument(doc);
   }
   return { ok: result.ok, exitCode: result.exitCode, diagnosticCount: result.diagnosticCount };
+});
+
+connection.onRequest("mcuhelper/runMcuStep", async (args) => {
+  const result = await handleRunMcuStep(args, globalSettings, getDoc);
+  if (result.message) return result;
+  const doc = documents.get(args.uri);
+  if (doc && result.solverResult) {
+    const index = getDocumentIndex(args.uri);
+    if (index) setCachedSolverResult(index.hash, result.solverResult);
+    const lspDiags = result.solverResult.diagnostics.map(toLspDiagnostic);
+    solverDiagnostics.set(args.uri, lspDiags);
+    await validateTextDocument(doc);
+  }
+  const diagnostics = result.solverResult ? result.solverResult.diagnostics.map(toLspDiagnostic) : [];
+  const firstError = diagnostics.find((d) => d.severity === 1 /* DiagnosticSeverity.Error */);
+  return {
+    ok: result.ok,
+    exitCode: result.exitCode,
+    diagnosticCount: result.diagnosticCount,
+    runDir: result.runDir,
+    mcuNrPath: result.mcuNrPath,
+    sourceFsPath: result.sourceFsPath,
+    prepared: result.prepared,
+    finCopiedPath: result.finCopiedPath,
+    finOverwritten: result.finOverwritten,
+    diagnostics,
+    firstError: firstError
+      ? {
+          message: firstError.message,
+          range: firstError.range,
+          code: firstError.code,
+        }
+      : undefined,
+  };
 });
 
 documents.listen(connection);

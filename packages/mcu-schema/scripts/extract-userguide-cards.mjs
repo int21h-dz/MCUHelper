@@ -69,6 +69,34 @@ function isKnownLabel(word) {
   return ALL_MCU_LABELS.has(word.toUpperCase());
 }
 
+function isNewCardLine(line) {
+  const t = line.trim();
+  if (!t || t.startsWith("===== PAGE")) return Boolean(t);
+  const dash = t.match(/^([A-Z][A-Z0-9]{1,5})\s*[–\-]/);
+  if (dash && isKnownLabel(dash[1])) return true;
+  const multiDash = t.match(/^([A-Z][A-Z0-9]{1,5}(?:\s*,\s*[A-Z][A-Z0-9]{1,5})+)\s*[–\-]/);
+  if (multiDash) return true;
+  const param = t.match(/^([A-Z][A-Z0-9]{1,5})\s{2,}([a-z][a-z0-9]*)\s*$/);
+  if (param && isKnownLabel(param[1])) return true;
+  return false;
+}
+
+/** Описание карты «LABEL – …» в TXT часто переносится на следующую строку (PDF). */
+function mergeDashDescription(lines, startIdx, initial) {
+  let desc = initial.trim();
+  for (let j = startIdx + 1; j < lines.length; j++) {
+    const t = lines[j].trim();
+    if (!t) {
+      if (desc.endsWith(".")) break;
+      continue;
+    }
+    if (isNewCardLine(lines[j])) break;
+    desc += " " + t;
+    if (desc.length > 600 || desc.endsWith(".")) break;
+  }
+  return desc.replace(/\s+/g, " ").trim();
+}
+
 function collectDescription(lines, startIdx) {
   const parts = [];
   for (let i = startIdx; i < lines.length; i++) {
@@ -103,15 +131,16 @@ for (let i = 0; i < lines.length; i++) {
   const multiDash = line.match(/^([A-Z][A-Z0-9]{1,5}(?:\s*,\s*[A-Z][A-Z0-9]{1,5})+)\s*[–\-]\s*(.+)$/);
   if (multiDash) {
     const labels = multiDash[1].split(/\s*,\s*/);
+    const desc = mergeDashDescription(lines, i, multiDash[2]);
     for (const raw of labels) {
-      if (isKnownLabel(raw)) addCard(raw, `${raw.toUpperCase()} …`, multiDash[2], null);
+      if (isKnownLabel(raw)) addCard(raw, `${raw.toUpperCase()} …`, desc, null);
     }
     continue;
   }
 
   const dash = line.match(/^([A-Z][A-Z0-9]{1,5})\s*[–\-]\s*(.+)$/);
   if (dash && isKnownLabel(dash[1])) {
-    addCard(dash[1], `${dash[1].toUpperCase()} …`, dash[2], null);
+    addCard(dash[1], `${dash[1].toUpperCase()} …`, mergeDashDescription(lines, i, dash[2]), null);
     continue;
   }
 

@@ -28,4 +28,11 @@ describe("cardDescriptionsExtra", () => {
     assert.ok(!deln!.description.includes("[ACEPT]"));
     assert.ok(!deln!.description.includes("[VOL"));
   });
+
+  it("NUCOFF hover has full description from UserGuide §11.2", () => {
+    const nucoff = getCardByLabel("NUCOFF");
+    assert.ok(nucoff);
+    assert.ok(nucoff!.description.includes("отдельности не производится"));
+    assert.ok(!nucoff!.description.endsWith(" в"));
+  });
 });

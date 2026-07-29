@@ -210,6 +210,7 @@
     el.draggable = true;
     el.addEventListener("dragstart", (e) => {
       e.dataTransfer.setData("text/plain", text);
+      e.dataTransfer.setData("application/mcuhelper.mcu", "1");
       e.dataTransfer.setData("application/mcuhelper.snippet", format === "snippet" ? "1" : "0");
       e.dataTransfer.effectAllowed = "copy";
     });

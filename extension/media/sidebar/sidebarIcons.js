@@ -51,9 +51,22 @@
       '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="#ef4444" fill="none" stroke-width="1.4"/><path d="M8 4.5v4M8 11h.01" stroke="#ef4444" stroke-width="1.6" stroke-linecap="round"/></svg>',
     warning:
       '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5l6.5 11H1.5L8 2.5z" stroke="#fbbf24" fill="none" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 6.5v3M8 11.5h.01" stroke="#fbbf24" stroke-width="1.5" stroke-linecap="round"/></svg>',
+    run:
+      '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="currentColor" fill="none" stroke-width="1.3"/><path d="M7 5.5l4 2.5-4 2.5V5.5z" fill="currentColor"/></svg>',
+    debug:
+      '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5c1.5 0 2.7 1.2 2.7 2.7v1.1h1.3M8 2.5C6.5 2.5 5.3 3.7 5.3 5.2v1.1H4" stroke="currentColor" fill="none" stroke-width="1.2" stroke-linecap="round"/><rect x="4.5" y="6" width="7" height="7" rx="2" stroke="currentColor" fill="none" stroke-width="1.3"/><path d="M6.5 9h3M8 9v2.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
+    play:
+      '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.5l8 4.5-8 4.5V3.5z" fill="currentColor"/></svg>',
+    sync:
+      '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 01-8.5 3.5M3 8a5 5 0 018.5-3.5" stroke="currentColor" fill="none" stroke-width="1.4" stroke-linecap="round"/><path d="M12.5 2.5v3h-3M3.5 13.5v-3h3" stroke="currentColor" fill="none" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    output:
+      '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="2.5" width="11" height="11" rx="1.5" stroke="currentColor" fill="none" stroke-width="1.3"/><path d="M5 6h6M5 8.5h6M5 11h4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
+    gear:
+      '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.2" stroke="currentColor" fill="none" stroke-width="1.3"/><path d="M8 2.2v1.6M8 12.2v1.6M2.2 8h1.6M12.2 8h1.6M3.9 3.9l1.1 1.1M11 11l1.1 1.1M12.1 3.9L11 5M5 11l-1.1 1.1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
   };
 
   const PANELS = {
+    "mcuhelper.run": { title: "Запуск MCU-NR", icon: "run", accent: "#e8913a", hint: "Debug → Run → Continue → Final" },
     "mcuhelper.catalog": { title: "Каталог модулей", icon: "catalog", accent: "#e8913a", hint: "Перетащите карточку или модуль в редактор" },
     "mcuhelper.lexerErrors": { title: "Диагностика", icon: "error", accent: "#ef4444", hint: "Напрямую из LSP (исходный файл) — клик для перехода", searchPh: "Фильтр диагностик…" },
     "mcuhelper.fragments": { title: "Фрагменты", icon: "fragment", accent: "#94a3b8", hint: "Клик — переход к началу фрагмента", searchPh: "Фильтр фрагментов…" },

@@ -93,6 +93,27 @@ describe("getHover", () => {
     assert.ok(hover!.includes("RCZ") || hover!.includes("цилиндр"));
   });
 
+  it("hover on BOX keyword documents four coordinate triplets", () => {
+    const text = "HEAD 1 0\nBOX B 0,0,0 1,0,0 0,1,0 0,0,1\nFINISH";
+    const { doc, index } = openText(text);
+    const hover = getHover(doc, { line: 1, character: 0 }, index);
+    assert.ok(hover?.includes("параллелепипед"));
+    assert.ok(hover?.includes("P1"));
+    assert.ok(hover?.includes("P2"));
+    assert.ok(hover?.includes("P3"));
+    assert.ok(hover?.includes("тройки"));
+  });
+
+  it("hover on BOX coordinate triplet shows parameter help", () => {
+    const text = "HEAD 1 0\nBOX B 0,0,0 1,0,0 0,1,0 0,0,1\nFINISH";
+    const { doc, index } = openText(text);
+    const line = text.split("\n")[1]!;
+    const hover = getHoverContent(doc, { line: 1, character: line.indexOf("1,0,0") + 1 }, index, {
+      enableIaeaNuclide: false,
+    });
+    assert.ok(hover?.includes("P1"), hover ?? "(null)");
+  });
+
   it("hover contextual MODS on nuclide line", () => {
     const { doc, index } = openFixture("full_variant");
     const matr = index.ast.materials[0]!;

@@ -54,10 +54,15 @@
           "default": "",
           "description": "Путь к исполняемому файлу MCU-NR"
         },
+        "mcuhelper.mcuConstantsLibPath": {
+          "type": "string",
+          "default": "",
+          "description": "Корень MDBNR: путь к библиотекам констант (в батнике это 2-я строка mcu5.ini)"
+        },
         "mcuhelper.variantName": {
           "type": "string",
           "default": "NAME",
-          "description": "Имя варианта (без расширения) для шага INPUT"
+          "description": "НЕ используется: имя варианта берётся из текущего открытого файла (без расширения)"
         },
         "mcuhelper.enableSolverValidation": {
           "type": "boolean",
@@ -154,6 +159,36 @@
         "icon": "$(run-all)"
       },
       {
+        "command": "mcuhelper.debugInput",
+        "title": "MCU-NR: Debug (INPUT)",
+        "icon": "$(bug)"
+      },
+      {
+        "command": "mcuhelper.runCalculation",
+        "title": "MCU-NR: Run (CALCULATION)",
+        "icon": "$(play)"
+      },
+      {
+        "command": "mcuhelper.continueCalculation",
+        "title": "MCU-NR: Continue (CALCULATION)",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "mcuhelper.finalOutput",
+        "title": "MCU-NR: Final (OUTPUT)",
+        "icon": "$(output)"
+      },
+      {
+        "command": "mcuhelper.configureSolver",
+        "title": "MCU-NR: Настроить пути запуска",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "mcuhelper.showRunActions",
+        "title": "MCU-NR: Действия запуска",
+        "icon": "$(play-circle)"
+      },
+      {
         "command": "mcuhelper.refreshIndex",
         "title": "MCU-NR: Обновить индекс",
         "icon": "$(refresh)"
@@ -205,6 +240,7 @@
     ],
     "views": {
       "mcuhelper": [
+        { "type": "webview", "id": "mcuhelper.run", "name": "Запуск", "visibility": "visible" },
         { "type": "webview", "id": "mcuhelper.catalog", "name": "Каталог", "visibility": "visible" },
         { "type": "webview", "id": "mcuhelper.lexerErrors", "name": "Диагностика", "visibility": "visible" },
         { "type": "webview", "id": "mcuhelper.fragments", "name": "Фрагменты" },
@@ -224,7 +260,8 @@
     },
     "menus": {
       "view/title": [
-        { "command": "mcuhelper.refreshIndex", "when": "view =~ /^mcuhelper\\./", "group": "navigation" }
+        { "command": "mcuhelper.refreshIndex", "when": "view =~ /^mcuhelper\\./ && view != mcuhelper.run", "group": "navigation" },
+        { "command": "mcuhelper.configureSolver", "when": "view == mcuhelper.run", "group": "navigation" }
       ],
       "editor/context": [
         {
@@ -269,6 +306,10 @@
         "command": "mcuhelper.prevLexerError",
         "key": "alt+shift+f7",
         "when": "editorLangId == mcunr"
+      },
+      {
+        "command": "mcuhelper.configureSolver",
+        "key": "ctrl+alt+p"
       }
     ]
   },

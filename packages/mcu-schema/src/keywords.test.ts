@@ -22,6 +22,8 @@ describe("keywords", () => {
     assert.ok(isKnownMcuLabel("PIN"));
     assert.ok(isKnownMcuLabel("powe"));
     assert.ok(isKnownMcuLabel("MATR"));
+    assert.ok(isKnownMcuLabel("URBMK"));
+    assert.ok(isKnownMcuLabel("NSKIP"));
     assert.ok(!isKnownMcuLabel("NOTACARD"));
   });
 

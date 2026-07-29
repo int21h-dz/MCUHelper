@@ -1,3 +1,4 @@
+import * as fs from "fs";
 import * as path from "path";
 import type { TextDocument } from "vscode-languageserver-textdocument";
 import {
@@ -15,28 +16,45 @@ import {
 import { buildScene, buildSliceGrid, queryPoint } from "@mcuhelper/mcu-geometry";
 import type { SliceAxis } from "@mcuhelper/mcu-geometry";
 import { SymbolInformation, SymbolKind, Diagnostic, DiagnosticSeverity, FoldingRange, FoldingRangeKind, DocumentLink } from "vscode-languageserver";
-import { getCachedSolverResult, runInputStep, setCachedSolverResult, type SolverResult } from "./solver";
+import {
+  collectMcuRunResult,
+  getCachedSolverResult,
+  prepareMcuRunFiles,
+  runInputStep,
+  runMcuStep,
+  setCachedSolverResult,
+  mcuModeToStepKey,
+  copyFinBesideSource,
+  isSuccessfulMcuCollect,
+  deleteVariantArtifact,
+  findVariantArtifactInDir,
+  type SolverResult,
+  type McuMode,
+} from "./solver";
 
 export interface McuServerSettings {
   mcuNrPath: string;
+  mcuConstantsLibPath: string;
   enableSolverValidation: boolean;
   variantName: string;
   enableIaeaNuclideHover: boolean;
 }
 
-export function uriToBaseDir(uri: string): string {
+export function uriToFsPath(uri: string): string {
   try {
     const { pathname } = new URL(uri);
     let fsPath = decodeURIComponent(pathname);
     if (/^\/[A-Za-z]:/.test(fsPath)) {
       fsPath = fsPath.slice(1);
     }
-    return path.dirname(fsPath);
+    return fsPath;
   } catch {
-    return path.dirname(
-      uri.replace(/^file:\/\//, "").replace(/^\//, "").replace(/^([A-Z]):/, "$1:")
-    );
+    return uri.replace(/^file:\/\//, "").replace(/^\//, "").replace(/^([A-Z]):/, "$1:");
   }
+}
+
+export function uriToBaseDir(uri: string): string {
+  return path.dirname(uriToFsPath(uri));
 }
 
 export function toLspDiagnostic(d: DiagnosticMessage): Diagnostic {
@@ -84,13 +102,20 @@ export function collectDiagnostics(
   const diags = index.ast.diagnostics
     .map(toLspDiagnostic)
     .filter((d) => d.range.start.line < lineCount);
+
+  // Solver-диагностики: либо уже переданы в extra (после runMcuStep), либо из кэша.
+  // Не мержить оба источника — иначе дубли (одна и та же ошибка дважды).
+  const solverFromExtra = extraSolverDiags.filter((d) => d.range.start.line < lineCount);
+  if (solverFromExtra.length > 0) {
+    return [...diags, ...solverFromExtra];
+  }
   const cached = getCachedSolverResult(index.hash);
   if (cached) {
     diags.push(
       ...cached.diagnostics.map(toLspDiagnostic).filter((d) => d.range.start.line < lineCount)
     );
   }
-  return [...diags, ...extraSolverDiags.filter((d) => d.range.start.line < lineCount)];
+  return diags;
 }
 
 export interface McuDiagnosticPayload {
@@ -432,11 +457,364 @@ export async function handleValidateInput(
   };
 }
 
+export interface RunMcuStepArgs {
+  uri: string;
+  variantName: string;
+  mode: McuMode;
+  mcuNrPath?: string;
+  constantsLibPath?: string;
+  /** true = только подготовить runDir/mcu5.ini (запуск в терминале делает extension). */
+  prepareOnly?: boolean;
+  /** После terminal-run: собрать diagnostics из LST без повторной подготовки. */
+  collectOnly?: boolean;
+  runDir?: string;
+  sourceFsPath?: string;
+  exitCode?: number | null;
+}
+
+interface RunSession {
+  runDir: string;
+  deckHash: string;
+  variantName: string;
+  lastMode: McuMode;
+  createdAt: number;
+}
+
+const runSessions = new Map<string, RunSession>();
+
+const SESSION_FILE = ".mcuhelper-session.json";
+
+function runsRootDir(baseDir: string): string {
+  return path.join(baseDir, ".mcuhelper-runs");
+}
+
+function ensureDir(p: string): void {
+  try {
+    fs.mkdirSync(p, { recursive: true });
+  } catch {
+    // ignore
+  }
+}
+
+function sessionFilePath(runDir: string): string {
+  return path.join(runDir, SESSION_FILE);
+}
+
+function writeRunSessionFile(session: RunSession): void {
+  try {
+    fs.writeFileSync(
+      sessionFilePath(session.runDir),
+      JSON.stringify(
+        {
+          variantName: session.variantName,
+          deckHash: session.deckHash,
+          lastMode: session.lastMode,
+          createdAt: session.createdAt,
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+  } catch {
+    // ignore
+  }
+}
+
+function readRunSessionFile(runDir: string): RunSession | undefined {
+  try {
+    const p = sessionFilePath(runDir);
+    if (!fs.existsSync(p)) return undefined;
+    const raw = JSON.parse(fs.readFileSync(p, "utf8")) as Partial<RunSession>;
+    if (typeof raw.variantName !== "string" || typeof raw.deckHash !== "string") return undefined;
+    return {
+      runDir,
+      variantName: raw.variantName,
+      deckHash: raw.deckHash,
+      lastMode: (raw.lastMode as McuMode) ?? "i",
+      createdAt: typeof raw.createdAt === "number" ? raw.createdAt : Date.now(),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Есть ли промежуточные артефакты MCU для Continue/Final. */
+export function hasVariantRunArtifacts(runDir: string, variantName: string): boolean {
+  if (findVariantArtifactInDir(runDir, variantName, "dat")) return true;
+  if (findVariantArtifactInDir(runDir, variantName, "mcu")) return true;
+  try {
+    const prefix = `${variantName}.mcu_`.toLowerCase();
+    for (const entry of fs.readdirSync(runDir)) {
+      if (entry.toLowerCase().startsWith(prefix)) return true;
+    }
+  } catch {
+    // ignore
+  }
+  return false;
+}
+
+function isRunSessionKeyMatch(session: RunSession, variantName: string, deckHash: string): boolean {
+  return session.variantName === variantName && session.deckHash === deckHash;
+}
+
+/**
+ * Resolve session for continue/final: memory → disk json → artifacts fallback.
+ * @returns session or error message
+ */
+export function resolveContinueFinalSession(options: {
+  uri: string;
+  runDir: string;
+  variantName: string;
+  deckHash: string;
+  mode: McuMode;
+}): { session: RunSession } | { message: string } {
+  const { uri, runDir, variantName, deckHash, mode } = options;
+  const existing = runSessions.get(uri);
+  if (existing) {
+    if (!isRunSessionKeyMatch(existing, variantName, deckHash)) {
+      return {
+        message:
+          "Содержимое варианта изменилось после INPUT. Выполните INPUT ещё раз, чтобы продолжение было корректным.",
+      };
+    }
+    return { session: existing };
+  }
+
+  const fromDisk = readRunSessionFile(runDir);
+  if (fromDisk) {
+    if (!isRunSessionKeyMatch(fromDisk, variantName, deckHash)) {
+      return {
+        message:
+          "Содержимое варианта изменилось после INPUT. Выполните INPUT ещё раз, чтобы продолжение было корректным.",
+      };
+    }
+    const session: RunSession = { ...fromDisk, runDir, lastMode: mode };
+    runSessions.set(uri, session);
+    return { session };
+  }
+
+  if (hasVariantRunArtifacts(runDir, variantName)) {
+    const session: RunSession = {
+      runDir,
+      deckHash,
+      variantName,
+      lastMode: mode,
+      createdAt: Date.now(),
+    };
+    runSessions.set(uri, session);
+    writeRunSessionFile(session);
+    return { session };
+  }
+
+  return {
+    message:
+      "Сначала выполните режим INPUT (debug/input), затем запускайте расчёт (CALCULATION/OUTPUT/continue).",
+  };
+}
+
+/** Полная очистка runDir перед INPUT / Run (`a`): всё кроме копии deck (её перезапишет prepare). */
+function cleanupRunDirFull(runDir: string, variantName: string): void {
+  const expectedPrefix = `${variantName}.`;
+  for (const entry of fs.readdirSync(runDir)) {
+    // Копию deck (`burnup` без расширения) не трогаем здесь — её перезапишет prepare.
+    if (entry === variantName) continue;
+    if (entry === SESSION_FILE) continue;
+    if (entry.startsWith(expectedPrefix)) {
+      deleteQuietly(path.join(runDir, entry));
+      continue;
+    }
+    // общие мусорные файлы
+    if (
+      entry === "end_time" ||
+      entry === "step_end" ||
+      entry === "no_sigma" ||
+      entry === "energy.fis" ||
+      entry === "mcuname" ||
+      entry === "mcu5.ini" ||
+      entry === "MCU5.INI" ||
+      entry === "mcu5.sys" ||
+      entry === "MCU5.SYS"
+    ) {
+      // ini перепишем перед запуском; mcu5.sys больше не используем
+      deleteQuietly(path.join(runDir, entry));
+      continue;
+    }
+    if (entry.endsWith(".bur")) deleteQuietly(path.join(runDir, entry));
+  }
+}
+
+function cleanupRunDirForFinal(runDir: string, variantName: string): void {
+  deleteVariantArtifact(runDir, variantName, "fin");
+  deleteVariantArtifact(runDir, variantName, "lst");
+}
+
+function deleteQuietly(p: string): void {
+  try {
+    if (fs.existsSync(p)) fs.unlinkSync(p);
+  } catch {
+    // ignore
+  }
+}
+
+export async function handleRunMcuStep(
+  args: RunMcuStepArgs,
+  settings: McuServerSettings,
+  getDoc: (uri: string) => TextDocument | undefined
+): Promise<{
+  ok: boolean;
+  exitCode?: number | null;
+  diagnosticCount?: number;
+  message?: string;
+  solverResult?: SolverResult;
+  runDir?: string;
+  mcuNrPath?: string;
+  sourceFsPath?: string;
+  prepared?: boolean;
+  /** После успешного Run/Final: путь к копии NAME.FIN рядом с исходником. */
+  finCopiedPath?: string;
+  finOverwritten?: boolean;
+}> {
+  const doc = getDoc(args.uri);
+  if (!doc) return { ok: false, message: "Document not open" };
+
+  if (args.collectOnly) {
+    const sourceFsPath = args.sourceFsPath ?? uriToFsPath(args.uri);
+    const runDir = args.runDir;
+    if (!runDir) return { ok: false, message: "collectOnly: не передан runDir" };
+    const index = ensureDocumentIndex(doc);
+    const result = collectMcuRunResult({
+      workingDir: runDir,
+      variantName: args.variantName,
+      sourceFsPath,
+      exitCode: args.exitCode ?? null,
+    });
+    setCachedSolverResult(index.hash, result);
+
+    let finCopiedPath: string | undefined;
+    let finOverwritten: boolean | undefined;
+    const success = isSuccessfulMcuCollect(args.exitCode, result.diagnostics);
+    // Run / Final: при успехе копируем FIN к исходному варианту.
+    if ((args.mode === "c" || args.mode === "f") && success) {
+      const copied = copyFinBesideSource(runDir, args.variantName, sourceFsPath);
+      if (copied) {
+        finCopiedPath = copied.path;
+        finOverwritten = copied.overwritten;
+      }
+    }
+
+    return {
+      ok: success,
+      exitCode: result.exitCode,
+      diagnosticCount: result.diagnostics.length,
+      solverResult: result,
+      runDir,
+      sourceFsPath,
+      finCopiedPath,
+      finOverwritten,
+    };
+  }
+
+  const constantsLibPath = args.constantsLibPath ?? settings.mcuConstantsLibPath;
+  const mcuNrPath = args.mcuNrPath ?? settings.mcuNrPath;
+  if (!mcuNrPath) return { ok: false, message: "Укажите mcuhelper.mcuNrPath (путь к exe)" };
+  if (!constantsLibPath) return { ok: false, message: "Укажите mcuhelper.mcuConstantsLibPath (путь к MDBNR)" };
+
+  const variantName = args.variantName;
+  const sourceFsPath = uriToFsPath(args.uri);
+  if (!sourceFsPath || sourceFsPath.startsWith("untitled:")) {
+    return { ok: false, message: "Сохраните файл варианта на диск перед запуском MCU-NR" };
+  }
+  if (!fs.existsSync(sourceFsPath)) {
+    return { ok: false, message: `Файл варианта не найден на диске: ${sourceFsPath}` };
+  }
+
+  const index = ensureDocumentIndex(doc);
+  const deckHash = index.hash;
+
+  const mode = args.mode;
+  const baseDir = uriToBaseDir(args.uri);
+  const root = runsRootDir(baseDir);
+  ensureDir(root);
+
+  // Стабильный каталог: .mcuhelper-runs/<variantName> (без timestamp/hash).
+  const runDir = path.join(root, variantName);
+  ensureDir(runDir);
+
+  if (mode === "i" || mode === "c") {
+    cleanupRunDirFull(runDir, variantName);
+    const session: RunSession = {
+      runDir,
+      deckHash,
+      variantName,
+      lastMode: mode,
+      createdAt: Date.now(),
+    };
+    runSessions.set(args.uri, session);
+    writeRunSessionFile(session);
+  } else {
+    const resolved = resolveContinueFinalSession({
+      uri: args.uri,
+      runDir,
+      variantName,
+      deckHash,
+      mode,
+    });
+    if ("message" in resolved) {
+      return { ok: false, message: resolved.message };
+    }
+    if (mode === "f") {
+      cleanupRunDirForFinal(runDir, variantName);
+    }
+  }
+
+  const stepKey = mcuModeToStepKey(mode);
+
+  if (args.prepareOnly) {
+    prepareMcuRunFiles({
+      workingDir: runDir,
+      variantName,
+      constantsLibPath,
+      sourceFsPath,
+      stepKey,
+    });
+    return {
+      ok: true,
+      prepared: true,
+      runDir,
+      mcuNrPath,
+      sourceFsPath,
+      diagnosticCount: 0,
+    };
+  }
+
+  const result = await runMcuStep({
+    mcuNrPath,
+    workingDir: runDir,
+    variantName,
+    constantsLibPath,
+    sourceFsPath,
+    stepKey,
+  });
+
+  if (index) setCachedSolverResult(index.hash, result);
+  return {
+    ok: result.exitCode === 0,
+    exitCode: result.exitCode,
+    diagnosticCount: result.diagnostics.length,
+    solverResult: result,
+    runDir,
+    mcuNrPath,
+    sourceFsPath,
+  };
+}
+
 export function applyServerSettings(
   target: McuServerSettings,
   cfg: Record<string, unknown>
 ): void {
   if (typeof cfg.mcuNrPath === "string") target.mcuNrPath = cfg.mcuNrPath;
+  if (typeof cfg.mcuConstantsLibPath === "string") target.mcuConstantsLibPath = cfg.mcuConstantsLibPath;
   if (typeof cfg.enableSolverValidation === "boolean") {
     target.enableSolverValidation = cfg.enableSolverValidation;
   }

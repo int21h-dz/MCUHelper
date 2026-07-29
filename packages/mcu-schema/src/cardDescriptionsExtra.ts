@@ -231,6 +231,22 @@ export const EXTRA_CARD_DESCRIPTIONS: ExtraCard[] = [
     description: "Список номеров реакций для регистрации скоростей (см. также RCT).",
     fragment: "registration",
   },
+  {
+    label: "NUCOFF",
+    title: "Отключение регистрации по нуклидам",
+    syntax: "NUCOFF",
+    description:
+      "При наличии этой карты регистрация скоростей реакций для нуклидов в отдельности не производится.",
+    fragment: "registration",
+  },
+  {
+    label: "URBMK",
+    title: "Пользовательский ввод (RBMK / site-specific)",
+    syntax: "URBMK filename",
+    description:
+      "Кастомная карта (есть не во всех сборках MCU): подключение пользовательского файла ввода. Имя файла — 2-й параметр (например `userf`). При отсутствии файла MCU пишет в LST `USER input file not exist`.",
+    fragment: "registration",
+  },
   // --- Траектории / CALD неаналог ---
   {
     label: "WTOB",
@@ -238,6 +254,14 @@ export const EXTRA_CARD_DESCRIPTIONS: ExtraCard[] = [
     syntax: "WTOB w1 w2 …",
     description:
       "Множители веса wi для вторичных частиц, рождённых в регистрационном объекте i; wi=0 — частицы не моделируются.",
+    fragment: "trajectory",
+  },
+  {
+    label: "NSKIP",
+    title: "Число отбрасываемых серий (синоним NSKI)",
+    syntax: "NSKIP n",
+    description:
+      "Количество первых серий, не попадающих в статистику (в ряде вариантов MCU встречается как NSKIP вместо NSKI).",
     fragment: "trajectory",
   },
   {
@@ -260,7 +284,7 @@ export const EXTRA_CARD_DESCRIPTIONS: ExtraCard[] = [
     title: "Ценности по объектам",
     syntax: "INPO V1 V2 …",
     description: "Ценности для регистрационных объектов; недостающие позиции заполняются единицами.",
-    fragment: "trajectory",
+    fragment: "calculationControl",
   },
   {
     label: "XYZ0",
@@ -268,35 +292,35 @@ export const EXTRA_CARD_DESCRIPTIONS: ExtraCard[] = [
     syntax: "XYZ0 x y z | XYZ0 x y",
     description:
       "Центр сферической (3 числа) или ось цилиндрической (2 числа) системы для весового окна по геометрии.",
-    fragment: "trajectory",
+    fragment: "calculationControl",
   },
   {
     label: "RADS",
     title: "Радиусы слоёв весового окна",
     syntax: "RADS r1 r2 …",
     description: "Возрастающие радиусы слоёв r1<r2<… для разбиения пространства весового окна.",
-    fragment: "trajectory",
+    fragment: "calculationControl",
   },
   {
     label: "INPM",
     title: "Ценности VE по радиусу и энергии",
     syntax: "INPM …",
     description: "Матрица NR×NE ценностей VEij (по строкам) для весового окна; NR — число слоёв RADS, NE — WWEN.",
-    fragment: "trajectory",
+    fragment: "calculationControl",
   },
   {
     label: "SANG",
     title: "Разбиение по углу (косинусы)",
     syntax: "SANG s1 s2 …",
     description: "Границы -1<s1<s2<…<1 по косинусу угла для угловой зависимости весового окна.",
-    fragment: "trajectory",
+    fragment: "calculationControl",
   },
   {
     label: "INRA",
     title: "Ценности по радиусу и углу",
     syntax: "INRA …",
     description: "Матрица NR×NA ценностей VA для углового разбиения SANG (опционально).",
-    fragment: "trajectory",
+    fragment: "calculationControl",
   },
   {
     label: "SETT",
@@ -304,7 +328,7 @@ export const EXTRA_CARD_DESCRIPTIONS: ExtraCard[] = [
     syntax: "SETT N|PH|EL|PO",
     description:
       "К какому типу частиц относятся следующие карты неаналогового моделирования (N/PH/EL/PO). По умолчанию N.",
-    fragment: "trajectory",
+    fragment: "calculationControl",
   },
   {
     label: "SERIES",

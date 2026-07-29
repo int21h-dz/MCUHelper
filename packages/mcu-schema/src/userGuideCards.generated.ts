@@ -12,7 +12,7 @@ export const USER_GUIDE_CARDS = [
     "label": "ACEPT",
     "title": "ACEPT",
     "syntax": "ACEPT …",
-    "description": "включение/выключение в подмодуле FARION для расчёта резонансного",
+    "description": "включение/выключение в подмодуле FARION для расчёта резонансного поглощения в области неразрешённых резонансов будет использоваться метод вероятностных таблиц Левитта (при наличии соответствующих данных в файлах библиотеки).",
     "fragment": "physical"
   },
   {
@@ -47,14 +47,14 @@ export const USER_GUIDE_CARDS = [
     "label": "BAL",
     "title": "BAL",
     "syntax": "BAL …",
-    "description": "при наличии этой карты будут вычисляться функционалы баланса",
+    "description": "при наличии этой карты будут вычисляться функционалы баланса нейтронов в системе, в том числе утечка из системы.",
     "fragment": "registration"
   },
   {
     "label": "BCRIT",
     "title": "BCRIT",
-    "syntax": "BCRIT value",
-    "description": "[EABS] [MNEN list] [ZNEN list] [ONEN list] [MPHEN list] [ZPHEN list] [OPHEN list] [MELEN list] [ZELEN list] [OELEN list] [NUCOFF] [PERC value1] [FIXED] [NRET value1 value2]",
+    "syntax": "BCRIT …",
+    "description": "вычисляет значения эффективного коэффициента размножения (необходимо наличие карты KEFF) для value значений параметра Bz (необходимо наличие карты BUCL): B z(i) = Bz * i / value, i = value. На этапе финальной обработки по полученным значениям эффективного коэффициента размножения вычисляется критическое значение баклинга с помощью линейной интерполяции.",
     "fragment": "registration"
   },
   {
@@ -67,8 +67,8 @@ export const USER_GUIDE_CARDS = [
   {
     "label": "BMAX",
     "title": "BMAX",
-    "syntax": "BMAX maxbur",
-    "description": "[VOL V1, V2,..., Vn,..., Vnmat] [BUCL value1 value2 value3] FINISH commentary",
+    "syntax": "BMAX …",
+    "description": "карта позволяет выполнить подготовку сечений только для первых maxbur материалов, описанных в разделе исходных данных для физического модуля. Это позволяет увеличить скорость расчета состояния. Карта не работает при наличии в исходных данных карты BURALL.",
     "fragment": "burnupRegistration"
   },
   {
@@ -88,16 +88,16 @@ export const USER_GUIDE_CARDS = [
   {
     "label": "BUCL",
     "title": "BUCL",
-    "syntax": "BUCL Bx, By, Bz",
-    "description": "[BCRIT value] [EABS] [MNEN list] [ZNEN list] [ONEN list] [MPHEN list] [ZPHEN list] [OPHEN list] [MELEN list] [ZELEN list] [OELEN list] [NUCOFF] [PERC value1] [FIXED] [NRET value1 value2]",
-    "fragment": "burnupRegistration"
+    "syntax": "BUCL …",
+    "description": "задает компоненты вектора геометрического параметра B (баклинга), характеризующего утечку нейтронов, и используется только п ри решении асимптотической задачи. Если решается асимптотическая задача, то в данных к геометрическому модулю требуется задать граничное условие трансляции вдоль направлений с ненулевыми значениями B.",
+    "fragment": "registration"
   },
   {
     "label": "BURALL",
     "title": "BURALL",
     "syntax": "BURALL …",
-    "description": "использованием карты BURALL позволяет наиболее полно использовать возможности",
-    "fragment": "burnupRegistration"
+    "description": "при наличии этой карты модуль готовит сечения и потоки для всех материалов. Это реком ендуемый режим работы, позволяющий наиболее полно использовать возможности модуля выгорания.",
+    "fragment": "burnup"
   },
   {
     "label": "CLEF",
@@ -159,7 +159,7 @@ export const USER_GUIDE_CARDS = [
     "label": "DEFPRN",
     "title": "DEFPRN",
     "syntax": "DEFPRN …",
-    "description": "печатаются параметры нуклидов с учетом переопределений, сделанных",
+    "description": "печатаются параметры нуклидов с учетом переопределений, сделанных пользователем с помощью карт DEF.",
     "fragment": "physical"
   },
   {
@@ -167,7 +167,7 @@ export const USER_GUIDE_CARDS = [
     "title": "DELN",
     "syntax": "DELN valdeln",
     "description": "[ACEPT] [ACERR valacerr] [PHOT valphot] [WPHO valwpho] [IWPHN valiwphn] [EGPH valegph1,valegph2] [ELEC valelec] [EGEL valegel1,valegel2] [PSIN valpsin] [PSGR valpsgr] [MATFIL list] [MATPRN] [SIPRN] [DEFPRN] [MATWGT] [MATREP] [VOL V1, V2,..., Vn,..., Vnmat] [STOP]",
-    "fragment": "registration"
+    "fragment": "physical"
   },
   {
     "label": "DOS",
@@ -179,15 +179,15 @@ export const USER_GUIDE_CARDS = [
   {
     "label": "DPNT",
     "title": "DPNT",
-    "syntax": "DPNT x1,y1,z1,R1,…,xN,yN,zN,RN",
-    "description": "[DRING x1,y1,z1,r1,R1,…,xN,yN,zN,rN,RN] [NENRG A, E1,…,EN] [NFUNC A, F1,…,FN] [PENRG A, E1,…,EN] [PFUNC A, F1,…,FN] END В этом разделе карты, начинающиеся с буквы M относятся к материалам, Z — зонам, а O — к объектам.",
+    "syntax": "DPNT …",
+    "description": "карта используется для расчета локальной оценки потока в точке методом точечного детектора. ( xi,yi,zi) – положение i-го точечного детектора, Ri,0 – радиус его фиктивной сферы. В файле исходных данных может быть использована только одна такая карта.",
     "fragment": "registration"
   },
   {
     "label": "DRING",
     "title": "DRING",
-    "syntax": "DRING x1,y1,z1,r1,R1,…,xN,yN,zN,rN,RN",
-    "description": "[NENRG A, E1,…,EN] [NFUNC A, F1,…,FN] [PENRG A, E1,…,EN] [PFUNC A, F1,…,FN] END В этом разделе карты, начинающиеся с буквы M относятся к материалам, Z — зонам, а O — к объектам.",
+    "syntax": "DRING …",
+    "description": "карта используется для расчета локальной оценки потока в точке методом кольцевого детектора. ( xi,yi,zi) – положение центра i-го кольцевого детектора, ri – радиус кольцевого детектора, Ri – радиус фиктивной сферы точечного детектора после программного определения его положения. В файле исходных данных может быть использована только одна такая карта.",
     "fragment": "registration"
   },
   {
@@ -201,7 +201,7 @@ export const USER_GUIDE_CARDS = [
     "label": "EABS",
     "title": "EABS",
     "syntax": "EABS …",
-    "description": "при наличии этой карты вычисляется средняя энергия поглощения",
+    "description": "при наличии этой карты вычисляется средняя энергия поглощения нейтрона.",
     "fragment": "registration"
   },
   {
@@ -242,8 +242,8 @@ export const USER_GUIDE_CARDS = [
   {
     "label": "EGEL",
     "title": "EGEL",
-    "syntax": "EGEL valegel1,valegel2",
-    "description": "[PSIN valpsin] [PSGR valpsgr] [MATFIL list] [MATPRN] [SIPRN] [DEFPRN] [MATWGT] [MATREP] [VOL V1, V2,..., Vn,..., Vnmat] [STOP]",
+    "syntax": "EGEL …",
+    "description": "имя управляющего параметра, определяющего верхнюю и нижнюю границы библиотеки задачи для расчёта взаимодействий электронов и позитронов со средой.",
     "fragment": "physical"
   },
   {
@@ -257,7 +257,7 @@ export const USER_GUIDE_CARDS = [
     "label": "EGRC",
     "title": "EGRC",
     "syntax": "EGRC …",
-    "description": "имя управляющего массива параметров, определяющего энергетические",
+    "description": "имя управляющего массива параметров, определяющего энергетические границы областей работы нейтронных подмодулей составного физического модуля.",
     "fragment": "physical"
   },
   {
@@ -278,13 +278,14 @@ export const USER_GUIDE_CARDS = [
     "label": "END",
     "title": "END",
     "syntax": "END …",
-    "description": "имя карты окончания описания материала. Эта карта может быть"
+    "description": "окончание раздела. Эта карта является обязательной. Для общих регистрационных областей в картах MFLU и MRCT (ZFLU и ZRCT, OFLU и ORCT – аналогично) будут вычисляться макроскопические сечения по всей области для тех типов реакций, которые перечислены в карте RCT.",
+    "fragment": "physical"
   },
   {
     "label": "ENERGY",
     "title": "ENERGY",
-    "syntax": "ENERGY list",
-    "description": "[SPECTR value] [SFLUX] [DPNT x1,y1,z1,R1,…,xN,yN,zN,RN] [DRING x1,y1,z1,r1,R1,…,xN,yN,zN,rN,RN] [NENRG A, E1,…,EN] [NFUNC A, F1,…,FN] [PENRG A, E1,…,EN] [PFUNC A, F1,…,FN] END В этом разделе карты, начинающиеся с буквы M относятся к материалам, Z — зонам, а O — к объектам.",
+    "syntax": "ENERGY …",
+    "description": "эти карты определяют значения нижних границ энергетических регистрационных групп в эВ для одной энергетической сетки. Верхняя граница последней энергетической группы равна бесконечности. Каждая карта задает одну независимую энергетическую сетку. Регистрация ведется отдельно для каждой сетки. Внутри одного раздела может быть использовано любое количество таких карт. При отсутствии хотя бы одной карты регистрация для данного раздела не ведется. Отсутствие значений в карте приводит к ошибке.",
     "fragment": "registration"
   },
   {
@@ -326,7 +327,8 @@ export const USER_GUIDE_CARDS = [
     "label": "FINISH",
     "title": "FINISH",
     "syntax": "FINISH [commentary]",
-    "description": "Здесь FINISH - признак окончания ввода данных к физическому модулю. commentary - текст произвольного содержания. Коррекция данных с помощью файлов PDC 8.10 При работе с исходными данными для физическ ого модуля возможно выполнить коррекцию некоторых данных с помощью внешних текстовых файлов с расширениями вида PDCn (PIN Data Correction), где n может принимать значения от 1 до 9 или отсутствовать (соответствует n=0). При наличии таких фалов в папке с ра счетом их обработка выполняется автоматически. Обработка производится в порядке увеличения n, т.е. в первую очередь будет обработан файл с расширением PDC, а в последнюю – PDC9."
+    "description": "Здесь FINISH - признак окончания ввода данных к физическому модулю. commentary - текст произвольного содержания. Коррекция данных с помощью файлов PDC 8.10 При работе с исходными данными для физическ ого модуля возможно выполнить коррекцию некоторых данных с помощью внешних текстовых файлов с расширениями вида PDCn (PIN Data Correction), где n может принимать значения от 1 до 9 или отсутствовать (соответствует n=0). При наличии таких фалов в папке с ра счетом их обработка выполняется автоматически. Обработка производится в порядке увеличения n, т.е. в первую очередь будет обработан файл с расширением PDC, а в последнюю – PDC9.",
+    "fragment": "physical"
   },
   {
     "label": "FISP",
@@ -346,7 +348,7 @@ export const USER_GUIDE_CARDS = [
     "label": "FIXED",
     "title": "FIXED",
     "syntax": "FIXED …",
-    "description": "при наличии этой карты создается файл, содержащий результаты работы",
+    "description": "при наличии этой карты создается файл, содержащий результаты работы модуля регистрации в фиксированном формате.",
     "fragment": "registration"
   },
   {
@@ -396,7 +398,7 @@ export const USER_GUIDE_CARDS = [
     "title": "INPE",
     "syntax": "INPE  <массив ценностей>",
     "description": "<массив ценностей> - массив положительных действительных чисел. Число этих чисел должно быть таким же, как число отрезков. Ценности регистрационных объектов задаются предложением INPO <массив ценностей> <массив ценностей> - массив положительных действительных чисел. Длина этого массива может не совпадать с реальным числом регистрационных объектов. Если длина массива меньше этого числа, недостающие позиции заполняются единицами. Режим расщепления/рулетки включается в файл параметров с расширением MEM по ключу +SPLRUL. Режим не совмещается с режимом весового окна и с режимом поверхностного источника.",
-    "fragment": "calculationControl"
+    "fragment": "trajectory"
   },
   {
     "label": "INPM",
@@ -410,7 +412,7 @@ export const USER_GUIDE_CARDS = [
     "title": "INPO",
     "syntax": "INPO  <массив ценностей>",
     "description": "<массив ценностей> - массив положительных действительных чисел. Длина этого массива может не совпадать с реальным числом регистрационных объектов. Если длина массива меньше этого числа, недостающие позиции заполняются единицами. Режим расщепления/рулетки включается в файл параметров с расширением MEM по ключу +SPLRUL. Режим не совмещается с режимом весового окна и с режимом поверхностного источника.",
-    "fragment": "calculationControl"
+    "fragment": "trajectory"
   },
   {
     "label": "INRA",
@@ -437,20 +439,21 @@ export const USER_GUIDE_CARDS = [
     "label": "KEFF",
     "title": "KEFF",
     "syntax": "KEFF …",
-    "description": "(необходимо наличие карты KEFF) для value значений параметра Bz (необходимо наличие",
+    "description": "при наличии этой карты будет рассчитываться эффективный коэффициент размножения нейтронов в рассчитываемой системе.",
     "fragment": "registration"
   },
   {
     "label": "LATT",
     "title": "LATT",
     "syntax": "LATT   <имя генератора сдвигов>",
-    "description": "Здесь <имя генератора сдвигов> - S2AR Структура дальнейших строк зависит от используемого генератора сдвигов. В настоящее время реализован только один такой генератор, называющийся S2AR, исходные данные для которого будут описаны. Этот генератор соответствует правильной параллелограммной решетке, подобной генерируемой генератором сдвигов G2AR в модуле NCG. Входные данные состоят из следующих строк. BOUN <mi,ni> <mj,nj> Здесь <mi,ni> - пара целых чисел, которые определяют диапазон изменения первого индекса i, <mj,nj> - пара целых чисел, которые определяют диапазон изменения второго индекса j."
+    "description": "Здесь <имя генератора сдвигов> - S2AR Структура дальнейших строк зависит от используемого генератора сдвигов. В настоящее время реализован только один такой генератор, называющийся S2AR, исходные данные для которого будут описаны. Этот генератор соответствует правильной параллелограммной решетке, подобной генерируемой генератором сдвигов G2AR в модуле NCG. Входные данные состоят из следующих строк. BOUN <mi,ni> <mj,nj> Здесь <mi,ni> - пара целых чисел, которые определяют диапазон изменения первого индекса i, <mj,nj> - пара целых чисел, которые определяют диапазон изменения второго индекса j.",
+    "fragment": "geometry"
   },
   {
     "label": "LIFE",
     "title": "LIFE",
     "syntax": "LIFE …",
-    "description": "при наличии этой карты будет рассчитываться среднее время жизни",
+    "description": "при наличии этой карты будет рассчитываться среднее время жизни нейтронов в моделируемой системе.",
     "fragment": "registration"
   },
   {
@@ -463,15 +466,15 @@ export const USER_GUIDE_CARDS = [
   {
     "label": "MATFIL",
     "title": "MATFIL",
-    "syntax": "MATFIL list",
-    "description": "[MATPRN] [SIPRN] [DEFPRN] [MATWGT] [MATREP] [VOL V1, V2,..., Vn,..., Vnmat] [STOP]",
+    "syntax": "MATFIL …",
+    "description": "имя управляющего параметра вывода в файл с расширением MAT материального состава задачи с учетом списков суммарного изотопа и данных в файлах с расширениями вида PDCn в виде исходных данных для физического модуля.",
     "fragment": "physical"
   },
   {
     "label": "MATPRN",
     "title": "MATPRN",
     "syntax": "MATPRN …",
-    "description": "по окончании ввода для каждого материала в формате исходных",
+    "description": "по окончании ввода для каждого материала в формате исходных данных для физического модуля печатается его материальный состав и характеристики.",
     "fragment": "physical"
   },
   {
@@ -485,14 +488,14 @@ export const USER_GUIDE_CARDS = [
     "label": "MATREP",
     "title": "MATREP",
     "syntax": "MATREP …",
-    "description": "осуществляет замену состава всех материалов на первый из отоп",
+    "description": "осуществляет замену состава всех материалов на первый из отоп первого материала. Предназначена для упрощения расчета весов с помощью карты MATWGT.",
     "fragment": "physical"
   },
   {
     "label": "MATWGT",
     "title": "MATWGT",
     "syntax": "MATWGT …",
-    "description": "рассчитывается вес каждого материала в граммах. Готовится",
+    "description": "рассчитывается вес каждого материала в граммах. Готовится информация по суммарному весу каждого нуклида модели, а также по материалам с совпадающим материальным составом. Результат выдается в файл с расширением PINC.",
     "fragment": "physical"
   },
   {
@@ -513,28 +516,28 @@ export const USER_GUIDE_CARDS = [
     "label": "MDOS",
     "title": "MDOS",
     "syntax": "MDOS …",
-    "description": "эти карты определяют номера регистрационных областей",
+    "description": "эти карты определяют номера регистрационных областей (соответственно материалов, зон и объектов) в которых будут рассчитываться скорости дозиметрических реакций, заданные с помощью карты DOS.",
     "fragment": "registration"
   },
   {
     "label": "MELEN",
     "title": "MELEN",
-    "syntax": "MELEN list",
-    "description": "[ZELEN list] [OELEN list] [NUCOFF] [PERC value1] [FIXED] [NRET value1 value2]",
+    "syntax": "MELEN …",
+    "description": "эти карты определяют номера регистрационных областей (соответственно материалов, зон и объектов), в которых вычисляется поглощенная энергия вследствие взаимодействия электронов с веществом.",
     "fragment": "registration"
   },
   {
     "label": "MFLU",
     "title": "MFLU",
-    "syntax": "MFLU list",
-    "description": "[ZFLU list] [OFLU list] [LEAK] [MIGL] [MRCT list] [ZRCT list] [ORCT list] [MDOS list] [ZDOS list] [ODOS list] [MPOW value1]",
+    "syntax": "MFLU …",
+    "description": "эти карты определяют номера регистрационных областей (соответственно материалов, зон и объектов) в которых будут рассчитываться потоки.",
     "fragment": "registration"
   },
   {
     "label": "MIR",
     "title": "MIR",
     "syntax": "MIR …",
-    "description": "1,-1,0 1",
+    "description": "1,-1,0 1 MIR 0,0,1 0 MIR 0,0,-1 1 END Рисунок А.18 – Пример задания контейнера Второй способ - контейнером служит первое тело в секции описания тел. В качестве контейнера можно использовать тела: SPH, RPP, HEX, RCZ, BOX (описание секции тел).",
     "fragment": "geometry"
   },
   {
@@ -554,22 +557,22 @@ export const USER_GUIDE_CARDS = [
   {
     "label": "MNEN",
     "title": "MNEN",
-    "syntax": "MNEN list",
-    "description": "[ZNEN list] [ONEN list] [MPHEN list] [ZPHEN list] [OPHEN list] [MELEN list] [ZELEN list] [OELEN list] [NUCOFF] [PERC value1] [FIXED] [NRET value1 value2]",
+    "syntax": "MNEN …",
+    "description": "эти карты определяют номера регистрационных областей (соответственно материалов, зон и объектов), в которых вычисляется поглощенная энергия вследствие взаимодействия нейтронов с веществом.",
     "fragment": "registration"
   },
   {
     "label": "MOM4",
     "title": "MOM4",
     "syntax": "MOM4 …",
-    "description": "при наличии этой карты помимо первого и второго центральных",
+    "description": "при наличии этой карты помимо первого и второго центральных моментов для всех рассчитываемых функционалов будут определяться также и третий и четвертый центральные моменты.",
     "fragment": "registration"
   },
   {
     "label": "MPHEN",
     "title": "MPHEN",
-    "syntax": "MPHEN list",
-    "description": "[ZPHEN list] [OPHEN list] [MELEN list] [ZELEN list] [OELEN list] [NUCOFF] [PERC value1] [FIXED] [NRET value1 value2]",
+    "syntax": "MPHEN …",
+    "description": "эти карты определяют номера регистрационных областей (соответственно материалов, зон и объектов), в которых вычисляется поглощенная энергия вследствие взаимодействия фотонов с веществом.",
     "fragment": "registration"
   },
   {
@@ -582,8 +585,15 @@ export const USER_GUIDE_CARDS = [
   {
     "label": "MRCT",
     "title": "MRCT",
-    "syntax": "MRCT list",
-    "description": "[ZRCT list] [ORCT list] [MDOS list] [ZDOS list] [ODOS list] [MPOW value1]",
+    "syntax": "MRCT …",
+    "description": "эти карты определяют номера регистрационных областей (соответственно материалов, зон и объектов) в которых будут рассчитываться скорости реакций, заданные с помощью карт RCT и FRM.",
+    "fragment": "registration"
+  },
+  {
+    "label": "MSMT",
+    "title": "MSMT",
+    "syntax": "MSMT list",
+    "description": "[ZSMT list] [OSMT list] [RCT list] [FRM list] [DOS list] [ENERGY list] [SPECTR value] [SFLUX] [DPNT x1,y1,z1,R1,…,xN,yN,zN,RN] [DRING x1,y1,z1,r1,R1,…,xN,yN,zN,rN,RN] [NENRG A, E1,…,EN] [NFUNC A, F1,…,FN] [PENRG A, E1,…,EN] [PFUNC A, F1,…,FN] END В этом разделе карты, начинающиеся с буквы M относятся к материалам, Z — зонам, а O — к объектам.",
     "fragment": "registration"
   },
   {
@@ -603,15 +613,15 @@ export const USER_GUIDE_CARDS = [
   {
     "label": "NENRG",
     "title": "NENRG",
-    "syntax": "NENRG A, E1,…,EN",
-    "description": "[NFUNC A, F1,…,FN] [PENRG A, E1,…,EN] [PFUNC A, F1,…,FN] END В этом разделе карты, начинающиеся с буквы M относятся к материалам, Z — зонам, а O — к объектам.",
+    "syntax": "NENRG …",
+    "description": "карты служащие для расчета эквивалентной мощности дозы и определяющие переходную функцию для потока нейтронов (NENRG, NFUNC) или фотонов (PENRG, PFUNC) в зависимости от энергии.",
     "fragment": "registration"
   },
   {
     "label": "NET",
     "title": "NET",
-    "syntax": "NET  <имя сети>   <корневой вектор> <число столбцов>",
-    "description": "<число строк>[<число слоев>]",
+    "syntax": "NET …",
+    "description": "метка предложения. <имя сети> - любой идентификатор, являющийся последовательностью из не более чем 6 латинских букв и цифр, начинающийся с буквы. Оно служит для ссылки на данную сеть при описании зоны-носителя сети.",
     "fragment": "geometry"
   },
   {
@@ -624,8 +634,8 @@ export const USER_GUIDE_CARDS = [
   {
     "label": "NFUNC",
     "title": "NFUNC",
-    "syntax": "NFUNC A, F1,…,FN",
-    "description": "[PENRG A, E1,…,EN] [PFUNC A, F1,…,FN] END В этом разделе карты, начинающиеся с буквы M относятся к материалам, Z — зонам, а O — к объектам.",
+    "syntax": "NFUNC …",
+    "description": "карты служащие для расчета эквивалентной мощности дозы и определяющие переходную функцию для потока нейтронов (NENRG, NFUNC) или фотонов (PENRG, PFUNC) в зависимости от энергии.",
     "fragment": "registration"
   },
   {
@@ -645,8 +655,8 @@ export const USER_GUIDE_CARDS = [
   {
     "label": "NRET",
     "title": "NRET",
-    "syntax": "NRET value1 value2",
-    "description": "KEFF – при наличии этой карты будет рассчитываться эффективный коэффициент размножения нейтронов в рассчитываемой системе.",
+    "syntax": "NRET …",
+    "description": "эта карта определяет порядок перебора характеристик функционала при печати в файл стандартной выдачи. (NRET – Nuclide Reaction Energy Tally).",
     "fragment": "registration"
   },
   {
@@ -667,7 +677,7 @@ export const USER_GUIDE_CARDS = [
     "label": "NUCOFF",
     "title": "NUCOFF",
     "syntax": "NUCOFF …",
-    "description": "при наличии этой карты регистрация скоростей реакций для нуклидов в",
+    "description": "при наличии этой карты регистрация скоростей реакций для нуклидов в отдельности не производится.",
     "fragment": "registration"
   },
   {
@@ -681,42 +691,49 @@ export const USER_GUIDE_CARDS = [
     "label": "ODOS",
     "title": "ODOS",
     "syntax": "ODOS …",
-    "description": "эти карты определяют номера регистрационных областей",
+    "description": "эти карты определяют номера регистрационных областей (соответственно материалов, зон и объектов) в которых будут рассчитываться скорости дозиметрических реакций, заданные с помощью карты DOS.",
     "fragment": "registration"
   },
   {
     "label": "OELEN",
     "title": "OELEN",
-    "syntax": "OELEN list",
-    "description": "[NUCOFF] [PERC value1] [FIXED] [NRET value1 value2]",
+    "syntax": "OELEN …",
+    "description": "эти карты определяют номера регистрационных областей (соответственно материалов, зон и объектов), в которых вычисляется поглощенная энергия вследствие взаимодействия электронов с веществом.",
     "fragment": "registration"
   },
   {
     "label": "OFLU",
     "title": "OFLU",
-    "syntax": "OFLU list",
-    "description": "[LEAK] [MIGL] [MRCT list] [ZRCT list] [ORCT list] [MDOS list] [ZDOS list] [ODOS list] [MPOW value1]",
+    "syntax": "OFLU …",
+    "description": "эти карты определяют номера регистрационных областей (соответственно материалов, зон и объектов) в которых будут рассчитываться потоки.",
     "fragment": "registration"
   },
   {
     "label": "ONEN",
     "title": "ONEN",
-    "syntax": "ONEN list",
-    "description": "[MPHEN list] [ZPHEN list] [OPHEN list] [MELEN list] [ZELEN list] [OELEN list] [NUCOFF] [PERC value1] [FIXED] [NRET value1 value2]",
+    "syntax": "ONEN …",
+    "description": "эти карты определяют номера регистрационных областей (соответственно материалов, зон и объектов), в которых вычисляется поглощенная энергия вследствие взаимодействия нейтронов с веществом.",
     "fragment": "registration"
   },
   {
     "label": "OPHEN",
     "title": "OPHEN",
-    "syntax": "OPHEN list",
-    "description": "[MELEN list] [ZELEN list] [OELEN list] [NUCOFF] [PERC value1] [FIXED] [NRET value1 value2]",
+    "syntax": "OPHEN …",
+    "description": "эти карты определяют номера регистрационных областей (соответственно материалов, зон и объектов), в которых вычисляется поглощенная энергия вследствие взаимодействия фотонов с веществом.",
     "fragment": "registration"
   },
   {
     "label": "ORCT",
     "title": "ORCT",
     "syntax": "ORCT …",
-    "description": "эти карты определяют номера регистрационных областей",
+    "description": "эти карты определяют номера регистрационных областей (соответственно материалов, зон и объектов) в которых будут рассчитываться скорости реакций, заданные с помощью карт RCT и FRM.",
+    "fragment": "registration"
+  },
+  {
+    "label": "OSMT",
+    "title": "OSMT",
+    "syntax": "OSMT list",
+    "description": "[RCT list] [FRM list] [DOS list] [ENERGY list] [SPECTR value] [SFLUX] [DPNT x1,y1,z1,R1,…,xN,yN,zN,RN] [DRING x1,y1,z1,r1,R1,…,xN,yN,zN,rN,RN] [NENRG A, E1,…,EN] [NFUNC A, F1,…,FN] [PENRG A, E1,…,EN] [PFUNC A, F1,…,FN] END В этом разделе карты, начинающиеся с буквы M относятся к материалам, Z — зонам, а O — к объектам.",
     "fragment": "registration"
   },
   {
@@ -730,7 +747,7 @@ export const USER_GUIDE_CARDS = [
     "label": "PARM",
     "title": "PARM",
     "syntax": "PARM …",
-    "description": "P0XY,-P0XY,2.5 /2 -P0XY,P0XY,2.5 P0XY,P0XY,2.5",
+    "description": "P0XY,-P0XY,2.5 /2 -P0XY,P0XY,2.5 P0XY,P0XY,2.5 /2 P0XY,1.5-P0XY,2.5 * C=C SHOW * C=C RGMM V01 4.1888 0.1 3612.8 0.2 FINISH 9.2.6.3 Генератор сдвигов G2MP Генератор сдвигов G2 MP, так же. как и генератор G2AR используется для определения решетки, получаемой из регулярного двумерного массива элементов. В отличие от сложного и ненаглядного формата генератора G2AR, генератор G2 MP использует картограмму, аналогичную той, которая используется при описании сетей.",
     "fragment": "geometry"
   },
   {
@@ -743,22 +760,22 @@ export const USER_GUIDE_CARDS = [
   {
     "label": "PENRG",
     "title": "PENRG",
-    "syntax": "PENRG A, E1,…,EN",
-    "description": "[PFUNC A, F1,…,FN] END В этом разделе карты, начинающиеся с буквы M относятся к материалам, Z — зонам, а O — к объектам.",
+    "syntax": "PENRG …",
+    "description": "карты служащие для расчета эквивалентной мощности дозы и определяющие переходную функцию для потока нейтронов (NENRG, NFUNC) или фотонов (PENRG, PFUNC) в зависимости от энергии.",
     "fragment": "registration"
   },
   {
     "label": "PERC",
     "title": "PERC",
     "syntax": "PERC …",
-    "description": "Примечание. Карты PERC, FIXED, NRET используются только на этапе финальной",
+    "description": "определяет способ печати статистических погрешностей. value1 – при значении равном 0 погрешности печатаются в абсолютных величинах, при 1 – в процентах (значение по умолчанию – 1).",
     "fragment": "registration"
   },
   {
     "label": "PFUNC",
     "title": "PFUNC",
-    "syntax": "PFUNC A, F1,…,FN",
-    "description": "END В этом разделе карты, начинающиеся с буквы M относятся к материалам, Z — зонам, а O — к объектам.",
+    "syntax": "PFUNC …",
+    "description": "карты служащие для расчета эквивалентной мощности дозы и определяющие переходную функцию для потока нейтронов (NENRG, NFUNC) или фотонов (PENRG, PFUNC) в зависимости от энергии.",
     "fragment": "registration"
   },
   {
@@ -814,7 +831,7 @@ export const USER_GUIDE_CARDS = [
     "label": "PTYPE",
     "title": "PTYPE",
     "syntax": "PTYPE …",
-    "description": "обязательная первая карта раздела.",
+    "description": "обязательная первая карта раздела. value1 – номер типа частиц, для которых при накоплении статистики будут использоваться заданные в этом разделе условия. Нумерация соответствует нумерации, принятой в физическом модуле (1 – нейтроны, 2 – фотоны, 3 – электроны).",
     "fragment": "registration"
   },
   {
@@ -835,7 +852,7 @@ export const USER_GUIDE_CARDS = [
     "label": "RCZD",
     "title": "RCZD",
     "syntax": "RCZD …",
-    "description": "означает цилиндр с внутренним распределением вероятностей рождения.",
+    "description": "означает цилиндр с внутренним распределением вероятностей рождения. В настоящее время реализовано лишь независимое по высоте и радиусу азимутально-симметричное распределение. Оба независимых распределения могут быть дискретными и кусочно-линейными.",
     "fragment": "source"
   },
   {
@@ -871,13 +888,13 @@ export const USER_GUIDE_CARDS = [
     "title": "SETT",
     "syntax": "SETT np",
     "description": "Управляющий параметр np может принимать значения N, PH , EL, PO. (по умолчанию np равно N). Значение N означает что все дальнейшие строки данных для неаналогового моделирования относятся к нейтронам, значение PH – к фотонам, EL – к электронам, PO – к позитронам. Таким образом, если решается чисто нейтронная задача, то строка задания типа частицы не нужна.",
-    "fragment": "calculationControl"
+    "fragment": "trajectory"
   },
   {
     "label": "SFLUX",
     "title": "SFLUX",
     "syntax": "SFLUX …",
-    "description": "текущем разделе параметров регистрации (карты SFLUX + MCUR, ZCUR и/или OCUR)",
+    "description": "при наличии этой карты для регистрационных областей, перечисленных в текущем разделе регистрации в картах MCUR, ZCUR и/или OCUR, вместо одно - и двусторонних токов будут вычисляться поверхностные потоки на границе этих областей.",
     "fragment": "registration"
   },
   {
@@ -905,7 +922,7 @@ export const USER_GUIDE_CARDS = [
     "label": "SIPRN",
     "title": "SIPRN",
     "syntax": "SIPRN …",
-    "description": "для каждого материала печатаются сечения полученн ого суммарного",
+    "description": "для каждого материала печатаются сечения полученн ого суммарного изотопа.",
     "fragment": "physical"
   },
   {
@@ -918,8 +935,8 @@ export const USER_GUIDE_CARDS = [
   {
     "label": "SPECTR",
     "title": "SPECTR",
-    "syntax": "SPECTR value",
-    "description": "[SFLUX] [DPNT x1,y1,z1,R1,…,xN,yN,zN,RN] [DRING x1,y1,z1,r1,R1,…,xN,yN,zN,rN,RN] [NENRG A, E1,…,EN] [NFUNC A, F1,…,FN] [PENRG A, E1,…,EN] [PFUNC A, F1,…,FN] END В этом разделе карты, начинающиеся с буквы M относятся к материалам, Z — зонам, а O — к объектам.",
+    "syntax": "SPECTR …",
+    "description": "при наличие этой карты функционалы потока и скоростей реакций на этапе финальной выдаче делятся на ширину энергетической группы ( value = 1) или на разницу логарифмов от границ энергетической группы (value = 2). При value = 0 (значение по умолчанию) финальная выдача происходит стандартно.",
     "fragment": "registration"
   },
   {
@@ -933,13 +950,15 @@ export const USER_GUIDE_CARDS = [
     "label": "STEP",
     "title": "STEP",
     "syntax": "STEP …",
-    "description": "Опция требует наличия карты STEP, хотя и не использует ее значений."
+    "description": "Опция требует наличия карты STEP, хотя и не использует ее значений.",
+    "fragment": "burnup"
   },
   {
     "label": "STOP",
     "title": "STOP",
     "syntax": "STOP …",
-    "description": "останавливает выполнение задачи после окончания чтения исходных"
+    "description": "останавливает выполнение задачи после окончания чтения исходных данных для физического модуля.",
+    "fragment": "physical"
   },
   {
     "label": "SUMZ",
@@ -959,20 +978,21 @@ export const USER_GUIDE_CARDS = [
     "label": "THOU",
     "title": "THOU",
     "syntax": "THOU …",
-    "description": "час, TDAY – сутки, TYEA – год. Отсчет времени задается строкой TIMP.",
+    "description": "час, TDAY – сутки, TYEA – год. Отсчет времени задается строкой TIMP. Исходные данные записываются так же, как в строке TIMP.",
     "fragment": "burnup"
   },
   {
     "label": "TRANSF",
     "title": "TRANSF",
     "syntax": "TRANSF …",
-    "description": "На рисунке А.37 приводится пример использования карты TRANSF."
+    "description": "На рисунке А.37 приводится пример использования карты TRANSF.",
+    "fragment": "geometry"
   },
   {
     "label": "TTYPE",
     "title": "TTYPE",
-    "syntax": "TTYPE value1",
-    "description": "[MFLU list] [ZFLU list] [OFLU list] [LEAK] [MIGL] [MRCT list] [ZRCT list] [ORCT list] [MDOS list] [ZDOS list] [ODOS list] [MPOW value1]",
+    "syntax": "TTYPE …",
+    "description": "эта карта определяет способ оценки функционалов. value1 – число, определяющее способ оценки функционалов (0 - по точкам столкновений, 1 – по длине пробега, 2 - по точкам поглощений). Значение по умолчанию — 0.",
     "fragment": "registration"
   },
   {
@@ -980,7 +1000,7 @@ export const USER_GUIDE_CARDS = [
     "title": "VOL",
     "syntax": "VOL …",
     "description": "печатается карта VOL с указанием объемов для каждого материал а последовательно,",
-    "fragment": "burnupRegistration"
+    "fragment": "physical"
   },
   {
     "label": "WOBJ",
@@ -1001,7 +1021,7 @@ export const USER_GUIDE_CARDS = [
     "title": "WWEN",
     "syntax": "WWEN  <массив границ отрезков>",
     "description": "<массив границ отрезков> - массив должен быть упорядочен по возрастанию, энергия вводится в эВ. Любая энергия должна попадать в какой -либо отрезок, поэтому последнее число должно быть очень большим. Число отрезков совпадает с числом введенных чисел, поскольку левая граница первого интервала есть 0. Ценности для отрезков на оси энергии задаются предложением INPE <массив ценностей> <массив ценностей> - массив положительных действительных чисел. Число этих чисел должно быть таким же, как число отрезков. Ценности регистрационных объектов задаются предложением INPO <массив ценностей> <массив ценностей> - массив положительных действительных чисел. Длина этого",
-    "fragment": "calculationControl"
+    "fragment": "trajectory"
   },
   {
     "label": "XYZ0",
@@ -1021,28 +1041,28 @@ export const USER_GUIDE_CARDS = [
     "label": "ZDOS",
     "title": "ZDOS",
     "syntax": "ZDOS …",
-    "description": "эти карты определяют номера регистрационных областей",
+    "description": "эти карты определяют номера регистрационных областей (соответственно материалов, зон и объектов) в которых будут рассчитываться скорости дозиметрических реакций, заданные с помощью карты DOS.",
     "fragment": "registration"
   },
   {
     "label": "ZELEN",
     "title": "ZELEN",
-    "syntax": "ZELEN list",
-    "description": "[OELEN list] [NUCOFF] [PERC value1] [FIXED] [NRET value1 value2]",
+    "syntax": "ZELEN …",
+    "description": "эти карты определяют номера регистрационных областей (соответственно материалов, зон и объектов), в которых вычисляется поглощенная энергия вследствие взаимодействия электронов с веществом.",
     "fragment": "registration"
   },
   {
     "label": "ZFLU",
     "title": "ZFLU",
-    "syntax": "ZFLU list",
-    "description": "[OFLU list] [LEAK] [MIGL] [MRCT list] [ZRCT list] [ORCT list] [MDOS list] [ZDOS list] [ODOS list] [MPOW value1]",
+    "syntax": "ZFLU …",
+    "description": "эти карты определяют номера регистрационных областей (соответственно материалов, зон и объектов) в которых будут рассчитываться потоки.",
     "fragment": "registration"
   },
   {
     "label": "ZNEN",
     "title": "ZNEN",
-    "syntax": "ZNEN list",
-    "description": "[ONEN list] [MPHEN list] [ZPHEN list] [OPHEN list] [MELEN list] [ZELEN list] [OELEN list] [NUCOFF] [PERC value1] [FIXED] [NRET value1 value2]",
+    "syntax": "ZNEN …",
+    "description": "эти карты определяют номера регистрационных областей (соответственно материалов, зон и объектов), в которых вычисляется поглощенная энергия вследствие взаимодействия нейтронов с веществом.",
     "fragment": "registration"
   },
   {
@@ -1055,15 +1075,15 @@ export const USER_GUIDE_CARDS = [
   {
     "label": "ZPHEN",
     "title": "ZPHEN",
-    "syntax": "ZPHEN list",
-    "description": "[OPHEN list] [MELEN list] [ZELEN list] [OELEN list] [NUCOFF] [PERC value1] [FIXED] [NRET value1 value2]",
+    "syntax": "ZPHEN …",
+    "description": "эти карты определяют номера регистрационных областей (соответственно материалов, зон и объектов), в которых вычисляется поглощенная энергия вследствие взаимодействия фотонов с веществом.",
     "fragment": "registration"
   },
   {
     "label": "ZRCT",
     "title": "ZRCT",
-    "syntax": "ZRCT list",
-    "description": "[ORCT list] [MDOS list] [ZDOS list] [ODOS list] [MPOW value1]",
+    "syntax": "ZRCT …",
+    "description": "эти карты определяют номера регистрационных областей (соответственно материалов, зон и объектов) в которых будут рассчитываться скорости реакций, заданные с помощью карт RCT и FRM.",
     "fragment": "registration"
   },
   {

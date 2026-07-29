@@ -56,7 +56,29 @@ export function classifyOtherModule(stmt: StatementNode): string | null {
   if (["SRCD", "SRC", "SPNT", "TYPE", "SNAM", "REPER", "NOBJ"].includes(u)) return "source";
   if (["REGD", "REG", "RGS", "NREG", "ENERG", "KEFF"].includes(u)) return "registration";
   if (["TRJD", "TRJ", "NBAT", "NTOT", "NSKI", "ISTR"].includes(u)) return "trajectory";
-  if (["CALD", "CAL", "NAMV", "NAMVAR", "MAXS", "MAXSER", "STEP", "SERIES"].includes(u)) return "calculationControl";
+  if (
+    [
+      "CALD",
+      "CAL",
+      "NAMV",
+      "NAMVAR",
+      "MAXS",
+      "MAXSER",
+      "STEP",
+      "SERIES",
+      "SETT",
+      "WWEN",
+      "INPE",
+      "INPO",
+      "XYZ0",
+      "RADS",
+      "INPM",
+      "SANG",
+      "INRA",
+    ].includes(u)
+  ) {
+    return "calculationControl";
+  }
   if (u.startsWith("BUR") || u === "FINAL" || u === "CODE" || u === "FISZ" || u === "FISZON") return "burnup";
   return null;
 }

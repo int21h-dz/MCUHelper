@@ -26,7 +26,7 @@ import { expandCartogramTokens } from "./netCartogram";
 import { collectIncludesFromSource } from "./includeResolve";
 import { expandIncludes, expandRepeats } from "./preprocessor";
 import { applyGeometryScopeTransition, initialGeometryScopeState } from "./geometryScope";
-import { isG2mpCartogramRow, looksLikeZoneOverridingFragment, looksLikeZoneStatement } from "./zoneStatement";
+import { isG2mpCartogramRow, latticeTypeUsesCartogram, looksLikeZoneOverridingFragment, looksLikeZoneStatement } from "./zoneStatement";
 import {
   detectFragmentFromLabel,
   FRAGMENT_DISPLAY,
@@ -428,6 +428,7 @@ export function parseDocument(text: string, options: ParseOptions): DocumentAst 
   let currentFragment: FragmentId | null = null;
   const fragmentStarts: { id: FragmentId; line: number }[] = [];
   let finishCount = 0;
+  let finishedAll = false;
   const scopeState = initialGeometryScopeState();
   let currentScope = scopeState.scope;
   let inMaterialBlock = false;
@@ -455,6 +456,10 @@ export function parseDocument(text: string, options: ParseOptions): DocumentAst 
     }
 
     const stmt = mergeStatementLines(lines, i);
+    if (finishedAll) {
+      i = stmt.end + 1;
+      continue;
+    }
     const label = stmt.text.split(/\s+/)[0]?.toUpperCase() ?? "";
     const prevFragment: FragmentId | null = currentFragment;
     currentFragment = detectFragment(label, currentFragment, stmt.text);
@@ -497,6 +502,7 @@ export function parseDocument(text: string, options: ParseOptions): DocumentAst 
       finishCount++;
       inG2mpCartogram = false;
       if (currentFragment === "physical") inMaterialBlock = false;
+      if (/\bALL\b/i.test(stmt.text)) finishedAll = true;
     }
 
     if (label === "EQU" || label === "SET") {
@@ -636,7 +642,14 @@ export function parseDocument(text: string, options: ParseOptions): DocumentAst 
       const raw = stmt.text.replace(/^PARM\s*/i, "").trim();
       const last = lattices[lattices.length - 1]!;
       if (raw) last.positions.push(raw);
-      if (last.latticeType.toUpperCase() === "G2MP") inG2mpCartogram = true;
+      if (latticeTypeUsesCartogram(last.latticeType)) inG2mpCartogram = true;
+    }
+
+    if (inG2mpCartogram && isG2mpCartogramRow(label) && lattices.length > 0) {
+      const vals = stmt.text.split(/\s+/).slice(1);
+      const last = lattices[lattices.length - 1]!;
+      if (!last.typeMap) last.typeMap = [];
+      last.typeMap.push(vals);
     }
 
     if (
@@ -644,7 +657,7 @@ export function parseDocument(text: string, options: ParseOptions): DocumentAst 
       label &&
       !isG2mpCartogramRow(label) &&
       !isIgnorableAuxLine(stmt.text) &&
-      !["PARM", "LISTEL", "LATT"].includes(label)
+      !["PARM", "LISTEL", "LATT", "LFIXSO", "LBLACK"].includes(label)
     ) {
       inG2mpCartogram = false;
     }
@@ -710,7 +723,8 @@ export function parseDocument(text: string, options: ParseOptions): DocumentAst 
       /^M\d+/i.test(label) ||
       /^E-?\d+/i.test(label) ||
       /^I-?\d+/i.test(label) ||
-      /^F-?\d+/i.test(label);
+      /^F-?\d+/i.test(label) ||
+      (inG2mpCartogram && isG2mpCartogramRow(label));
     if (label && !isKnownSpecialLine) {
       diagnostics.push({
         severity: "error",

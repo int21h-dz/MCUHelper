@@ -43,7 +43,12 @@ export function looksLikeZoneOverridingFragment(text: string): boolean {
   return false;
 }
 
-/** Строка картограммы G2MP (L01 … L23). */
+/** Генератор G2MP: после PARM идёт картограмма строк L01…LJ (UserGuide §9.2.6.3). */
+export function latticeTypeUsesCartogram(latticeType: string): boolean {
+  return latticeType.toUpperCase().replace(/\s+/g, "") === "G2MP";
+}
+
+/** Строка картограммы G2MP: метка L + номер строки (L01, L02, …, L10, L23). */
 export function isG2mpCartogramRow(label: string): boolean {
-  return /^L\d+$/i.test(label);
+  return /^L\d{2,}$/i.test(label);
 }

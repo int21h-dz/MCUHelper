@@ -49,10 +49,10 @@ export const BODY_PARAM_GROUPS: Record<string, BodyParamGroup[]> = {
   ],
   BOX: [
     { label: "name", documentation: "Имя тела" },
-    { label: "x,y,z", documentation: "Вершина параллелепипеда" },
-    { label: "e1", documentation: "Первое ребро" },
-    { label: "e2", documentation: "Второе ребро" },
-    { label: "e3", documentation: "Третье ребро" },
+    { label: "B (x,y,z)", documentation: "Радиус-вектор вершины параллелепипеда" },
+    { label: "P1 (x,y,z)", documentation: "Вектор первого ребра из вершины B (направление и длина)" },
+    { label: "P2 (x,y,z)", documentation: "Вектор второго ребра из вершины B" },
+    { label: "P3 (x,y,z)", documentation: "Вектор третьего ребра из вершины B" },
   ],
   PLG: [
     { label: "id", documentation: "Номер полуплоскости" },
@@ -73,9 +73,9 @@ export const BODY_PARAM_GROUPS: Record<string, BodyParamGroup[]> = {
   ],
   SBOX: [
     { label: "name", documentation: "Имя тела" },
-    { label: "e1", documentation: "Первое ребро (вершина в 0)" },
-    { label: "e2", documentation: "Второе ребро" },
-    { label: "e3", documentation: "Третье ребро" },
+    { label: "P1 (x,y,z)", documentation: "Вектор первого ребра (вершина в начале координат)" },
+    { label: "P2 (x,y,z)", documentation: "Вектор второго ребра" },
+    { label: "P3 (x,y,z)", documentation: "Вектор третьего ребра" },
   ],
   SHEX: [
     { label: "name", documentation: "Имя тела" },

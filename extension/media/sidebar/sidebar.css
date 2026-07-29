@@ -484,6 +484,126 @@ body {
   margin: 4px 0;
 }
 
+/* ── Run panel ── */
+.mcu-run-panel {
+  padding-bottom: 12px;
+}
+
+.mcu-run-paths {
+  margin: 8px 12px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mcu-run-path {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: var(--mcu-radius-sm);
+  background: var(--mcu-surface-raised);
+  border: 1px solid var(--mcu-border);
+}
+
+.mcu-run-path-k {
+  flex-shrink: 0;
+  font-size: var(--mcu-size-xs);
+  font-weight: 650;
+  color: var(--panel-accent, var(--mcu-accent));
+  min-width: 42px;
+}
+
+.mcu-run-path-v {
+  font-family: var(--mcu-mono);
+  font-size: var(--mcu-size-xs);
+  color: var(--vscode-descriptionForeground, #888);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcu-run-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 4px;
+}
+
+.mcu-run-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--mcu-border);
+  border-radius: var(--mcu-radius);
+  background: var(--mcu-surface-raised);
+  color: var(--vscode-sideBar-foreground, #ccc);
+  padding: 12px 12px;
+  cursor: pointer;
+  transition: transform 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.12);
+}
+
+.mcu-run-btn:hover:not(.is-disabled) {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--btn-accent, var(--mcu-accent)) 55%, var(--mcu-border));
+  background: color-mix(in srgb, var(--btn-accent, var(--mcu-accent)) 12%, var(--mcu-surface-raised));
+}
+
+.mcu-run-btn:active:not(.is-disabled) {
+  transform: translateY(0);
+}
+
+.mcu-run-btn.is-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.mcu-run-btn-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  background: color-mix(in srgb, var(--btn-accent, var(--mcu-accent)) 22%, transparent);
+  color: var(--btn-accent, var(--mcu-accent));
+}
+
+.mcu-run-btn-icon .mcu-icon {
+  width: 18px;
+  height: 18px;
+  color: inherit;
+}
+
+.mcu-run-btn-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mcu-run-btn-title {
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.mcu-run-btn-sub {
+  font-size: var(--mcu-size-xs);
+  color: var(--vscode-descriptionForeground, #888);
+}
+
+.mcu-run-btn-debug { --btn-accent: #4a9eff; }
+.mcu-run-btn-run { --btn-accent: #22c55e; }
+.mcu-run-btn-continue { --btn-accent: #2dd4bf; }
+.mcu-run-btn-final { --btn-accent: #a78bfa; }
+.mcu-run-btn-setup { --btn-accent: #e8913a; }
+
 .mcu-no-results {
   padding: 20px;
   text-align: center;

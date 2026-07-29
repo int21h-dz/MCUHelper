@@ -142,6 +142,8 @@ export interface LatticeNode {
   elements: string[];
   /** Строки PARM (сырой текст после метки). */
   positions: string[];
+  /** Картограмма прототипов G2MP (строки L01… после PARM). */
+  typeMap?: string[][];
   range: SourceRange;
 }
 

@@ -3,11 +3,11 @@ import {
   FRAGMENT_DISPLAY,
   MODS_VALUES,
   formatCardHover,
+  formatBodyHover,
   fragmentsForLabel,
   getBodyByKey,
   getCardByLabel,
   labelAllowedInFragment,
-  type BodyTypeSchema,
   type FragmentId,
 } from "@mcuhelper/mcu-schema";
 import {
@@ -27,6 +27,7 @@ import {
   findSourceSpectrumAtLine,
   collectZoneBodyRefs,
   getCompositionLineParameterHover,
+  getBodyLineParameterHover,
   looksLikeZoneStatement,
   mcuNuclideAtomicWeight,
   mcuNuclideToIaeaElement,
@@ -117,10 +118,6 @@ function constantValue(index: DocumentIndex, name: string): number | null {
     if (c.name.toUpperCase() === name.toUpperCase()) return v;
   }
   return null;
-}
-
-function formatBodyHover(body: BodyTypeSchema): string {
-  return `**${body.title}** (\`${body.key}\`)\n\n${body.description}\n\nПараметры: ${body.paramNames.join(", ")}`;
 }
 
 function hoverForKeyword(word: string): string | null {
@@ -346,6 +343,13 @@ export function getHoverContent(
     fragmentAtLine === "physical"
       ? getCompositionLineParameterHover(line, pos.character)
       : null;
+  if (
+    !paramHover &&
+    (fragmentAtLine === "geometry" || fragmentAtLine == null) &&
+    !(rawWord && isOnStatementKeyword(line, pos.character, rawWord) && getBodyByKey(rawWord))
+  ) {
+    paramHover = getBodyLineParameterHover(line, pos.character);
+  }
   if (paramHover && index && /GROUP/i.test(paramHover)) {
     const known = [
       ...new Set(index.ast.materials.map((m) => m.group).filter((g): g is string => Boolean(g))),

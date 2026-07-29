@@ -93,6 +93,7 @@ describe("serverHandlers integration", () => {
   it("applyServerSettings and syncSettingsFromInitialize", () => {
     const settings = {
       mcuNrPath: "",
+      mcuConstantsLibPath: "",
       enableSolverValidation: false,
       variantName: "NAME",
       enableIaeaNuclideHover: true,

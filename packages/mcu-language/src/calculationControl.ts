@@ -42,7 +42,7 @@ export function getTotalHistoriesEstimate(ast: DocumentAst): TotalHistoriesEstim
     } else if (label === "MAXS" || label === "MAXSER") {
       const v = parseStatementFirstNumber(stmt.text, vars);
       if (v !== null) maxser = v;
-    } else if (label === "NSKI") {
+    } else if (label === "NSKI" || label === "NSKIP") {
       const v = parseStatementFirstNumber(stmt.text, vars);
       if (v !== null) nski = v;
     }

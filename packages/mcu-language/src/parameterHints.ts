@@ -312,6 +312,29 @@ function nuclideLineSignature(linePrefix: string): ParameterSignatureHelp | null
   );
 }
 
+/** Hover по активному параметру строки тела (BOX, RCZ, …). */
+export function getBodyLineParameterHover(line: string, cursorCharacter: number): string | null {
+  const prefix = linePrefixBeforeCursor(line, cursorCharacter);
+  const trimmed = prefix.trim();
+  if (!trimmed || trimmed.startsWith("*") || trimmed.startsWith("C=")) return null;
+
+  const tokens = splitTokens(trimmed.replace(/;.*/, ""));
+  if (!tokens.length) return null;
+  const head = tokens[0].toUpperCase();
+  let bodyKey = head;
+  if (!getBodyParamGroups(head) && tokens.length > 1) {
+    const second = tokens[1].toUpperCase();
+    if (getBodyParamGroups(second)) bodyKey = second;
+  }
+  if (!getBodyParamGroups(bodyKey)) return null;
+
+  const help = getParameterSignatureHelp(line, cursorCharacter);
+  if (!help) return null;
+  const p = help.parameters[help.activeParameter];
+  if (!p) return null;
+  return `**Параметр:** \`${p.label}\`\n\n${p.documentation ?? ""}`;
+}
+
 /** Hover по активному параметру строки MATR или нуклида. */
 export function getCompositionLineParameterHover(line: string, cursorCharacter: number): string | null {
   const prefix = linePrefixBeforeCursor(line, cursorCharacter);

@@ -5,6 +5,7 @@ import {
   MCU_LABEL_ALIASES,
   MODS_VALUES,
   formatCardHover,
+  formatBodyHover,
   getCardByLabel,
   labelAllowedInFragment,
   parseCardArgContext,
@@ -63,7 +64,7 @@ function cardDocumentation(card: CardSchema, index?: DocumentIndex, line?: numbe
 function bodyDocumentation(body: (typeof BODY_TYPES)[number]) {
   return {
     kind: MarkupKind.Markdown,
-    value: `**${body.title}** (\`${body.key}\`)\n\n${body.description}\n\nПараметры: ${body.paramNames.join(", ")}`,
+    value: formatBodyHover(body),
   };
 }
 

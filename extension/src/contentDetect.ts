@@ -29,15 +29,32 @@ const { detect: detectMcunrContent, score: scoreMcunrContent } = loadDetector();
 
 export { detectMcunrContent, scoreMcunrContent };
 
-const DEFAULT_DETECT_FROM = ["plaintext", "txt", "log", "text", "ansi", "ini"];
+export const DEFAULT_DETECT_FROM_LANGUAGES = ["plaintext", "txt", "log", "text", "ansi", "ini"];
 
-function canAutoDetect(doc: vscode.TextDocument): boolean {
+/** Документ-кандидат на автоопределение MCU-NR (plaintext/ini/untitled и т.п.). */
+export function isLanguageDetectCandidate(doc: vscode.TextDocument): boolean {
   const cfg = vscode.workspace.getConfiguration("mcuhelper");
   if (!cfg.get<boolean>("autoDetectLanguage", true)) return false;
   if (doc.languageId === "mcunr") return false;
   if (doc.uri.scheme !== "file" && doc.uri.scheme !== "untitled") return false;
-  const from = cfg.get<string[]>("autoDetectFromLanguages", DEFAULT_DETECT_FROM);
+  const from = cfg.get<string[]>("autoDetectFromLanguages", DEFAULT_DETECT_FROM_LANGUAGES);
   return from.includes(doc.languageId);
+}
+
+/** Сразу переключить на mcunr при вставке из каталога (доверенный источник). */
+export async function ensureMcunrLanguageForCatalog(
+  doc: vscode.TextDocument,
+  log?: vscode.OutputChannel
+): Promise<boolean> {
+  if (!isLanguageDetectCandidate(doc)) return doc.languageId === "mcunr";
+  try {
+    await vscode.languages.setTextDocumentLanguage(doc, "mcunr");
+    log?.appendLine(`MCU-NR из каталога: ${doc.uri.fsPath || doc.uri.toString()}`);
+    return true;
+  } catch (e) {
+    log?.appendLine(`Не удалось установить язык mcunr: ${e}`);
+    return false;
+  }
 }
 
 /** Установить language id mcunr, если содержимое похоже на MCU-NR. */
@@ -45,7 +62,7 @@ export async function maybeSetMcunrLanguage(
   doc: vscode.TextDocument,
   log?: vscode.OutputChannel
 ): Promise<boolean> {
-  if (!canAutoDetect(doc)) return false;
+  if (!isLanguageDetectCandidate(doc)) return false;
 
   const text = doc.getText();
   const result = scoreMcunrContent(text);

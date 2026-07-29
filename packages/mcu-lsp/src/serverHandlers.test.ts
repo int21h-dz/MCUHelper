@@ -16,7 +16,10 @@ import {
   handleGetIndex,
   handleGetSlice,
   handleValidateInput,
+  handleRunMcuStep,
   resolveDocumentIndex,
+  resolveContinueFinalSession,
+  hasVariantRunArtifacts,
   uriToBaseDir,
   toLspDiagnostic,
 } from "./serverHandlers";
@@ -82,6 +85,44 @@ describe("serverHandlers extended", () => {
     assert.ok(diags.some((d) => d.message === "solver error"));
   });
 
+  it("collectDiagnostics does not duplicate solver diags when extra overlaps cache", () => {
+    const text = fs.readFileSync(path.join(fixtures, "pin_example.mcu"), "utf8");
+    const uri = "file:///fixtures/pin_dup.mcu";
+    const doc = TextDocument.create(uri, "mcunr", 1, text);
+    const index = analyzeDocument(uri, text, 1);
+    const solverDiag = {
+      severity: "error" as const,
+      message: "Include file is absent:'confpd'",
+      code: "mcu-solver",
+      range: {
+        start: { line: 0, character: 0 },
+        end: { line: 0, character: 1 },
+        offset: 0,
+        endOffset: 1,
+      },
+    };
+    setCachedSolverResult(index.hash, {
+      diagnostics: [solverDiag],
+      exitCode: 1,
+      stdout: "",
+      stderr: "",
+    });
+    const extra = [
+      {
+        severity: 1,
+        message: solverDiag.message,
+        code: "mcu-solver",
+        range: {
+          start: { line: 0, character: 0 },
+          end: { line: 0, character: 1 },
+        },
+        source: "mcuhelper",
+      },
+    ];
+    const diags = collectDiagnostics(doc, extra as never);
+    assert.strictEqual(diags.filter((d) => d.message === solverDiag.message).length, 1);
+  });
+
   it("collectDiagnostics ignores expanded #include ghost lines", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-diag-inc-"));
     fs.writeFileSync(path.join(dir, "frag.mcu"), "MATR 1 T=\nU235 1.E-3\nFINISH", "utf8");
@@ -135,6 +176,7 @@ describe("serverHandlers extended", () => {
     const getDoc = (u: string) => (u === uri ? doc : undefined);
     const settings = {
       mcuNrPath: "",
+      mcuConstantsLibPath: "",
       enableSolverValidation: false,
       variantName: "VAR",
       enableIaeaNuclideHover: false,
@@ -268,6 +310,7 @@ FINISH`;
   it("handleValidateInput without document returns error", async () => {
     const settings = {
       mcuNrPath: "",
+      mcuConstantsLibPath: "",
       enableSolverValidation: false,
       variantName: "VAR",
       enableIaeaNuclideHover: false,
@@ -278,5 +321,83 @@ FINISH`;
       () => undefined
     );
     assert.strictEqual(result.ok, false);
+  });
+
+  it("resolveContinueFinalSession uses disk artifacts without memory session", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-sess-"));
+    try {
+      const runDir = path.join(tmp, ".mcuhelper-runs", "burnup");
+      fs.mkdirSync(runDir, { recursive: true });
+      fs.writeFileSync(path.join(runDir, "burnup.DAT"), "x", "utf8");
+      assert.ok(hasVariantRunArtifacts(runDir, "burnup"));
+      const resolved = resolveContinueFinalSession({
+        uri: "file:///no-memory-session",
+        runDir,
+        variantName: "burnup",
+        deckHash: "abc",
+        mode: "f",
+      });
+      assert.ok("session" in resolved);
+      assert.ok(fs.existsSync(path.join(runDir, ".mcuhelper-session.json")));
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("resolveContinueFinalSession fails without artifacts", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-nosess-"));
+    try {
+      const runDir = path.join(tmp, ".mcuhelper-runs", "burnup");
+      fs.mkdirSync(runDir, { recursive: true });
+      const resolved = resolveContinueFinalSession({
+        uri: "file:///empty-run",
+        runDir,
+        variantName: "burnup",
+        deckHash: "abc",
+        mode: "continue",
+      });
+      assert.ok("message" in resolved);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("collectOnly copies FIN for successful calculation mode", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-colfin-"));
+    try {
+      const source = path.join(tmp, "burnup");
+      const runDir = path.join(tmp, ".mcuhelper-runs", "burnup");
+      fs.mkdirSync(runDir, { recursive: true });
+      fs.writeFileSync(source, "PIN 1\nFINISH\n", "utf8");
+      fs.writeFileSync(path.join(runDir, "burnup.fin"), "FIN BODY\n", "utf8");
+      fs.writeFileSync(path.join(runDir, "burnup.lst"), "WARNINGS in initial data of MCU: 0\n", "utf8");
+      const uri = `file:///${source.replace(/\\/g, "/")}`;
+      const doc = TextDocument.create(uri, "mcunr", 1, "PIN 1\nFINISH\n");
+      const settings = {
+        mcuNrPath: "x",
+        mcuConstantsLibPath: "y",
+        enableSolverValidation: false,
+        variantName: "burnup",
+        enableIaeaNuclideHover: false,
+      };
+      const result = await handleRunMcuStep(
+        {
+          uri,
+          variantName: "burnup",
+          mode: "c",
+          collectOnly: true,
+          runDir,
+          sourceFsPath: source,
+          exitCode: 0,
+        },
+        settings,
+        (u) => (u === uri ? doc : undefined)
+      );
+      assert.ok(result.ok);
+      assert.ok(result.finCopiedPath);
+      assert.strictEqual(fs.readFileSync(result.finCopiedPath!, "utf8"), "FIN BODY\n");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });

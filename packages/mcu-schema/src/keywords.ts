@@ -167,6 +167,7 @@ export const MCU_LABELS_BY_FRAGMENT: Record<FragmentId | "shared", readonly stri
     "ZPOEN",
     "ZSMT",
     "ZRTB",
+    "URBMK",
   ],
   burnupRegistration: ["BRGD", "BRG", "BURALL", "BMAX", "BUCL", "VOL"],
   trajectory: [
@@ -177,17 +178,11 @@ export const MCU_LABELS_BY_FRAGMENT: Record<FragmentId | "shared", readonly stri
     "NBAT",
     "NBATCH",
     "NSKI",
+    "NSKIP",
     "WTOB",
     "MIXG",
     "WWEN",
     "INPE",
-    "INPO",
-    "XYZ0",
-    "RADS",
-    "INPM",
-    "SANG",
-    "INRA",
-    "SETT",
   ],
   calculationControl: [
     "CALD",
@@ -211,6 +206,11 @@ export const MCU_LABELS_BY_FRAGMENT: Record<FragmentId | "shared", readonly stri
     "WWEN",
     "INPE",
     "INPO",
+    "XYZ0",
+    "RADS",
+    "INPM",
+    "SANG",
+    "INRA",
     "SETT",
   ],
   burnup: [
@@ -284,6 +284,7 @@ export const MCU_LABEL_ALIASES: Record<string, string> = {
   BURD: "BURN",
   BURNUP: "BURN",
   BRGD: "BRG",
+  NSKIP: "NSKI",
 };
 
 const _all = new Set<string>();

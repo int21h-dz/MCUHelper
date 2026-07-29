@@ -419,6 +419,33 @@ describe("fragment order", () => {
     assert.ok(ast.diagnostics.some((d) => d.code === "card-wrong-fragment" && d.message.includes("DELN")));
   });
 
+  it("CALD weight-window cards from UserGuide 14.2.2 are allowed in calculationControl", () => {
+    const text = [
+      "CALD",
+      "NAMVAR BURNUP",
+      "MAXSER 150",
+      "DTZM 2",
+      "SETT N",
+      "WWEN 0.1 5000 150000000000000",
+      "XYZ0 0 0 0",
+      "RADS 100 160 216 285 350 450 545 750",
+      "INPM 1 1 1 1",
+      "SANG -0.806 -0.6580 -0.4811 -0.2380 0.2380 0.4811 0.6580 0.806",
+      "INRA 0 1 1 1",
+      "FINISH",
+    ].join("\n");
+    const ast = parseDocument(text, { uri: "cald-weight-window.mcu" });
+    const wrongFragment = ast.diagnostics.filter((d) => d.code === "card-wrong-fragment");
+    assert.strictEqual(
+      wrongFragment.length,
+      0,
+      wrongFragment.map((d) => d.message).join("; ")
+    );
+    assert.ok(ast.fragments.some((f) => f.id === "calculationControl"));
+    assert.ok(ast.statements.find((s) => s.label === "XYZ0")?.fragment === "calculationControl");
+    assert.ok(ast.statements.find((s) => s.label === "INRA")?.fragment === "calculationControl");
+  });
+
   it("geometry zones named like registration cards are not card-wrong-fragment", () => {
     const text = [
       "HEAD 3 0",
@@ -729,6 +756,29 @@ FINISH`;
     const diags = analyzeSemantics(ast).filter((d) => d.code === "zone-body");
     assert.strictEqual(diags.length, 0, diags.map((d) => d.message).join("; "));
   });
+
+  it("G2MP LATT: cartogram rows L01… are not unknown-statement", () => {
+    const text = `HEAD 1 0
+CONT T T T
+RCZ C 0 0 0 10 5
+END
+ZZZ C /1:1
+END
+LATT G2MP ZZZ
+LISTEL L16 L24 W16 W24 W36 LWT LAB L2
+PARM 23,23 -11*14.7*COS(60), -11*14.7*SIN(60),HZ -14.7*COS(60), 14.7*SIN(60),0 14.7, 0, 0
+* 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23
+L01 0 0 0 0 L2 L2 L2 L2 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+L02 0 0 0 L2 L2 L2 L2 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+FINISH`;
+    const ast = parseDocument(text, { uri: "g2mp.mcu" });
+    const unknown = ast.diagnostics.filter((d) => d.code === "unknown-statement");
+    assert.strictEqual(unknown.length, 0, unknown.map((d) => d.message).join("; "));
+    const lat = ast.lattices.find((l) => l.latticeType === "G2MP");
+    assert.ok(lat?.typeMap?.length === 2, "cartogram rows stored");
+    assert.deepStrictEqual(lat!.typeMap![0]!.slice(0, 5), ["0", "0", "0", "0", "L2"]);
+    assert.ok(!ast.zones.some((z) => z.name === "L01"), "L01 is cartogram row, not zone");
+  });
 });
 
 describe("ENERGY group bounds", () => {
@@ -769,6 +819,30 @@ FINISH`;
     const ast = parseDocument(text, { uri: "energy-runtest.mcu" });
     const diags = analyzeSemantics(ast).filter((d) => d.code?.startsWith("energy"));
     assert.strictEqual(diags.length, 0, diags.map((d) => d.message).join("; "));
+  });
+
+  it("URBMK and NSKIP are known cards (not unknown-statement)", () => {
+    const text = `RGS
+URBMK userf
+FINISH
+TRJD
+NSKIP 3
+NTOT 1000
+FINISH`;
+    const ast = parseDocument(text, { uri: "urbmk.mcu" });
+    assert.strictEqual(
+      ast.diagnostics.filter((d) => d.code === "unknown-statement").length,
+      0,
+      ast.diagnostics.map((d) => d.message).join("; ")
+    );
+  });
+
+  it("ignores trailing garbage after FINISH ALL", () => {
+    const text = `PIN 1 0
+FINISH ALL
+□`;
+    const ast = parseDocument(text, { uri: "tail.mcu" });
+    assert.ok(!ast.diagnostics.some((d) => d.code === "unknown-statement"));
   });
 
   it("reports garbage standalone line in source block", () => {

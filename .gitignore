@@ -20,6 +20,8 @@ MCU-NR_UserGuide_220519.pdf
 structure.md
 
 # Large RUNTEST cases (local solver regression data)
+RUNTEST/.mcuhelper-runs/
+**/.mcuhelper-runs/
 RUNTEST/3l070626
 RUNTEST/958
 RUNTEST/accumulation
