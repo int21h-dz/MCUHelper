@@ -19,23 +19,6 @@ docs/MCU-NR_UserGuide_220519.txt
 MCU-NR_UserGuide_220519.pdf
 structure.md
 
-# Large RUNTEST cases (local solver regression data)
-RUNTEST/.mcuhelper-runs/
+# Local solver regression / MCU binaries (not in repo)
+RUNTEST/
 **/.mcuhelper-runs/
-RUNTEST/3l070626
-RUNTEST/958
-RUNTEST/accumulation
-RUNTEST/Bochka.inp
-RUNTEST/burnup
-RUNTEST/NZK150.inp
-RUNTEST/radiation
-RUNTEST/source
-RUNTEST/vs_ru
-RUNTEST/BURNUPR/burnup
-RUNTEST/BURNUPR/mcu5.sh
-RUNTEST/BURNUPR/runtest.bat
-RUNTEST/N_PH/gor_sp
-RUNTEST/N_PH/runtest.bat
-RUNTEST/PH_EL/rhdet_pbg
-RUNTEST/PH_EL/runtest.bat
-RUNTEST/pr2/mcuinp
