@@ -1,7 +1,16 @@
 import * as vscode from "vscode";
 import { isMcunrDocument } from "./contentDetect";
+import { THANKS_URL, isAllowedThanksUrl } from "./runPanelHelpers";
 
 export const RUN_PANEL_VIEW_ID = "mcuhelper.run";
+
+const RUN_COMMAND_ALLOWLIST = new Set([
+  "mcuhelper.debugInput",
+  "mcuhelper.runCalculation",
+  "mcuhelper.continueCalculation",
+  "mcuhelper.finalOutput",
+  "mcuhelper.configureSolver",
+]);
 
 function pathBasename(doc: vscode.TextDocument): string {
   const name = doc.fileName.split(/[/\\]/).pop() ?? "NAME";
@@ -24,8 +33,13 @@ function runPanelHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string
   <meta http-equiv="Content-Security-Policy" content="${csp}">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="${css}">
+  <style>
+    html, body.mcu-run-webview { height: auto; min-height: 0; margin: 0; padding: 0; overflow: hidden; }
+    body.mcu-run-webview #root { display: block; line-height: 0; }
+    body.mcu-run-webview .mcu-run-panel { line-height: normal; }
+  </style>
 </head>
-<body>
+<body class="mcu-run-webview">
   <div id="root"></div>
   <script src="${icons}"></script>
   <script src="${js}"></script>
@@ -57,8 +71,18 @@ export class RunPanelViewProvider implements vscode.WebviewViewProvider {
         return;
       }
       if (msg.type === "run" && typeof msg.command === "string") {
+        if (!RUN_COMMAND_ALLOWLIST.has(msg.command)) return;
         await vscode.commands.executeCommand(msg.command);
         this.refresh();
+        return;
+      }
+      if (msg.type === "thanks") {
+        await vscode.env.openExternal(vscode.Uri.parse(THANKS_URL));
+        return;
+      }
+      if (msg.type === "openExternal" && typeof msg.url === "string") {
+        if (!isAllowedThanksUrl(msg.url)) return;
+        await vscode.env.openExternal(vscode.Uri.parse(msg.url));
       }
     });
 

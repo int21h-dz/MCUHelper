@@ -40,48 +40,39 @@
 
   function panelShellOpen(panelId) {
     const accent = I.panelAccent(panelId);
-    return (
-      '<div class="mcu-panel-shell" style="--panel-accent:' +
-      esc(accent) +
-      '">' +
-      panelChrome(panelId)
-    );
+    return '<div class="mcu-panel-shell" style="--panel-accent:' + esc(accent) + '">';
   }
 
-  function panelChrome(panelId) {
-    const meta = I.PANELS[panelId] || { title: "MCU-NR", icon: "catalog", hint: "" };
-    return (
-      '<header class="mcu-panel-head">' +
-      '<span class="mcu-icon-wrap">' +
-      I.getIcon(meta.icon) +
-      "</span>" +
-      '<span class="mcu-panel-title">' +
-      esc(meta.title) +
-      "</span></header>" +
-      (meta.hint ? '<div class="mcu-panel-hint">' + esc(meta.hint) + "</div>" : "")
-    );
+  function panelHint(panelId) {
+    const meta = I.PANELS[panelId];
+    return meta && meta.hint ? meta.hint : "";
   }
 
-  function searchHtml(inputId, placeholder) {
+  function searchHtml(inputId, placeholder, tooltip) {
+    const tip = tooltip ? ' title="' + esc(tooltip) + '"' : "";
     return (
-      '<div class="mcu-search-wrap">' +
+      '<div class="mcu-search-wrap"' +
+      tip +
+      ">" +
       I.getIcon("search") +
       '<input type="search" class="mcu-search" id="' +
       inputId +
       '" placeholder="' +
       esc(placeholder || "Поиск…") +
-      '" autocomplete="off" />' +
+      '" autocomplete="off"' +
+      tip +
+      " />" +
       "</div>"
     );
   }
 
   function catalogSearchHtml() {
-    return searchHtml("mcu-search", "Поиск карт…");
+    return searchHtml("mcu-search", "Поиск карт…", panelHint(state.panel));
   }
 
   function navSearchHtml() {
     const meta = I.PANELS[state.panel] || {};
-    return searchHtml("mcu-nav-search", meta.searchPh || "Поиск…");
+    return searchHtml("mcu-nav-search", meta.searchPh || "Поиск…", panelHint(state.panel));
   }
 
   function navPillLabel(node) {
@@ -111,20 +102,54 @@
     return parts.join(" — ");
   }
 
+  function panelHasSearch(panelId) {
+    return panelId !== "mcuhelper.lexerErrors";
+  }
+
+  function isDiagGroup(node) {
+    const id = node.id || "";
+    return id.startsWith("diag-") && node.children && node.children.length > 0;
+  }
+
+  function isDiagMetaCard(node) {
+    const id = node.id || "";
+    return id === "diag-source" || id === "diag-truncated-hint";
+  }
+
+  function diagHoverTitle(node) {
+    const badges = node.badges || [];
+    const severity = { error: 1, warning: 1, info: 1 };
+    const code = badges.find(function (b) {
+      return !severity[b];
+    });
+    if (code && node.description) return code + " · " + node.description;
+    return node.description || node.label;
+  }
+
   function renderNavCard(node) {
+    if (isDiagMetaCard(node)) {
+      const text = node.description ? node.label + " · " + node.description : node.label;
+      return '<div class="mcu-diag-meta">' + esc(text) + "</div>";
+    }
+
     const clickable = node.uri && node.range;
     const pill = navPillLabel(node);
     const line = node.description || node.label;
     const copyText = cardCopyText(node);
+    const id = node.id || "";
+    const isDiag = id.startsWith("diag-");
+    const hoverTitle = isDiag ? diagHoverTitle(node) : copyText;
     const detail =
       node.description && node.description.length > 40
         ? '<div class="mcu-card-detail"><div class="mcu-card-desc">' +
-          esc(node.label) +
-          " — " +
+          esc(isDiag && (node.badges || [])[0] ? (node.badges[0] + " · ") : "") +
           esc(node.description) +
           "</div></div>"
         : node.description
-          ? '<div class="mcu-card-detail"><div class="mcu-card-desc">' + esc(node.description) + "</div></div>"
+          ? '<div class="mcu-card-detail"><div class="mcu-card-desc">' +
+            esc(isDiag && (node.badges || [])[0] ? (node.badges[0] + " · ") : "") +
+            esc(node.description) +
+            "</div></div>"
           : "";
     return (
       '<div class="mcu-card mcu-nav-card' +
@@ -137,6 +162,8 @@
       esc(nodeSearchText(node)) +
       '" data-copy="' +
       esc(copyText) +
+      '" title="' +
+      esc(hoverTitle) +
       '">' +
       '<span class="mcu-card-label">' +
       esc(pill) +
@@ -152,12 +179,17 @@
   function renderNavGroup(node) {
     const pill = navPillLabel(node);
     const count = node.children ? node.children.length : 0;
+    const diagGroup = isDiagGroup(node);
     const marker = node.description
       ? '<span class="mcu-marker">' + esc(node.description) + "</span>"
       : '<span class="mcu-marker">' + count + " эл.</span>";
     const openCls = isGroupExpanded(node.id) ? " open" : "";
+    const iconPart = diagGroup
+      ? ""
+      : '<span class="mcu-module-icon mcu-module-icon-mat">' + esc(pill) + "</span>";
     return (
       '<div class="mcu-accordion mcu-nav-group' +
+      (diagGroup ? " mcu-diag-group" : "") +
       openCls +
       '" data-group-id="' +
       esc(node.id) +
@@ -168,9 +200,7 @@
       '<span class="mcu-chevron" data-action="toggle">' +
       I.getIcon("chevron") +
       "</span>" +
-      '<span class="mcu-module-icon mcu-module-icon-mat">' +
-      esc(pill) +
-      "</span>" +
+      iconPart +
       '<span class="mcu-module-title">' +
       esc(node.label) +
       "</span>" +
@@ -196,9 +226,12 @@
   }
 
   function renderEmpty(message) {
+    const tip = panelHint(state.panel);
     root.innerHTML =
       panelShellOpen(state.panel) +
-      '<div class="mcu-empty">' +
+      '<div class="mcu-empty"' +
+      (tip ? ' title="' + esc(tip) + '"' : "") +
+      ">" +
       I.getIcon("empty") +
       "<div>" +
       esc(message || "Откройте файл MCU-NR") +
@@ -488,9 +521,10 @@
       return;
     }
     const accent = I.panelAccent(state.panel);
+    const searchPart = panelHasSearch(state.panel) ? navSearchHtml() : "";
     root.innerHTML =
       panelShellOpen(state.panel) +
-      navSearchHtml() +
+      searchPart +
       '<div class="mcu-nav-body mcu-catalog-body" style="--panel-accent:' +
       esc(accent) +
       '"><div class="mcu-card-grid mcu-nav-root">' +

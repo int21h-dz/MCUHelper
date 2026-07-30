@@ -18,6 +18,8 @@ export const {
 
 export const {
   getBodyByKey,
+  isGeoBodyLabel,
+  GEO_BODY_KEYS,
   getBodyParamGroups,
   getCardByLabel,
   getCardArgSpec,

@@ -31,6 +31,7 @@ function richPayload(): IndexPayload {
       { label: "MATR", text: "MATR 1 fuel", fragment: "physical", range },
       { label: "U235", text: "U235 1.E-3", fragment: "physical", range },
       { label: "HEAD", text: "HEAD 1 0", fragment: "geometry", range },
+      { label: "CONT", text: "CONT T T M M", fragment: "geometry", range },
       { label: "RCZ", text: "RCZ FU 0 0 0 10 1", fragment: "geometry", range },
       { label: "Z0", text: "Z0 FU :1", fragment: "geometry", range },
       { label: "T01", text: "T01 A B C", fragment: "geometry", range },
@@ -167,9 +168,36 @@ describe("navData", () => {
     assert.ok(tree[0]!.children?.some((c) => c.label === "MATR"));
     assert.ok(!tree[0]!.children?.some((c) => c.label === "U235"));
     assert.strictEqual(tree[1]!.label, "HEAD");
-    assert.ok(tree[1]!.children?.some((c) => c.label === "RCZ"));
-    assert.ok(!tree[1]!.children?.some((c) => c.label === "T01"));
-    assert.ok(!tree[1]!.children?.some((c) => c.label === "END"));
+    assert.ok(tree[1]!.children?.some((c) => c.label === "HEAD"));
+    assert.ok(!tree[1]!.children?.some((c) => c.label === "CONT"));
+    assert.ok(!tree[1]!.children?.some((c) => c.label === "RCZ"));
+    assert.ok(!tree[1]!.children?.some((c) => c.label === "Z0"));
+    assert.ok(tree[1]!.children?.some((c) => c.label === "END"));
+  });
+
+  it("fragments keeps card when zone name collides (filter zone by range)", () => {
+    const matrRange = { start: { line: 1, character: 0 }, end: { line: 1, character: 10 } };
+    const zoneRange = { start: { line: 9, character: 0 }, end: { line: 9, character: 10 } };
+    const payload: IndexPayload = {
+      fragments: [{ id: "physical", startLine: 0, endLine: 12 }],
+      statements: [
+        { label: "MATR", text: "MATR 1", fragment: "physical", range: matrRange },
+        { label: "MATR", text: "MATR A :1", fragment: "physical", range: zoneRange },
+      ],
+      summaries: {
+        materials: [],
+        zones: [{ name: "MATR", expression: "A", materialNum: 1, regNum: 1, objNum: 1, range: zoneRange }],
+        objects: [],
+        constants: [],
+        bodies: [],
+        nets: [],
+        lattices: [],
+      },
+    };
+    const tree = buildFragmentsTree(payload, "file:///t.mcu");
+    const kids = tree[0]!.children ?? [];
+    assert.ok(kids.some((c) => c.label === "MATR" && c.range?.start.line === 1));
+    assert.ok(!kids.some((c) => c.range?.start.line === 9));
   });
 
   it("zones and objects trees format registration", () => {

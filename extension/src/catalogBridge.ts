@@ -22,6 +22,8 @@ export interface CatalogModulePayload {
 
 type SchemaModule = {
   buildCatalogPayload: () => CatalogModulePayload[];
+  isGeoBodyLabel?: (label: string) => boolean;
+  isKnownMcuLabel?: (label: string) => boolean;
 };
 
 function loadSchemaModule(): SchemaModule {
@@ -39,10 +41,30 @@ function loadSchemaModule(): SchemaModule {
 }
 
 let cached: CatalogModulePayload[] | undefined;
+let schemaMod: SchemaModule | undefined;
+
+function schema(): SchemaModule {
+  if (!schemaMod) schemaMod = loadSchemaModule();
+  return schemaMod;
+}
 
 export function buildCatalogPayload(): CatalogModulePayload[] {
   if (!cached) {
-    cached = loadSchemaModule().buildCatalogPayload();
+    cached = schema().buildCatalogPayload();
   }
   return cached;
+}
+
+/** Тип геометрического тела (SPH/RCZ/TRANSF/…). */
+export function isGeoBodyLabel(label: string): boolean {
+  const mod = schema();
+  if (typeof mod.isGeoBodyLabel === "function") return mod.isGeoBodyLabel(label);
+  return false;
+}
+
+/** Известная карта MCU-NR (не зона с омонимом). */
+export function isKnownMcuLabel(label: string): boolean {
+  const mod = schema();
+  if (typeof mod.isKnownMcuLabel === "function") return mod.isKnownMcuLabel(label);
+  return false;
 }

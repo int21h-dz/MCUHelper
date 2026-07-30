@@ -742,6 +742,30 @@ export function getBodyByKey(key: string): BodyTypeSchema | undefined {
   return BODY_TYPES.find((b) => b.key === key.toUpperCase());
 }
 
+/**
+ * Ключи геометрических тел (parser BODY_KEYS): схемы BODY_TYPES + редкие/legacy типы.
+ * Единый список для парсера и UI-навигации.
+ */
+export const GEO_BODY_KEYS: ReadonlySet<string> = new Set([
+  ...BODY_TYPES.map((b) => b.key),
+  "ELL",
+  "WED",
+  "UCX",
+  "UCY",
+  "UCZ",
+  "SLA",
+  "SLB",
+  "REC",
+  "TRC",
+  "HEXG",
+  "TRANSF",
+  "UPOLY",
+]);
+
+export function isGeoBodyLabel(label: string): boolean {
+  return GEO_BODY_KEYS.has(label.toUpperCase());
+}
+
 export {
   ALL_MCU_LABELS,
   MCU_LABEL_ALIASES,

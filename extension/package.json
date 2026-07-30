@@ -110,7 +110,7 @@
       },
       {
         "command": "mcuhelper.showFragments",
-        "title": "MCU-NR: Показать фрагменты",
+        "title": "MCU-NR: Навигация",
         "icon": "$(symbol-namespace)"
       },
       {
@@ -184,6 +184,11 @@
         "icon": "$(gear)"
       },
       {
+        "command": "mcuhelper.openRunKeybindings",
+        "title": "MCU-NR: Настроить горячие клавиши запуска",
+        "icon": "$(keyboard)"
+      },
+      {
         "command": "mcuhelper.showRunActions",
         "title": "MCU-NR: Действия запуска",
         "icon": "$(play-circle)"
@@ -240,10 +245,10 @@
     ],
     "views": {
       "mcuhelper": [
-        { "type": "webview", "id": "mcuhelper.run", "name": "Запуск", "visibility": "visible" },
+        { "type": "webview", "id": "mcuhelper.run", "name": "Запуск", "visibility": "visible", "initialSize": 1 },
         { "type": "webview", "id": "mcuhelper.catalog", "name": "Каталог", "visibility": "visible" },
         { "type": "webview", "id": "mcuhelper.lexerErrors", "name": "Диагностика", "visibility": "visible" },
-        { "type": "webview", "id": "mcuhelper.fragments", "name": "Фрагменты" },
+        { "type": "webview", "id": "mcuhelper.fragments", "name": "Навигация" },
         { "type": "webview", "id": "mcuhelper.materials", "name": "Материалы" },
         { "type": "webview", "id": "mcuhelper.constants", "name": "Константы" },
         { "type": "webview", "id": "mcuhelper.bodies", "name": "Тела" },
@@ -261,7 +266,8 @@
     "menus": {
       "view/title": [
         { "command": "mcuhelper.refreshIndex", "when": "view =~ /^mcuhelper\\./ && view != mcuhelper.run", "group": "navigation" },
-        { "command": "mcuhelper.configureSolver", "when": "view == mcuhelper.run", "group": "navigation" }
+        { "command": "mcuhelper.openRunKeybindings", "when": "view == mcuhelper.run", "group": "navigation@1" },
+        { "command": "mcuhelper.configureSolver", "when": "view == mcuhelper.run", "group": "navigation@2" }
       ],
       "editor/context": [
         {
@@ -310,6 +316,26 @@
       {
         "command": "mcuhelper.configureSolver",
         "key": "ctrl+alt+p"
+      },
+      {
+        "command": "mcuhelper.debugInput",
+        "key": "ctrl+alt+d",
+        "when": "editorLangId == mcunr"
+      },
+      {
+        "command": "mcuhelper.runCalculation",
+        "key": "ctrl+alt+r",
+        "when": "editorLangId == mcunr"
+      },
+      {
+        "command": "mcuhelper.continueCalculation",
+        "key": "ctrl+alt+shift+c",
+        "when": "editorLangId == mcunr"
+      },
+      {
+        "command": "mcuhelper.finalOutput",
+        "key": "ctrl+alt+f",
+        "when": "editorLangId == mcunr"
       }
     ]
   },

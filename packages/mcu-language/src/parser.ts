@@ -33,13 +33,11 @@ import {
   fragmentsForLabel,
   isKnownMcuLabel,
   labelAllowedInFragment,
+  isGeoBodyLabel,
+  GEO_BODY_KEYS,
 } from "./schemaBridge";
 
-const BODY_KEYS = new Set([
-  "SPH", "RCC", "ELL", "BOX", "WED", "RPP", "HEX", "HEXX", "HEXY", "RCZ",
-  "UCX", "UCY", "UCZ", "PLG", "PLX", "PLY", "PLZ", "SLA", "SLB", "REC",
-  "TRC", "ARB", "SBOX", "SHEX", "HEXG", "QUAD", "TRANSF", "UPOLY",
-]);
+const BODY_KEYS = GEO_BODY_KEYS;
 
 /**
  * dens: число, имя EQU/SET или выражение без пробелов (`2*DENSU`).

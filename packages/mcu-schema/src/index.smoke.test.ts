@@ -9,6 +9,8 @@ import {
   BODY_TYPES,
   MODS_VALUES,
   BOUNDARY_CODES,
+  isGeoBodyLabel,
+  GEO_BODY_KEYS,
 } from "./index";
 
 describe("index smoke", () => {
@@ -33,6 +35,13 @@ describe("index smoke", () => {
     assert.ok(getBodyByKey("RCZ"));
     assert.ok(getBodyByKey("RCC"));
     assert.ok(BODY_TYPES.length > 10);
+  });
+
+  it("isGeoBodyLabel covers BODY_TYPES and TRANSF", () => {
+    assert.ok(isGeoBodyLabel("RCZ"));
+    assert.ok(isGeoBodyLabel("TRANSF"));
+    assert.ok(GEO_BODY_KEYS.has("UPOLY"));
+    assert.ok(!isGeoBodyLabel("MATR"));
   });
 
   it("formatCardHover includes title and syntax", () => {

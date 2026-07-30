@@ -63,20 +63,86 @@
       '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="2.5" width="11" height="11" rx="1.5" stroke="currentColor" fill="none" stroke-width="1.3"/><path d="M5 6h6M5 8.5h6M5 11h4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
     gear:
       '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.2" stroke="currentColor" fill="none" stroke-width="1.3"/><path d="M8 2.2v1.6M8 12.2v1.6M2.2 8h1.6M12.2 8h1.6M3.9 3.9l1.1 1.1M11 11l1.1 1.1M12.1 3.9L11 5M5 11l-1.1 1.1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
+    heart:
+      '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13.2S2.5 9.6 2.5 5.8A2.9 2.9 0 018 4.2a2.9 2.9 0 015.5 1.6C13.5 9.6 8 13.2 8 13.2z" fill="currentColor"/></svg>',
   };
 
   const PANELS = {
-    "mcuhelper.run": { title: "Запуск MCU-NR", icon: "run", accent: "#e8913a", hint: "Debug → Run → Continue → Final" },
-    "mcuhelper.catalog": { title: "Каталог модулей", icon: "catalog", accent: "#e8913a", hint: "Перетащите карточку или модуль в редактор" },
-    "mcuhelper.lexerErrors": { title: "Диагностика", icon: "error", accent: "#ef4444", hint: "Напрямую из LSP (исходный файл) — клик для перехода", searchPh: "Фильтр диагностик…" },
-    "mcuhelper.fragments": { title: "Фрагменты", icon: "fragment", accent: "#94a3b8", hint: "Клик — переход к началу фрагмента", searchPh: "Фильтр фрагментов…" },
-    "mcuhelper.materials": { title: "Материалы", icon: "material", accent: "#e8913a", hint: "Клик — переход к определению в файле", searchPh: "Фильтр материалов…" },
-    "mcuhelper.zones": { title: "Зоны", icon: "zone", accent: "#4a9eff", hint: "Клик — переход к зоне", searchPh: "Фильтр зон…" },
-    "mcuhelper.bodies": { title: "Тела", icon: "body", accent: "#4a9eff", hint: "Клик — переход к телу", searchPh: "Фильтр тел…" },
-    "mcuhelper.constants": { title: "Константы", icon: "constant", accent: "#fbbf24", hint: "Видимые в области курсора (global / LCELL / CELL)", searchPh: "Фильтр констант…" },
-    "mcuhelper.nets": { title: "Сети", icon: "net", accent: "#2dd4bf", hint: "Клик — переход к NET", searchPh: "Фильтр сетей…" },
-    "mcuhelper.lattices": { title: "Решётки", icon: "lattice", accent: "#a78bfa", hint: "Клик — переход к LATT", searchPh: "Фильтр решёток…" },
-    "mcuhelper.objects": { title: "Объекты", icon: "object", accent: "#2dd4bf", hint: "Объекты регистрации", searchPh: "Фильтр объектов…" },
+    "mcuhelper.run": {
+      title: "Запуск",
+      icon: "run",
+      accent: "#e8913a",
+      hint: "Debug (Ctrl+Alt+D) · Run (Ctrl+Alt+R) · Continue (Ctrl+Alt+Shift+C) · Final (Ctrl+Alt+F). Пути — шестерёнка в заголовке или Ctrl+Alt+P",
+    },
+    "mcuhelper.catalog": {
+      title: "Каталог",
+      icon: "catalog",
+      accent: "#e8913a",
+      hint: "Перетащите карточку или модуль в редактор. Двойной клик по модулю — вставка шаблона",
+    },
+    "mcuhelper.lexerErrors": {
+      title: "Диагностика",
+      icon: "error",
+      accent: "#ef4444",
+      hint: "Клик по строке — переход в исходный файл",
+      searchPh: "Фильтр диагностик…",
+    },
+    "mcuhelper.fragments": {
+      title: "Навигация",
+      icon: "fragment",
+      accent: "#94a3b8",
+      hint: "Карты и операторы по фрагментам варианта — клик для перехода",
+      searchPh: "Фильтр навигации…",
+    },
+    "mcuhelper.materials": {
+      title: "Материалы",
+      icon: "material",
+      accent: "#e8913a",
+      hint: "Клик — переход к определению в файле",
+      searchPh: "Фильтр материалов…",
+    },
+    "mcuhelper.zones": {
+      title: "Зоны",
+      icon: "zone",
+      accent: "#4a9eff",
+      hint: "Клик — переход к зоне",
+      searchPh: "Фильтр зон…",
+    },
+    "mcuhelper.bodies": {
+      title: "Тела",
+      icon: "body",
+      accent: "#4a9eff",
+      hint: "Клик — переход к телу",
+      searchPh: "Фильтр тел…",
+    },
+    "mcuhelper.constants": {
+      title: "Константы",
+      icon: "constant",
+      accent: "#fbbf24",
+      hint: "Константы в области курсора (global / LCELL / CELL)",
+      searchPh: "Фильтр констант…",
+    },
+    "mcuhelper.nets": {
+      title: "Сети",
+      icon: "net",
+      accent: "#2dd4bf",
+      hint: "Клик — переход к NET",
+      searchPh: "Фильтр сетей…",
+    },
+    "mcuhelper.lattices": {
+      title: "Решётки",
+      icon: "lattice",
+      accent: "#a78bfa",
+      hint: "Клик — переход к LATT",
+      searchPh: "Фильтр решёток…",
+    },
+    "mcuhelper.objects": {
+      title: "Объекты",
+      icon: "object",
+      accent: "#2dd4bf",
+      hint: "Клик — переход к объекту регистрации",
+      searchPh: "Фильтр объектов…",
+    },
   };
 
   function panelAccent(panelId) {

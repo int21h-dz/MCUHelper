@@ -22,3 +22,8 @@ structure.md
 # Local solver regression / MCU binaries (not in repo)
 RUNTEST/
 **/.mcuhelper-runs/
+
+# Windows Mark-of-the-Web / ADS (скачанные файлы; ломают git add)
+*:Zone.Identifier
+*:Zone.Identifier:$DATA
+**/*:Zone.Identifier*

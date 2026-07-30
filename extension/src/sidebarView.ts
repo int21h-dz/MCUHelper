@@ -77,9 +77,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     return this.viewId === "mcuhelper.lexerErrors";
   }
 
-  applyLexerErrors(): void {
-    if (!this.view || !this.isLexerErrors) return;
-    void applyDiagnosticsToSidebar(
+  applyLexerErrors(): Promise<void> {
+    if (!this.view || !this.isLexerErrors) return Promise.resolve();
+    return applyDiagnosticsToSidebar(
       this.view.webview,
       this.viewId,
       vscode.window.activeTextEditor?.document,

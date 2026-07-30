@@ -1,5 +1,7 @@
 /** Дерево навигации для Webview sidebar (данные из LSP getIndex). */
 
+import { isGeoBodyLabel } from "./catalogBridge";
+
 export interface SourceRange {
   start: { line: number; character: number };
   end: { line: number; character: number };
@@ -209,13 +211,46 @@ function isDataRowLabel(label: string): boolean {
   );
 }
 
+const GEO_BODY_LABELS_FALLBACK = new Set([
+  "SPH", "RCC", "ELL", "BOX", "WED", "RPP", "HEX", "HEXX", "HEXY", "RCZ",
+  "UCX", "UCY", "UCZ", "PLG", "PLX", "PLY", "PLZ", "SLA", "SLB", "REC",
+  "TRC", "ARB", "SBOX", "SHEX", "HEXG", "QUAD", "TRANSF", "UPOLY",
+]);
+
+function isBodyLabel(label: string): boolean {
+  const upper = label.toUpperCase();
+  if (GEO_BODY_LABELS_FALLBACK.has(upper)) return true;
+  try {
+    return isGeoBodyLabel(label);
+  } catch {
+    return false;
+  }
+}
+
+/** Зона по совпадению имени и строки — не путаем с картой-омонимом (NET/MATR/…). */
+function isZoneStatement(
+  stmt: NonNullable<IndexPayload["statements"]>[number],
+  index: IndexPayload
+): boolean {
+  const label = stmt.label.toUpperCase();
+  const line = stmt.range.start.line;
+  return (index.summaries?.zones ?? []).some(
+    (z) => z.name.toUpperCase() === label && z.range.start.line === line
+  );
+}
+
 function isFragmentChildStatement(
   stmt: NonNullable<IndexPayload["statements"]>[number],
-  inMatrBlock: boolean
+  inMatrBlock: boolean,
+  index: IndexPayload
 ): boolean {
   const label = stmt.label.toUpperCase();
   if (!label) return false;
-  if (label === "END" || label === "FINISH") return false;
+  if (label === "FINISH") return false;
+  if (label === "CONT") return false;
+  if (label === "EQU" || label === "SET") return false;
+  if (isBodyLabel(label)) return false;
+  if (isZoneStatement(stmt, index)) return false;
   if (!/^[A-Za-z]/.test(label)) return false;
   if (inMatrBlock && !MATR_BLOCK_STOP_LABELS.has(label)) return false;
   if (isDataRowLabel(label)) return false;
@@ -232,7 +267,7 @@ export function buildFragmentsTree(index: IndexPayload, uri: string): NavTreeNod
       .filter((stmt) => stmt.fragment === fragment.id)
       .flatMap((stmt, si) => {
         const label = stmt.label.toUpperCase();
-        const keep = isFragmentChildStatement(stmt, inMatrBlock);
+        const keep = isFragmentChildStatement(stmt, inMatrBlock, index);
         if (label === "MATR") {
           inMatrBlock = true;
         } else if (MATR_BLOCK_STOP_LABELS.has(label)) {
@@ -241,11 +276,14 @@ export function buildFragmentsTree(index: IndexPayload, uri: string): NavTreeNod
         if (!keep) return [];
         const text = stmt.text.trim();
         const rest = text.slice(stmt.label.length).trim();
-        const suffix = rest ? ` · ${trimPreview(rest)}` : "";
+        const lineNum = stmt.range.start.line + 1;
+        const description = rest
+          ? `${trimPreview(rest)} · строка ${lineNum}`
+          : `строка ${lineNum}`;
         return [{
           id: `fragstmt-${fragment.id}-${i}-${si}`,
           label: stmt.label,
-          description: `строка ${stmt.range.start.line + 1}${suffix}`,
+          description,
           uri,
           range: stmt.range,
         }];

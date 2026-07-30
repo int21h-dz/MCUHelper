@@ -33,7 +33,7 @@ body {
   line-height: 1.4;
   overflow-x: hidden;
   overflow-y: auto;
-  padding: 0 0 20px;
+  padding: 0 0 12px;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -83,59 +83,14 @@ body {
   background: color-mix(in srgb, attr(data-tint) 20%, transparent);
 }
 
-/* ── Panel chrome ── */
-.mcu-panel-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 12px 10px;
-  border-bottom: 1px solid var(--mcu-border);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--panel-accent) 10%, var(--mcu-surface)) 0%,
-    var(--mcu-surface) 100%
-  );
-  position: sticky;
-  top: 0;
-  z-index: 20;
-}
-
-.mcu-panel-head .mcu-icon-wrap {
-  width: 28px;
-  height: 28px;
-  background: color-mix(in srgb, var(--panel-accent) 22%, transparent);
-  color: var(--panel-accent);
-}
-
-.mcu-panel-head .mcu-icon {
-  width: 18px;
-  height: 18px;
-  color: var(--panel-accent);
-}
-
-.mcu-panel-title {
-  font-size: 15px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
-  flex: 1;
-}
-
-.mcu-panel-hint {
-  font-size: var(--mcu-size-xs);
-  color: var(--vscode-descriptionForeground, #999);
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--mcu-border);
-  line-height: 1.45;
-}
-
-/* ── Search (catalog) ── */
+/* ── Search (catalog / nav) ── */
 .mcu-search-wrap {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 10px 10px 6px;
+  margin: 8px 8px 4px;
   padding: 0 10px;
-  height: 34px;
+  height: 30px;
   border-radius: var(--mcu-radius);
   border: 1px solid var(--mcu-border);
   background: var(--mcu-surface-raised);
@@ -168,11 +123,11 @@ body {
 
 /* ── Empty ── */
 .mcu-empty {
-  padding: 32px 20px;
+  padding: 20px 14px;
   text-align: center;
   color: var(--vscode-descriptionForeground, #999);
-  font-size: var(--mcu-size);
-  line-height: 1.55;
+  font-size: var(--mcu-size-sm);
+  line-height: 1.5;
 }
 
 /* ── Chevron button ── */
@@ -365,11 +320,17 @@ body {
   font-size: var(--mcu-size-sm);
   color: #fff;
   background: color-mix(in srgb, var(--mod-accent, var(--panel-accent, #3794ff)) 85%, #000);
-  padding: 2px 8px;
+  padding: 2px 6px;
   border-radius: 4px;
   flex-shrink: 0;
-  min-width: 3.2em;
-  text-align: center;
+  width: var(--mcu-card-label-w, 4.75rem);
+  min-width: var(--mcu-card-label-w, 4.75rem);
+  max-width: var(--mcu-card-label-w, 4.75rem);
+  text-align: left;
+  box-sizing: border-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mcu-card-title {
@@ -484,77 +445,58 @@ body {
   margin: 4px 0;
 }
 
-/* ── Run panel ── */
-.mcu-run-panel {
-  padding-bottom: 12px;
-}
-
-.mcu-run-paths {
-  margin: 8px 12px 4px;
-  display: flex;
-  flex-direction: column;
+.mcu-nav-group.mcu-diag-group .mcu-accordion-header {
   gap: 6px;
 }
 
-.mcu-run-path {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
+.mcu-nav-group.mcu-diag-group .mcu-module-title {
+  flex: 1;
   min-width: 0;
-  padding: 6px 8px;
-  border-radius: var(--mcu-radius-sm);
-  background: var(--mcu-surface-raised);
-  border: 1px solid var(--mcu-border);
 }
 
-.mcu-run-path-k {
-  flex-shrink: 0;
+.mcu-diag-meta {
+  margin: 4px 8px 2px;
+  padding: 4px 8px;
   font-size: var(--mcu-size-xs);
-  font-weight: 650;
-  color: var(--panel-accent, var(--mcu-accent));
-  min-width: 42px;
+  color: var(--vscode-descriptionForeground, #999);
 }
 
-.mcu-run-path-v {
-  font-family: var(--mcu-mono);
-  font-size: var(--mcu-size-xs);
-  color: var(--vscode-descriptionForeground, #888);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* ── Run panel ── */
+.mcu-run-panel {
+  padding: 0;
 }
 
-.mcu-run-actions {
+.mcu-run-actions-row {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px 4px;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 3px;
 }
 
 .mcu-run-btn {
   display: flex;
   align-items: center;
-  gap: 12px;
-  width: 100%;
-  text-align: left;
+  justify-content: center;
   border: 1px solid var(--mcu-border);
-  border-radius: var(--mcu-radius);
+  border-radius: var(--mcu-radius-sm);
   background: var(--mcu-surface-raised);
   color: var(--vscode-sideBar-foreground, #ccc);
-  padding: 12px 12px;
   cursor: pointer;
-  transition: transform 0.12s ease, border-color 0.12s ease, background 0.12s ease;
-  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.12);
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.mcu-run-btn-icon-only {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  flex-shrink: 0;
 }
 
 .mcu-run-btn:hover:not(.is-disabled) {
-  transform: translateY(-1px);
   border-color: color-mix(in srgb, var(--btn-accent, var(--mcu-accent)) 55%, var(--mcu-border));
   background: color-mix(in srgb, var(--btn-accent, var(--mcu-accent)) 12%, var(--mcu-surface-raised));
-}
-
-.mcu-run-btn:active:not(.is-disabled) {
-  transform: translateY(0);
 }
 
 .mcu-run-btn.is-disabled {
@@ -566,43 +508,42 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
   flex-shrink: 0;
   background: color-mix(in srgb, var(--btn-accent, var(--mcu-accent)) 22%, transparent);
   color: var(--btn-accent, var(--mcu-accent));
 }
 
 .mcu-run-btn-icon .mcu-icon {
-  width: 18px;
-  height: 18px;
+  width: 12px;
+  height: 12px;
   color: inherit;
-}
-
-.mcu-run-btn-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.mcu-run-btn-title {
-  font-size: 14px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
-}
-
-.mcu-run-btn-sub {
-  font-size: var(--mcu-size-xs);
-  color: var(--vscode-descriptionForeground, #888);
 }
 
 .mcu-run-btn-debug { --btn-accent: #4a9eff; }
 .mcu-run-btn-run { --btn-accent: #22c55e; }
 .mcu-run-btn-continue { --btn-accent: #2dd4bf; }
 .mcu-run-btn-final { --btn-accent: #a78bfa; }
-.mcu-run-btn-setup { --btn-accent: #e8913a; }
+
+.mcu-run-thanks {
+  margin-left: auto;
+  border: 1px solid color-mix(in srgb, #e8913a 45%, var(--mcu-border));
+  background: color-mix(in srgb, #e8913a 14%, var(--mcu-surface-raised));
+  color: #e8913a;
+}
+
+.mcu-run-thanks .mcu-icon {
+  width: 12px;
+  height: 12px;
+  color: #e8913a;
+}
+
+.mcu-run-thanks:hover {
+  border-color: #e8913a;
+  background: color-mix(in srgb, #e8913a 24%, var(--mcu-surface-raised));
+}
 
 .mcu-no-results {
   padding: 20px;

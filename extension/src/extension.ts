@@ -18,6 +18,7 @@ import { registerDiagnosticNavigation, fetchMcuDiagnostics } from "./diagnosticN
 import { clearLanguageDetectState, scheduleLanguageDetectOnEdit } from "./languageDetectScheduler";
 import { registerRunPanel, type RunPanelViewProvider } from "./runPanelView";
 import { runMcuInTerminal } from "./mcuTerminalRun";
+import { shouldFocusDiagnosticsAfterRun } from "./runPanelHelpers";
 
 const REFRESH_DEBOUNCE_MS = 500;
 const SELECTION_REFRESH_DEBOUNCE_MS = 300;
@@ -124,6 +125,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand("mcuhelper.refreshIndex", () => scheduleRefresh()),
     vscode.commands.registerCommand("mcuhelper.configureSolver", () => configureSolverPaths()),
+    vscode.commands.registerCommand("mcuhelper.openRunKeybindings", () => openRunKeybindings()),
     vscode.commands.registerCommand("mcuhelper.showRunActions", () => showRunActions()),
     vscode.commands.registerCommand("mcuhelper.showCatalog", () => vscode.commands.executeCommand("mcuhelper.catalog.focus")),
     vscode.commands.registerCommand("mcuhelper.showLexerErrors", () => vscode.commands.executeCommand("mcuhelper.lexerErrors.focus")),
@@ -326,6 +328,11 @@ async function configureSolverPaths(): Promise<void> {
   runPanel?.refresh();
 }
 
+async function openRunKeybindings(): Promise<void> {
+  // Фильтр по id команд (в Shortcuts заголовок «MCU-NR» часто не находится).
+  await vscode.commands.executeCommand("workbench.action.openGlobalKeybindings", "mcuhelper.");
+}
+
 async function showRunActions(): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (!editor || !isMcunrDocument(editor.document)) {
@@ -358,6 +365,11 @@ function updateRunUiVisibility(): void {
     runStatusItem?.hide();
   }
   runPanel?.refresh();
+}
+
+async function focusDiagnosticsPanel(): Promise<void> {
+  await vscode.commands.executeCommand("mcuhelper.lexerErrors.focus");
+  await sidebarProviders.get("mcuhelper.lexerErrors")?.applyLexerErrors();
 }
 
 async function runMcuStepCommand(mode: "i" | "c" | "f" | "b" | "continue"): Promise<void> {
@@ -474,7 +486,16 @@ async function runMcuStepCommand(mode: "i" | "c" | "f" | "b" | "continue"): Prom
 
   const cnt = result.diagnosticCount ?? 0;
   void refreshSidebarsCoalesced(sidebarProviders, "all");
-  sidebarProviders.get("mcuhelper.lexerErrors")?.applyLexerErrors();
+  await sidebarProviders.get("mcuhelper.lexerErrors")?.applyLexerErrors();
+
+  if (
+    shouldFocusDiagnosticsAfterRun({
+      diagnosticCount: cnt,
+      hasFirstError: !!result.firstError,
+    })
+  ) {
+    await focusDiagnosticsPanel();
+  }
 
   if (exitCode === undefined) {
     vscode.window.showWarningMessage(

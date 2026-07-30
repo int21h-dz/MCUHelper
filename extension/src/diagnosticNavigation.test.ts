@@ -67,6 +67,7 @@ describe("diagnosticNavigation", () => {
     assert.equal(tree[1].children?.length, 1);
     assert.equal(tree[2].label, "Предупреждения");
     assert.equal(tree[1].children?.[0].label, "L1:5");
-    assert.match(tree[1].children?.[0].description ?? "", /no-tabs/);
+    assert.equal(tree[1].children?.[0].description, "Символ табуляции запрещён");
+    assert.ok(tree[1].children?.[0].badges?.includes("no-tabs"));
   });
 });

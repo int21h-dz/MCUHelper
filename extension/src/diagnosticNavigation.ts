@@ -96,7 +96,7 @@ export function buildDiagnosticTree(
     return {
       id: `diag-${index}-${d.range.start.line}-${d.range.start.character}`,
       label: `L${line}:${col}`,
-      description: code ? `${code} · ${d.message}` : d.message,
+      description: d.message,
       badges: code ? [code, severityLabel(d.severity)] : [severityLabel(d.severity)],
       uri,
       range: {

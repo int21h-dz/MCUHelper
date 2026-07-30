@@ -32,6 +32,8 @@ export declare const ALL_CARDS: CardSchema[];
 export declare function formatCardHover(card: CardSchema): string;
 export declare function getCardByLabel(label: string): CardSchema | undefined;
 export declare function getBodyByKey(key: string): BodyTypeSchema | undefined;
+export declare const GEO_BODY_KEYS: ReadonlySet<string>;
+export declare function isGeoBodyLabel(label: string): boolean;
 export { ALL_MCU_LABELS, MCU_LABEL_ALIASES, MCU_LABELS_BY_FRAGMENT, detectFragmentFromLabel, isKnownMcuLabel, listAllMcuLabels, normalizeMcuLabel, } from "./keywords";
 export { CARD_ARG_SPECS, getCardArgSpec, parseCardArgContext, type CardArgContext, type CardArgEnumValue, type CardArgSpec, } from "./cardArgEnums";
 export { BODY_PARAM_GROUPS, getBodyParamGroups, type BodyParamGroup } from "./bodyParamGroups";

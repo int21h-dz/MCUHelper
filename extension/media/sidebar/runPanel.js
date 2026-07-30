@@ -4,9 +4,16 @@
   const root = document.getElementById("root");
   const I = window.McuSidebarIcons;
 
+  /** Defaults from package.json; пользователь может переназначить в Keyboard Shortcuts. */
+  const RUN_SHORTCUTS = {
+    "mcuhelper.debugInput": "Ctrl+Alt+D",
+    "mcuhelper.runCalculation": "Ctrl+Alt+R",
+    "mcuhelper.continueCalculation": "Ctrl+Alt+Shift+C",
+    "mcuhelper.finalOutput": "Ctrl+Alt+F",
+  };
+
   let status = {
     hasDoc: false,
-    variantName: "",
     mcuNrPath: "",
     constantsLibPath: "",
     pathsReady: false,
@@ -21,52 +28,57 @@
       .replace(/"/g, "&quot;");
   }
 
-  function shortPath(p) {
-    if (!p) return "не задан";
-    const parts = String(p).split(/[/\\]/);
-    if (parts.length <= 2) return p;
-    return "…/" + parts.slice(-2).join("/");
+  function runDisabledReason() {
+    if (!status.hasDoc) return "Откройте файл MCU-NR";
+    if (!status.pathsReady) {
+      return "Сначала укажите пути (шестерёнка в заголовке панели или Ctrl+Alt+P)";
+    }
+    return "";
+  }
+
+  function pathsTooltip() {
+    const lines = [
+      "Пути MCU-NR (шестерёнка в заголовке · Ctrl+Alt+P)",
+      "",
+      "exe: " + (status.mcuNrPath || "не задан"),
+      "MDBNR: " + (status.constantsLibPath || "не задан"),
+    ];
+    return lines.join("\n");
+  }
+
+  function panelTitle() {
+    const base = (I.PANELS["mcuhelper.run"] && I.PANELS["mcuhelper.run"].hint) || "";
+    return base + "\n\n" + pathsTooltip();
   }
 
   function render() {
     const accent = "#e8913a";
     const canRun = status.hasDoc && status.pathsReady;
-    const hint = !status.hasDoc
-      ? "Откройте файл MCU-NR"
-      : !status.pathsReady
-        ? "Сначала укажите пути к exe и MDBNR"
-        : "Вариант: " + status.variantName;
+    const disabledReason = runDisabledReason();
 
     root.innerHTML =
       '<div class="mcu-panel-shell mcu-run-panel" style="--panel-accent:' +
       accent +
+      '" title="' +
+      esc(panelTitle()) +
       '">' +
-      '<header class="mcu-panel-head">' +
-      '<span class="mcu-icon-wrap">' +
-      I.getIcon("run") +
-      "</span>" +
-      '<span class="mcu-panel-title">Запуск MCU-NR</span></header>' +
-      '<div class="mcu-panel-hint">' +
-      esc(hint) +
-      "</div>" +
-      '<div class="mcu-run-paths">' +
-      '<div class="mcu-run-path"><span class="mcu-run-path-k">exe</span><span class="mcu-run-path-v" title="' +
-      esc(status.mcuNrPath) +
+      '<div class="mcu-run-actions mcu-run-actions-row">' +
+      btn("debug", "Debug — INPUT · проверка данных", "mcuhelper.debugInput", canRun, disabledReason, "debug") +
+      btn("play", "Run — CALCULATION · расчёт", "mcuhelper.runCalculation", canRun, disabledReason, "run") +
+      btn(
+        "sync",
+        "Continue — продолжить расчёт",
+        "mcuhelper.continueCalculation",
+        canRun,
+        disabledReason,
+        "continue"
+      ) +
+      btn("output", "Final — OUTPUT · финальная выдача", "mcuhelper.finalOutput", canRun, disabledReason, "final") +
+      '<button type="button" class="mcu-run-btn mcu-run-btn-icon-only mcu-run-thanks" data-thanks="1" title="' +
+      esc("Поблагодарить — CloudTips") +
       '">' +
-      esc(shortPath(status.mcuNrPath)) +
-      "</span></div>" +
-      '<div class="mcu-run-path"><span class="mcu-run-path-k">MDBNR</span><span class="mcu-run-path-v" title="' +
-      esc(status.constantsLibPath) +
-      '">' +
-      esc(shortPath(status.constantsLibPath)) +
-      "</span></div>" +
-      "</div>" +
-      '<div class="mcu-run-actions">' +
-      btn("debug", "Debug", "INPUT · проверка данных", "mcuhelper.debugInput", canRun, "debug") +
-      btn("play", "Run", "CALCULATION · расчёт", "mcuhelper.runCalculation", canRun, "run") +
-      btn("sync", "Continue", "продолжить расчёт", "mcuhelper.continueCalculation", canRun, "continue") +
-      btn("output", "Final", "OUTPUT · финальная выдача", "mcuhelper.finalOutput", canRun, "final") +
-      btn("gear", "Настроить пути", "exe MCU-NR и папка MDBNR", "mcuhelper.configureSolver", true, "setup") +
+      I.getIcon("heart") +
+      "</button>" +
       "</div></div>";
 
     root.querySelectorAll("[data-cmd]").forEach((el) => {
@@ -75,28 +87,32 @@
         vscode.postMessage({ type: "run", command: el.getAttribute("data-cmd") });
       });
     });
+
+    root.querySelectorAll("[data-thanks]").forEach((el) => {
+      el.addEventListener("click", () => {
+        vscode.postMessage({ type: "thanks" });
+      });
+    });
   }
 
-  function btn(icon, title, sub, command, enabled, kind) {
+  function btn(icon, tooltip, command, enabled, disabledReason, kind) {
+    const shortcut = RUN_SHORTCUTS[command];
+    const fullTip = shortcut ? tooltip + " (" + shortcut + ")" : tooltip;
+    const title = enabled ? fullTip : disabledReason || fullTip;
     return (
-      '<button type="button" class="mcu-run-btn mcu-run-btn-' +
+      '<button type="button" class="mcu-run-btn mcu-run-btn-icon-only mcu-run-btn-' +
       kind +
       (enabled ? "" : " is-disabled") +
       '" data-cmd="' +
       esc(command) +
+      '" title="' +
+      esc(title) +
       '"' +
       (enabled ? "" : " disabled") +
       ">" +
       '<span class="mcu-run-btn-icon">' +
       I.getIcon(icon) +
-      "</span>" +
-      '<span class="mcu-run-btn-text">' +
-      '<span class="mcu-run-btn-title">' +
-      esc(title) +
-      "</span>" +
-      '<span class="mcu-run-btn-sub">' +
-      esc(sub) +
-      "</span></span></button>"
+      "</span></button>"
     );
   }
 
@@ -105,7 +121,6 @@
     if (!msg || msg.type !== "status") return;
     status = {
       hasDoc: !!msg.hasDoc,
-      variantName: msg.variantName || "",
       mcuNrPath: msg.mcuNrPath || "",
       constantsLibPath: msg.constantsLibPath || "",
       pathsReady: !!msg.pathsReady,
