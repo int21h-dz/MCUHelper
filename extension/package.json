@@ -2,7 +2,7 @@
   "name": "mcuhelper-vscode",
   "displayName": "MCU-NR Helper",
   "description": "Подсветка, диагностика, hover и навигация для исходных данных MCU-NR",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "publisher": "mcuhelper",
   "engines": { "vscode": "^1.85.0" },
   "categories": ["Programming Languages"],
