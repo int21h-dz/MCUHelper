@@ -19,6 +19,10 @@ import { analyzeNuclideParameterCounts } from "./nuclideParamValidation";
 import { analyzePositiveQuantities } from "./positiveQuantities";
 import { analyzeUndefinedVariables } from "./variableRefs";
 import { computeMaterialMassDensityGcm3 } from "./materialDensity";
+import {
+  buildSumIsotopeStatesByOffset,
+  evaluateSumIsotopeMembership,
+} from "./sumIsotope";
 import { materialVolumeCm3, parseMaterialVolumes } from "./materialVolumes";
 import { buildZoneRegistrationMap } from "./zoneRegistration";
 import { buildScopedVars, constScopeKey } from "./constantScope";
@@ -295,6 +299,11 @@ export function buildSummaries(ast: DocumentAst): {
   lattices: LatticeSummary[];
 } {
   const volumes = parseMaterialVolumes(ast);
+  const sumStates = buildSumIsotopeStatesByOffset(
+    ast.statements,
+    ast.materials.map((m) => m.range.offset),
+    ast.constants
+  );
   const materials: MaterialSummary[] = ast.materials.map((m) => {
     const vars = buildScopedVars(ast.constants, m.range.offset, "global");
     const massDensityGcm3 = computeMaterialMassDensityGcm3(m, vars);
@@ -303,6 +312,11 @@ export function buildSummaries(ast: DocumentAst): {
       volumeCm3 != null && massDensityGcm3 != null && massDensityGcm3 > 0
         ? volumeCm3 * massDensityGcm3
         : null;
+    const sumState = sumStates.get(m.range.offset) ?? {
+      listMode: "none" as const,
+      list: new Set<string>(),
+      siden: null,
+    };
     return {
       number: m.number,
       group: m.group,
@@ -312,11 +326,15 @@ export function buildSummaries(ast: DocumentAst): {
       massDensityGcm3,
       volumeCm3,
       massG,
-      nuclides: m.nuclides.map((n) => ({
-        name: n.name,
-        concentration: n.density,
-        range: n.range,
-      })),
+      nuclides: m.nuclides.map((n) => {
+        const sum = evaluateSumIsotopeMembership(n, sumState, vars);
+        return {
+          name: n.name,
+          concentration: n.density,
+          range: n.range,
+          ...(sum.inSum ? { sumIsotope: { reasons: sum.reasons } } : {}),
+        };
+      }),
       range: m.range,
     };
   });
@@ -355,6 +373,9 @@ export function buildSummaries(ast: DocumentAst): {
     if (v !== null) vars.set(c.name, v);
   }
 
+  // На огромных моделях computeBodyVolumeCm3 на каждое тело — O(n·cost); UI важнее точных объёмов.
+  const skipBodyVolumes = ast.bodies.length > 4_000;
+
   return {
     materials,
     zones,
@@ -370,7 +391,7 @@ export function buildSummaries(ast: DocumentAst): {
           name: b.name,
           bodyType: b.bodyType,
           paramsPreview: params.length > 48 ? `${params.slice(0, 45)}…` : params,
-          volumeCm3: computeBodyVolumeCm3(b, bodyVars, ast.bodies),
+          volumeCm3: skipBodyVolumes ? null : computeBodyVolumeCm3(b, bodyVars, ast.bodies),
           scope: b.scope,
           transf: b.transf,
           protoName: b.protoName,

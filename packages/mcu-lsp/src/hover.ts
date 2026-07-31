@@ -31,6 +31,7 @@ import {
   looksLikeZoneStatement,
   mcuNuclideAtomicWeight,
   mcuNuclideToIaeaElement,
+  sumIsotopeForNuclide,
   type DocumentIndex,
 } from "@mcuhelper/mcu-language";
 import { getCachedNuclideIaeaMarkdown, formatNaturalInsertHoverButton, prefetchNuclideIaeaHover, type NaturalInsertContext } from "./iaeaNds";
@@ -289,6 +290,15 @@ function formatNuclideHoverLocal(
     }
     lines.push(rhoLine);
   }
+  if (mat) {
+    const sum = sumIsotopeForNuclide(index.ast, mat, {
+      name: word,
+      density: nuclHit.concentration,
+    });
+    if (sum.inSum) {
+      lines.push(`_${sum.reasons.join("; ")}_`);
+    }
+  }
   return lines.join("\n\n");
 }
 
@@ -331,9 +341,9 @@ export function getHoverContent(
           : undefined;
 
       const iaea = getCachedNuclideIaeaMarkdown(rawWord, insert);
-      if (iaea) return base + iaea;
+      if (iaea) return `${base}\n\n${iaea.replace(/^\n+/, "")}`;
       prefetchNuclideIaeaHover(rawWord, insert);
-      if (insert) return base + formatNaturalInsertHoverButton(insert);
+      if (insert) return `${base}\n\n${formatNaturalInsertHoverButton(insert).replace(/^\n+/, "")}`;
       return base;
     }
   }

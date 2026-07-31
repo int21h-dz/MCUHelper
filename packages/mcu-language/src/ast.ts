@@ -201,7 +201,13 @@ export interface MaterialSummary {
   massDensityGcm3: number | null;
   volumeCm3: number | null;
   massG: number | null;
-  nuclides: Array<{ name: string; concentration: string; range: SourceRange }>;
+  nuclides: Array<{
+    name: string;
+    concentration: string;
+    range: SourceRange;
+    /** Нуклид входит в суммарный изотоп (SI/SINOT/SIDEN, UserGuide §8.5). */
+    sumIsotope?: { reasons: string[] };
+  }>;
   range: SourceRange;
 }
 

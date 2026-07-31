@@ -182,6 +182,10 @@ export interface MaterialSummary {
         name: string;
         concentration: string;
         range: SourceRange;
+        /** Нуклид входит в суммарный изотоп (SI/SINOT/SIDEN, UserGuide §8.5). */
+        sumIsotope?: {
+            reasons: string[];
+        };
     }>;
     range: SourceRange;
 }

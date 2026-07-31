@@ -9,6 +9,11 @@ class MarkdownString {
 
 module.exports = {
   MarkdownString,
+  ThemeColor: class ThemeColor {
+    constructor(id) {
+      this.id = id;
+    }
+  },
   workspace: {
     getConfiguration: () => ({
       get: (key, defaultValue) => defaultValue,
@@ -23,6 +28,7 @@ module.exports = {
   window: {
     showErrorMessage: async () => undefined,
     activeTextEditor: undefined,
+    createTextEditorDecorationType: () => ({ dispose: () => undefined }),
   },
   Uri: {
     parse: (s) => ({ toString: () => s, fsPath: s.replace("file://", "") }),
@@ -43,5 +49,6 @@ module.exports = {
       this.end = { line: endLine, character: endChar };
     }
   },
+  DecorationRangeBehavior: { ClosedClosed: 1, ClosedOpen: 2, OpenClosed: 3, OpenOpen: 0 },
   ExtensionContext: class {},
 };

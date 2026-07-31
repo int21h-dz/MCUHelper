@@ -22,6 +22,7 @@ import {
   hasVariantRunArtifacts,
   uriToBaseDir,
   toLspDiagnostic,
+  slimSummariesForIndex,
 } from "./serverHandlers";
 
 const fixtures = path.join(__dirname, "../../../test/fixtures");
@@ -305,6 +306,65 @@ FINISH`;
     const hall = result!.summaries.constants.find((c) => c.name === "HALL");
     assert.ok(hall);
     assert.strictEqual(hall!.value, 1024);
+  });
+
+  it("handleGetIndex omits MATR nuclide rows from statements", () => {
+    const text = `PIN 0 0
+MATR 1
+U235 1.0E-3
+H 0.06
+END
+FINISH ALL`;
+    const uri = "file:///slim-index.mcu";
+    const doc = TextDocument.create(uri, "mcunr", 1, text);
+    const getDoc = (u: string) => (u === uri ? doc : undefined);
+    const result = handleGetIndex(uri, getDoc);
+    assert.ok(result);
+    assert.ok(result!.statements?.some((s) => s.label === "MATR"));
+    assert.ok(result!.statements?.some((s) => s.label === "END"));
+    assert.ok(!result!.statements?.some((s) => /U235/i.test(s.label)));
+    assert.ok(result!.summaries.materials.some((m) => m.nuclides.some((n) => n.name === "U235")));
+  });
+
+  it("slimSummariesForIndex drops ordinary nuclides above soft limit but keeps sum-isotope", () => {
+    const materials = Array.from({ length: 100 }, (_, i) => ({
+      number: i + 1,
+      nuclideCount: 300,
+      nuclidesPreview: "U235",
+      massDensityGcm3: null as number | null,
+      volumeCm3: null as number | null,
+      massG: null as number | null,
+      nuclides: Array.from({ length: 300 }, (__, j) => ({
+        name: `N${j}`,
+        concentration: "1",
+        range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 }, offset: 0, endOffset: 1 },
+        ...(j === 0 ? { sumIsotope: { reasons: ["входит в суммарный изотоп (указан в SI)"] } } : {}),
+      })),
+      range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 }, offset: 0, endOffset: 1 },
+    }));
+    const slim = slimSummariesForIndex({
+      materials,
+      zones: [],
+      objects: [],
+      constants: [],
+      bodies: [],
+      nets: [],
+      lattices: [],
+    });
+    assert.strictEqual(slim.materials[0]!.nuclides.length, 1);
+    assert.ok(slim.materials[0]!.nuclides[0]!.sumIsotope);
+    assert.strictEqual(slim.materials[0]!.nuclideCount, 300);
+  });
+
+  it("handleGetIndex always returns sumIsotopeMarks", () => {
+    const text = ["PIN", "SI FP1", "SIDEN 1e-5", "MATR 1", "U235 1e-2", "FP1 1e-8", "FINISH"].join("\n");
+    const uri = "file:///sum-marks.mcu";
+    const doc = TextDocument.create(uri, "mcunr", 1, text);
+    const getDoc = (u: string) => (u === uri ? doc : undefined);
+    const result = handleGetIndex(uri, getDoc);
+    assert.ok(result);
+    assert.ok(Array.isArray(result!.sumIsotopeMarks));
+    assert.ok(result!.sumIsotopeMarks!.some((m) => m.name.toUpperCase() === "FP1"));
   });
 
   it("handleValidateInput without document returns error", async () => {

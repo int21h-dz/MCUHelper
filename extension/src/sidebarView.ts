@@ -30,9 +30,18 @@ const NAV_VIEW_MAP: Record<string, NavViewId> = {
 };
 
 let sidebarReadyHandler: (() => void) | undefined;
+let sumIsotopeDecorationHandler:
+  | ((editor: vscode.TextEditor, index: IndexPayload | null) => void)
+  | undefined;
 
 export function setSidebarReadyHandler(handler: () => void): void {
   sidebarReadyHandler = handler;
+}
+
+export function setSumIsotopeDecorationHandler(
+  handler: (editor: vscode.TextEditor, index: IndexPayload | null) => void
+): void {
+  sumIsotopeDecorationHandler = handler;
 }
 
 function sidebarHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
@@ -306,6 +315,9 @@ async function refreshSidebarsOnce(
         providers.get(id)?.applyIndex(null);
       }
     }
+    if (editor && sumIsotopeDecorationHandler) {
+      sumIsotopeDecorationHandler(editor, null);
+    }
     return;
   }
 
@@ -314,6 +326,9 @@ async function refreshSidebarsOnce(
 
   const uri = editor.document.uri.toString();
   const pos = editor.selection.active;
+
+  // Не очищаем панели до ответа: иначе debounce после правок мигает и сбрасывает дерево.
+  // Пока идёт fetch, остаётся предыдущий индекс.
 
   let index: IndexPayload | null = null;
   let errorMsg: string | undefined;
@@ -330,5 +345,9 @@ async function refreshSidebarsOnce(
       continue;
     }
     providers.get(id)?.applyIndex(index, errorMsg);
+  }
+
+  if (scope === "all" && sumIsotopeDecorationHandler) {
+    sumIsotopeDecorationHandler(editor, index);
   }
 }

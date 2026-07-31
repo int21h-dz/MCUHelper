@@ -160,6 +160,18 @@ describe("navData", () => {
     assert.ok(tree[1]!.description?.includes("нукл."));
   });
 
+  it("materials tree marks sum-isotope nuclides as muted", () => {
+    const payload = richPayload();
+    payload.summaries.materials[0]!.nuclides[0]!.sumIsotope = {
+      reasons: ["входит в суммарный изотоп (указан в SI)"],
+    };
+    const tree = buildMaterialsTree(payload, "file:///t.mcu");
+    const n0 = tree[0]!.children![0]!;
+    assert.strictEqual(n0.muted, true);
+    assert.ok(n0.tooltip?.includes("суммарный"));
+    assert.strictEqual(tree[0]!.children![1]!.muted, false);
+  });
+
   it("fragments tree formats ranges and labels", () => {
     const tree = buildFragmentsTree(richPayload(), "file:///t.mcu");
     assert.strictEqual(tree.length, 2);

@@ -65,6 +65,15 @@ export function getDocumentIndex(uri: string, expanded = true): DocumentIndex | 
   return cache.get(cacheKey(uri, expanded));
 }
 
+/** Любой кэш того же uri+version (expanded или source) — чтобы не парсить дважды. */
+export function getDocumentIndexForVersion(uri: string, version: number): DocumentIndex | undefined {
+  for (const expanded of [true, false] as const) {
+    const cached = cache.get(cacheKey(uri, expanded));
+    if (cached && cached.version === version) return cached;
+  }
+  return undefined;
+}
+
 export function clearDocument(uri: string): void {
   cache.delete(cacheKey(uri, true));
   cache.delete(cacheKey(uri, false));

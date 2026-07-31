@@ -2,9 +2,9 @@
 
 **Расширение для [Visual Studio Code](https://code.visualstudio.com/download) и Language Server** для исходных данных семейства [MCU6](#о-mcu-и-mcu-nr).
 
-[`VS Code ^1.85`](https://code.visualstudio.com/download) · `Node.js` · язык `mcunr` · 500+ тестов
+[`VS Code ^1.85`](https://code.visualstudio.com/download) · `Node.js` · язык `mcunr` · ~535 тестов
 
-> **English:** MCU Helper is a VS Code extension and Language Server for editing MCU6 input decks — text files that describe materials, 3D geometry, sources, tallying, and burnup for Monte Carlo particle transport. It brings syntax highlighting, diagnostics, completions, hover documentation, a module catalog, run actions for MCU-NR, and convenient navigation inside MCU input files.
+> **English:** MCU Helper is a VS Code extension and Language Server for editing MCU6 input decks — text files that describe materials, 3D geometry, sources, tallying, and burnup for Monte Carlo particle transport. It brings syntax highlighting, diagnostics, completions, hover documentation, sum-isotope highlighting (`SI` / `SINOT` / `SIDEN`), a module catalog, run actions for MCU-NR, and convenient navigation inside MCU input files.
 
 ![Демонстрация MCU Helper в VS Code](media/Promo.gif)
 
@@ -84,8 +84,9 @@ flowchart LR
   - неинициализированные имена в `EQU`/`SET` и выражениях;
   - отсутствующий `#include` и ошибки солвера из `NAME.LST` после запуска
 - **Автодополнение** — все карты (~229 меток), алиасы, аргументы карт (`SUMZON`→`SUMB`…`ZONG`, `CONTEN`→`DENS`…, `CODE`→`RSTP`…), символы документа
-- **Signature Help** — подсказка активного параметра при вводе тел (`RCC`, `RCZ`, …), карт (`MATR`, `POWER`, `STEP`, …), строк нуклидов
+- **Signature Help** — подсказка активного параметра при вводе тел (`RCC`, `RCZ`, …), карт (`MATR`, `POWER`, `STEP`, `SI`/`SINOT`/`SIDEN`, …), строк нуклидов
 - **Всплывающие подсказки** — описания из UserGuide; для нуклидов — концентрация, плотность и атомная масса; опционально данные **IAEA NDS**; для `POWER`/`STEP`, `EMES`/`EPRO`, `VOL` — дополнительные расчёты и мини-отчёты
+- **Суммарный изотоп** (UserGuide §8.5) — карты `SI` / `SINOT` / `SIDEN`: нуклиды в сумме подсвечиваются серым в редакторе и приглушённо в панели «Материалы»; в hover — причина пометки (список SI/SINOT или порог `SIDEN`)
 - **Автоопределение языка** `mcunr` по содержимому (`PIN`, `MATR`, `HEAD`, …)
 - **Автоопределение кодировки** — UTF-8 / Windows-1251 / CP866 / KOI8-R для legacy-файлов и `#include`
 - **Сворачивание (folding)** — фрагменты варианта, блоки `MATR`, `LCELL…ENDL` и `LATT`
@@ -102,7 +103,7 @@ flowchart LR
 | **Каталог** | 8 модулей варианта; карточки карт с hover; drag или клик → вставка шаблона |
 | **Диагностика** | Ошибки и предупреждения текущего файла с переходом по клику; открывается после MCU-run при ошибках LST |
 | **Навигация** | Фрагменты варианта и карты/операторы (без тел, зон, EQU/SET, CONT) |
-| **Материалы** | Дерево `MATR` с плотностью и группами |
+| **Материалы** | Дерево `MATR` с плотностью и группами; нуклиды суммарного изотопа — приглушённо |
 | **Константы** | Эффективный набор `EQU`/`SET` в позиции курсора (global + локальные LCELL/CELL) |
 | **Тела** | Список геометрических тел по scope |
 | **Сети** | Ячейки `NET` |
@@ -177,7 +178,7 @@ flowchart LR
    - или из командной строки:
 
      ```bat
-     code --install-extension release\mcuhelper-vscode-0.6.0.vsix
+     code --install-extension release\mcuhelper-vscode-0.8.0.vsix
      ```
 
 ### Из исходников (разработка)
@@ -196,7 +197,7 @@ npm run build
 1. Откройте файл варианта — `.mcu`, `.mcunr` или текстовый файл с картами `PIN` / `MATR` / `HEAD`.
 2. Язык редактора переключится на **mcunr** автоматически (настройка `mcuhelper.autoDetectLanguage`).
 3. В Activity Bar нажмите иконку **MCU-NR** — откроется боковая панель с каталогом и навигацией.
-4. Наведите курсор на карту или нуклид — появится hover с описанием и данными.
+4. Наведите курсор на карту или нуклид — появится hover с описанием и данными (для нуклидов суммарного изотопа — ещё и причина пометки).
 5. Для запуска расчёта: вкладка **Запуск** → **Настроить пути** → **Debug** / **Run**.
 
 **Примеры файлов** в репозитории:
@@ -309,7 +310,7 @@ package-vsix.bat
 npm test
 ```
 
-Запускает 500+ тестов в пакетах `mcu-schema`, `mcu-language`, `mcu-geometry`, `mcu-lsp`, `extension`.
+Запускает 500+ тестов (~535) в пакетах `mcu-schema`, `mcu-language`, `mcu-geometry`, `mcu-lsp`, `extension`.
 
 ```bash
 npm run test:coverage

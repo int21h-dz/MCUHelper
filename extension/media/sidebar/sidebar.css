@@ -551,3 +551,13 @@ body {
   color: var(--vscode-descriptionForeground, #888);
   font-size: var(--mcu-size-sm);
 }
+
+/* Нуклиды суммарного изотопа (SI/SINOT/SIDEN) */
+.mcu-nav-card.mcu-muted {
+  opacity: 0.72;
+}
+.mcu-nav-card.mcu-muted .mcu-card-label,
+.mcu-nav-card.mcu-muted .mcu-card-title {
+  color: var(--vscode-descriptionForeground, #888);
+  font-style: italic;
+}

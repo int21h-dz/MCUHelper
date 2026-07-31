@@ -12,6 +12,10 @@ export interface NavTreeNode {
   label: string;
   description?: string;
   badges?: string[];
+  /** Серый/приглушённый вид (суммарный изотоп и т.п.). */
+  muted?: boolean;
+  /** Подсказка при наведении (причина muted и др.). */
+  tooltip?: string;
   uri?: string;
   range?: SourceRange;
   children?: NavTreeNode[];
@@ -55,7 +59,12 @@ export interface IndexPayload {
       massDensityGcm3: number | null;
       volumeCm3: number | null;
       massG: number | null;
-      nuclides: Array<{ name: string; concentration: string; range: SourceRange }>;
+      nuclides: Array<{
+        name: string;
+        concentration: string;
+        range: SourceRange;
+        sumIsotope?: { reasons: string[] };
+      }>;
       range: SourceRange;
     }>;
     zones: Array<{
@@ -109,6 +118,14 @@ export interface IndexPayload {
       range: SourceRange;
     }>;
   };
+  /** Компактные метки суммарного изотопа для серых decorations (всегда, даже при slim). */
+  sumIsotopeMarks?: Array<{
+    name: string;
+    concentration: string;
+    range: SourceRange;
+    reasons: string[];
+  }>;
+  hash?: string;
   editorContext?: {
     line: number;
     character: number;
@@ -327,6 +344,8 @@ export function buildMaterialsTree(index: IndexPayload, uri: string): NavTreeNod
         id: `mat-${m.number}-n-${i}`,
         label: n.name,
         description: `${n.concentration} яд/см³`,
+        muted: Boolean(n.sumIsotope),
+        tooltip: n.sumIsotope?.reasons?.join("; "),
         uri,
         range: n.range,
       })),

@@ -35,4 +35,18 @@ describe("cardDescriptionsExtra", () => {
     assert.ok(nucoff!.description.includes("отдельности не производится"));
     assert.ok(!nucoff!.description.endsWith(" в"));
   });
+
+  it("SI/SINOT/SIDEN describe sum isotope, not cross-section print", () => {
+    const si = getCardByLabel("SI");
+    const sinot = getCardByLabel("SINOT");
+    const siden = getCardByLabel("SIDEN");
+    assert.ok(si && sinot && siden);
+    assert.ok(si!.description.includes("суммарный изотоп"));
+    assert.ok(sinot!.description.includes("суммарный изотоп"));
+    assert.ok(siden!.description.includes("суммарный изотоп"));
+    assert.ok(!si!.description.includes("печати сечений"));
+    assert.ok(!sinot!.description.includes("печати сечений"));
+    assert.ok(!siden!.title.includes("печати"));
+    assert.ok(si!.title.includes("суммарн"));
+  });
 });

@@ -2,6 +2,7 @@ export * from "./detect";
 export * from "./encodingDetect";
 export * from "./constantScope";
 export * from "./materialDensity";
+export * from "./sumIsotope";
 export * from "./materialVolumes";
 export * from "./bodyVolume";
 export * from "./calculationControl";

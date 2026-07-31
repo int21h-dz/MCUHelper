@@ -27,4 +27,16 @@ describe("cardLineParamGroups", () => {
     const spnt = getCardLineParamGroups("SPNT");
     assert.ok(spnt?.[0].label.includes("x,y,z"));
   });
+
+  it("SIDEN has value threshold for sum isotope", () => {
+    const siden = getCardLineParamGroups("SIDEN");
+    assert.ok(siden);
+    assert.strictEqual(siden![0].label, "value");
+    assert.ok(siden![0].documentation.includes("суммарный изотоп"));
+  });
+
+  it("SI and SINOT have list param for sum isotope", () => {
+    assert.strictEqual(getCardLineParamGroups("SI")?.[0].label, "list");
+    assert.strictEqual(getCardLineParamGroups("SINOT")?.[0].label, "list");
+  });
 });

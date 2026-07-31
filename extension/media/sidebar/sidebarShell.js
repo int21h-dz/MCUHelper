@@ -138,7 +138,7 @@
     const copyText = cardCopyText(node);
     const id = node.id || "";
     const isDiag = id.startsWith("diag-");
-    const hoverTitle = isDiag ? diagHoverTitle(node) : copyText;
+    const hoverTitle = isDiag ? diagHoverTitle(node) : node.tooltip || copyText;
     const detail =
       node.description && node.description.length > 40
         ? '<div class="mcu-card-detail"><div class="mcu-card-desc">' +
@@ -154,6 +154,7 @@
     return (
       '<div class="mcu-card mcu-nav-card' +
       (clickable ? " leaf-clickable" : "") +
+      (node.muted ? " mcu-muted" : "") +
       '" data-uri="' +
       esc(node.uri || "") +
       '" data-range="' +

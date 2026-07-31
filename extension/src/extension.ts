@@ -11,7 +11,7 @@ import { GeometryPanel } from "./geometryPanel";
 import { maybeSetMcunrLanguage, scoreMcunrContent, isMcunrDocument } from "./contentDetect";
 import { maybeFixDocumentEncoding, detectEncodingCommand } from "./encodingDetect";
 import { registerExpandNaturalIsotope, hoverMiddleware } from "./expandNaturalIsotope";
-import { createSidebarProviders, refreshSidebarsCoalesced, setSidebarReadyHandler, type SidebarViewId, type SidebarViewProvider } from "./sidebarView";
+import { createSidebarProviders, refreshSidebarsCoalesced, setSidebarReadyHandler, setSumIsotopeDecorationHandler, type SidebarViewId, type SidebarViewProvider } from "./sidebarView";
 import { registerTemplateInsert } from "./templateInsert";
 import { buildCatalogPayload } from "./catalogBridge";
 import { registerDiagnosticNavigation, fetchMcuDiagnostics } from "./diagnosticNavigation";
@@ -19,6 +19,11 @@ import { clearLanguageDetectState, scheduleLanguageDetectOnEdit } from "./langua
 import { registerRunPanel, type RunPanelViewProvider } from "./runPanelView";
 import { runMcuInTerminal } from "./mcuTerminalRun";
 import { shouldFocusDiagnosticsAfterRun } from "./runPanelHelpers";
+import {
+  applySumIsotopeDecorations,
+  clearSumIsotopeDecorations,
+  createSumIsotopeDecorationType,
+} from "./sumIsotopeDecorations";
 
 const REFRESH_DEBOUNCE_MS = 500;
 const SELECTION_REFRESH_DEBOUNCE_MS = 300;
@@ -44,10 +49,13 @@ let refreshTimer: ReturnType<typeof setTimeout> | undefined;
 let selectionRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 let runStatusItem: vscode.StatusBarItem | undefined;
 let runPanel: RunPanelViewProvider | undefined;
+let sumIsotopeDecorationType: vscode.TextEditorDecorationType | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel("MCU-NR Helper");
   context.subscriptions.push(output);
+  sumIsotopeDecorationType = createSumIsotopeDecorationType();
+  context.subscriptions.push(sumIsotopeDecorationType);
 
   const bundledServer = path.join(context.extensionPath, "server", "server.js");
   const monorepoServer = path.join(
@@ -108,6 +116,31 @@ export function activate(context: vscode.ExtensionContext): void {
   registerDiagnosticNavigation(context, () => client);
   sidebarProviders = createSidebarProviders(context, client);
   setSidebarReadyHandler(() => scheduleRefresh());
+  setSumIsotopeDecorationHandler((editor, index) => {
+    if (!sumIsotopeDecorationType) return;
+    if (!index) {
+      clearSumIsotopeDecorations(editor, sumIsotopeDecorationType);
+      return;
+    }
+    const fromMarks = index.sumIsotopeMarks;
+    const nuclides =
+      fromMarks && fromMarks.length > 0
+        ? fromMarks.map((n) => ({
+            name: n.name,
+            range: n.range,
+            reasons: n.reasons,
+          }))
+        : index.summaries.materials.flatMap((m) =>
+            m.nuclides
+              .filter((n) => n.sumIsotope)
+              .map((n) => ({
+                name: n.name,
+                range: n.range,
+                reasons: n.sumIsotope!.reasons,
+              }))
+          );
+    applySumIsotopeDecorations(editor, sumIsotopeDecorationType, nuclides);
+  });
   runPanel = registerRunPanel(context);
   runStatusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 30);
   runStatusItem.name = "MCU-NR Run Actions";
@@ -163,7 +196,8 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.workspace.onDidOpenTextDocument(async (doc) => {
       await maybeFixDocumentEncoding(doc, output);
-      if (await maybeSetMcunrLanguage(doc, output)) scheduleRefresh();
+      const langChanged = await maybeSetMcunrLanguage(doc, output);
+      if (langChanged) scheduleRefresh();
       else if (isMcunrDocument(doc)) scheduleRefresh();
     }),
     vscode.workspace.onDidSaveTextDocument(() => scheduleRefresh()),

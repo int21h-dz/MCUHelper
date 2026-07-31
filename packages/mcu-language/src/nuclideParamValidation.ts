@@ -18,6 +18,9 @@ const NUCLIDE_LINE_EXCLUDED_HEADS = new Set([
   "DELN", "NEUT", "EGRC", "KEFF", "RCT", "ZRCT", "ORCT", "MRCT", "ENERG", "ENERGY",
   "ACEPT", "ACERR", "PHOT", "WPHO", "IWPHN", "EGPH", "ELEC", "EGEL", "PSIN", "PSGR",
   "MATFIL", "MATPRN", "SIPRN", "DEFPRN", "MATWGT", "MATREP",
+  // Суммарный изотоп / PIN (UserGuide §8.5) — иначе `SIDEN 1` маскируется под `nuclide dens`.
+  // SI намеренно не здесь: в MATR бывает нуклид кремния `SI dens` (см. isSiCardListPrefix).
+  "SINOT", "SIDEN", "ICE", "CPM", "CPMEND",
 ]);
 
 function isExcludedNuclideLikeLine(text: string): boolean {
@@ -46,6 +49,23 @@ function isOptionalParamTokenOrPrefix(token: string, allowBarePrefix: boolean): 
   return OPTIONAL_PARAM_KEYS.some((k) => k.startsWith(upper));
 }
 
+/** Плотность нуклида: число / sci / выражение; имена вроде FP1 — это list карты SI. */
+function looksLikeNuclideDensToken(token: string): boolean {
+  if (DENSITY_RE.test(token)) return true;
+  return /^[+\-.(0-9]/.test(token);
+}
+
+/**
+ * Карта SI list vs нуклид SI dens.
+ * `SI FP1` / `SI ` → карта; `SI 1.1E-2` → нуклид.
+ * EQU-имя как dens (SI CONC) ошибочно уйдёт в карту — редкий кейс.
+ */
+function isSiCardListPrefix(tokens: string[]): boolean {
+  if (tokens[0]?.toUpperCase() !== "SI") return false;
+  if (tokens.length === 1) return true;
+  return !looksLikeNuclideDensToken(tokens[1]);
+}
+
 export function isNuclideCompositionLinePrefix(prefix: string): boolean {
   const code = prefix.replace(/;.*/, "");
   const trimmed = code.trim();
@@ -60,12 +80,13 @@ export function isNuclideCompositionLinePrefix(prefix: string): boolean {
   // Системно исключаем карты со специальными аргументами (SUMZON/CONTEN/CODE/...),
   // иначе строка вида `CARD TOKEN` ошибочно маскируется под `nuclide dens`.
   if (getCardArgSpec(head)) return false;
+  if (isSiCardListPrefix(tokens)) return false;
 
-  if (tokens.length === 1) return /\s$/.test(code);
+  const endsWithSpace = /\s$/.test(code);
+  if (tokens.length === 1) return endsWithSpace;
   if (/^(ACE|MODS|DTEM|PHT)=/i.test(tokens[1])) return false;
   if (tokens.length === 2) return true;
 
-  const endsWithSpace = /\s$/.test(code);
   for (let i = 2; i < tokens.length; i++) {
     const allowBarePrefix = i === tokens.length - 1 && !endsWithSpace;
     if (!isOptionalParamTokenOrPrefix(tokens[i], allowBarePrefix)) return false;

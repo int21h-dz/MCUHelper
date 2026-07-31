@@ -15,6 +15,8 @@ const LIVECHART_BASE = "https://nds.iaea.org/relnsd/v1/data";
 const USER_AGENT = "Mozilla/5.0 (compatible; McuHelper/0.1; +https://github.com/mcuhelper)";
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const NEGATIVE_CACHE_TTL_MS = 60 * 60 * 1000;
+/** Смена формата hover — инвалидирует старый markdown на диске. */
+const CACHE_FORMAT = "v4";
 const FETCH_TIMEOUT_MS = 8000;
 const CACHE_FILE = path.join(os.homedir(), ".mcuhelper", "iaea-nds-cache.json");
 const NATURAL_ABUNDANCE_FILE = path.join(os.homedir(), ".mcuhelper", "natural-abundance-index.json");
@@ -104,12 +106,12 @@ interface SigResponse {
 }
 
 const NEUTRON_REACTIONS: Array<{ reaction: string; label: string }> = [
-  { reaction: "n,g", label: "(n,γ)" },
+  { reaction: "n,g", label: "(n,g)" },
   { reaction: "n,f", label: "(n,f)" },
   { reaction: "n,el", label: "(n,el)" },
   { reaction: "n,2n", label: "(n,2n)" },
   { reaction: "n,3n", label: "(n,3n)" },
-  { reaction: "n,a", label: "(n,α)" },
+  { reaction: "n,a", label: "(n,a)" },
 ];
 
 async function fetchJson<T>(url: string, timeoutMs = FETCH_TIMEOUT_MS): Promise<T | null> {
@@ -138,13 +140,11 @@ function pickSection(sections: EndfSection[]): EndfSection | undefined {
 }
 
 function formatSci(value: number, digits = 3): string {
-  if (!Number.isFinite(value)) return "—";
+  if (!Number.isFinite(value)) return "-";
   if (value === 0) return "0";
   const abs = Math.abs(value);
   if (abs >= 1e4 || (abs > 0 && abs < 1e-2)) {
-    const exp = Math.floor(Math.log10(abs));
-    const mant = value / 10 ** exp;
-    return `${mant.toFixed(Math.max(1, digits - 1))}×10^${exp}`;
+    return value.toExponential(Math.max(1, digits - 1));
   }
   if (abs >= 100) return value.toFixed(1);
   if (abs >= 10) return value.toFixed(2);
@@ -153,7 +153,7 @@ function formatSci(value: number, digits = 3): string {
 }
 
 function formatPercent(fraction: number): string {
-  if (!Number.isFinite(fraction)) return "—";
+  if (!Number.isFinite(fraction)) return "-";
   const pct = fraction * 100;
   if (pct >= 0.01) return `${pct.toFixed(2)}%`;
   if (pct > 0) return `${formatSci(pct, 2)}%`;
@@ -162,7 +162,7 @@ function formatPercent(fraction: number): string {
 
 function formatParity(p?: string): string {
   if (!p) return "";
-  const map: Record<string, string> = { plus: "+", minus: "−", "+": "+", "-": "−" };
+  const map: Record<string, string> = { plus: "+", minus: "-", "+": "+", "-": "-" };
   return map[p.toLowerCase()] ?? p;
 }
 
@@ -188,7 +188,7 @@ function halfLifeToSeconds(t12: number, unit: string): number {
 
 function formatHalfLife(t12?: number, unit?: string, dt?: number): string | null {
   if (t12 == null || !unit) return null;
-  const unc = dt != null && dt > 0 ? ` ± ${formatSci(dt, 2)}` : "";
+  const unc = dt != null && dt > 0 ? ` +/- ${formatSci(dt, 2)}` : "";
   const units: Record<string, string> = {
     s: "с",
     m: "мин",
@@ -207,21 +207,22 @@ function formatHalfLife(t12?: number, unit?: string, dt?: number): string | null
   return `${formatSci(seconds, 3)} с`;
 }
 
+/** GFM-таблица; безопасна, если в тексте нет сырого `<` (ломает markdown HTML). */
 function mdTable(headers: string[], rows: string[][]): string {
   if (!rows.length) return "";
-  const esc = (s: string) => s.replace(/\|/g, "\\|");
+  const esc = (s: string) => s.replace(/\|/g, "\\|").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const lines = [
     `| ${headers.map(esc).join(" | ")} |`,
     `| ${headers.map(() => "---").join(" | ")} |`,
-    ...rows.map((row) => `| ${row.map((c) => esc(c)).join(" | ")} |`),
+    ...rows.map((row) => `| ${row.map((c) => esc(String(c))).join(" | ")} |`),
   ];
   return lines.join("\n");
 }
 
 function formatBarn(value: number | null | undefined, unc?: number): string {
-  if (value == null || !Number.isFinite(value)) return "—";
+  if (value == null || !Number.isFinite(value)) return "-";
   if (unc != null && Number.isFinite(unc) && unc > 0) {
-    return `${formatSci(value)} ± ${formatSci(unc)}`;
+    return `${formatSci(value)} +/- ${formatSci(unc)}`;
   }
   return formatSci(value);
 }
@@ -343,16 +344,15 @@ function formatDecayBlock(target: string, decay: DecayResponse, section: EndfSec
   if (decay.Library) metaRows.push(["Библиотека", decay.Library]);
   if (decay.AUTH) metaRows.push(["Оценка", decay.AUTH.trim()]);
   const hl = formatHalfLife(decay.T12, decay.uT12, decay.dT12);
-  if (hl) metaRows.push(["T½", hl]);
+  if (hl) metaRows.push(["T1/2", hl]);
   const jpi = formatSpinJpi(decay.Spin, decay.Parity);
-  if (jpi) metaRows.push(["Jπ", jpi]);
-  if (decay.Ealpha != null) metaRows.push(["Eα", `${formatSci(decay.Ealpha)} ${decay.uEalpha ?? "keV"}`]);
-  if (decay.Ebeta != null) metaRows.push(["Eβ", `${formatSci(decay.Ebeta)} ${decay.uEbeta ?? "keV"}`]);
+  if (jpi) metaRows.push(["Jpi", jpi]);
+  if (decay.Ealpha != null) metaRows.push(["E-alpha", `${formatSci(decay.Ealpha)} ${decay.uEalpha ?? "keV"}`]);
+  if (decay.Ebeta != null) metaRows.push(["E-beta", `${formatSci(decay.Ebeta)} ${decay.uEbeta ?? "keV"}`]);
 
   const lines: string[] = [
     "",
-    "---",
-    `### [IAEA NDS — ${nucleus}](https://www-nds.iaea.org/exfor/x4guide/API/#ENDF)`,
+    `**[IAEA NDS - ${nucleus}](https://www-nds.iaea.org/exfor/x4guide/API/#ENDF)**`,
   ];
 
   if (metaRows.length) {
@@ -360,14 +360,12 @@ function formatDecayBlock(target: string, decay: DecayResponse, section: EndfSec
   }
 
   if (decay.DecayModes?.length) {
-    const modeRows = decay.DecayModes.filter(
-      (dm) => dm.Branching == null || dm.Branching >= 1e-8
-    )
+    const modeRows = decay.DecayModes.filter((dm) => dm.Branching == null || dm.Branching >= 1e-8)
       .sort((a, b) => (b.Branching ?? 0) - (a.Branching ?? 0))
       .map((dm) => [
         dm.txRTYP ?? "?",
-        dm.Branching != null ? formatPercent(dm.Branching) : "—",
-        dm.DecayQ != null ? `${formatSci(dm.DecayQ)} ${dm.uDecayQ ?? "keV"}` : "—",
+        dm.Branching != null ? formatPercent(dm.Branching) : "-",
+        dm.DecayQ != null ? `${formatSci(dm.DecayQ)} ${dm.uDecayQ ?? "keV"}` : "-",
       ]);
     if (modeRows.length) {
       lines.push("", "**Распад**", "", mdTable(["Режим", "Вклад", "Q"], modeRows));
@@ -389,11 +387,11 @@ function formatCrossSectionBlock(target: string, rows: CrossSectionRow[], librar
     `**Сечения ENDF${libNote}**, barn`,
     "",
     mdTable(
-      ["Реакция", `σ @ ${THERMAL_EV} eV`, "σ @ 1 MeV", "σ @ 14 MeV"],
+      ["Реакция", `sigma @ ${THERMAL_EV} eV`, "sigma @ 1 MeV", "sigma @ 14 MeV"],
       rows.map((r) => [r.label, r.thermal, r.at1MeV, r.at14MeV])
     ),
     "",
-    `[ENDF σ](${API_BASE}/e4list?Target=${encodeURIComponent(target)}&Reaction=n,g&Quantity=SIG&json)`,
+    `[ENDF sigma](${API_BASE}/e4list?Target=${encodeURIComponent(target)}&Reaction=n,g&Quantity=SIG&json)`,
   ];
   return lines.join("\n");
 }
@@ -417,8 +415,7 @@ async function fetchIsotopeMarkdown(target: string): Promise<string | null> {
   } else if (xsecRows.length) {
     parts.push(
       "",
-      "---",
-      `### [IAEA NDS — ${target}](https://www-nds.iaea.org/exfor/x4guide/API/#ENDF)`
+      `**[IAEA NDS - ${target}](https://www-nds.iaea.org/exfor/x4guide/API/#ENDF)**`
     );
   }
 
@@ -609,8 +606,7 @@ function formatNaturalMarkdown(
   const rows = isotopes.map((iso) => [iso.label, `${iso.abundance}%`]);
   const lines: string[] = [
     "",
-    "---",
-    `### [IAEA NDS — природный ${element}](https://www-nds.iaea.org/relnsd/vcharthtml/api_v0_guide.html)`,
+    `**[IAEA NDS - природный ${element}](https://www-nds.iaea.org/relnsd/vcharthtml/api_v0_guide.html)**`,
     "",
     mdTable(["Изотоп", "Мольная доля"], rows),
     "",
@@ -720,9 +716,9 @@ async function persistDiskCache(): Promise<void> {
 
 function resolveCacheKey(nuclideName: string): string | null {
   const target = mcuNuclideToIaeaTarget(nuclideName);
-  if (target) return `iso:${target}`;
+  if (target) return `${CACHE_FORMAT}:iso:${target}`;
   const element = mcuNuclideToIaeaElement(nuclideName);
-  if (element) return `natural:${element.toUpperCase()}`;
+  if (element) return `${CACHE_FORMAT}:natural:${element.toUpperCase()}`;
   return null;
 }
 

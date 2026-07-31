@@ -1,6 +1,7 @@
 export * from "./detect";
 export * from "./constantScope";
 export * from "./materialDensity";
+export * from "./sumIsotope";
 export * from "./materialVolumes";
 export * from "./bodyVolume";
 export * from "./calculationControl";

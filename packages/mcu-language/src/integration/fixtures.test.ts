@@ -1368,6 +1368,40 @@ describe("nuclide parameter hints", () => {
     assert.strictEqual(getCompositionLineParameterHover(line, line.indexOf("DELN")), null);
   });
 
+  it("does not treat SIDEN card line as nuclide dens hover", () => {
+    const line = "SIDEN 1";
+    const help = getParameterSignatureHelp(line, line.indexOf("1"));
+    assert.ok(help);
+    assert.ok(!help!.parameters.some((p) => p.label === "dens" || p.label === "name"));
+    assert.ok(help!.parameters.some((p) => p.label === "value"));
+    assert.ok(help!.documentation?.includes("суммарного изотопа"));
+    assert.strictEqual(getCompositionLineParameterHover(line, line.indexOf("SIDEN")), null);
+    assert.strictEqual(getCompositionLineParameterHover(line, line.indexOf("1")), null);
+  });
+
+  it("treats SI dens as nuclide, SI list as card", () => {
+    const nuclide = "SI 1.1E-2";
+    const nuclHelp = getParameterSignatureHelp(nuclide, nuclide.length);
+    assert.ok(nuclHelp);
+    assert.strictEqual(nuclHelp!.parameters[nuclHelp!.activeParameter].label, "dens");
+
+    const card = "SI FP1 FP2";
+    const cardHelp = getParameterSignatureHelp(card, card.indexOf("FP1"));
+    assert.ok(cardHelp);
+    assert.ok(cardHelp!.parameters.some((p) => p.label === "list"));
+    assert.ok(!cardHelp!.parameters.some((p) => p.label === "dens"));
+    assert.strictEqual(getCompositionLineParameterHover(card, card.indexOf("FP1")), null);
+  });
+
+  it("does not treat SINOT card line as nuclide dens hover", () => {
+    const line = "SINOT U235 U238";
+    const help = getParameterSignatureHelp(line, line.indexOf("U235"));
+    assert.ok(help);
+    assert.ok(help!.parameters.some((p) => p.label === "list"));
+    assert.ok(!help!.parameters.some((p) => p.label === "dens"));
+    assert.strictEqual(getCompositionLineParameterHover(line, line.indexOf("SINOT")), null);
+  });
+
   it("highlights GROUP on MATR header", () => {
     const line = "MATR 14 T=100 GROUP=MOD";
     const help = getParameterSignatureHelp(line, line.length);

@@ -54,6 +54,26 @@ export const CARD_LINE_PARAM_GROUPS: Record<string, CardLineParamHint[]> = {
     { label: "number", documentation: "Номер регистратора" },
     { label: "DOWN|UP", documentation: "Направление, опционально" },
   ],
+  SI: [
+    {
+      label: "list",
+      documentation: "Список нуклидов, входящих в суммарный изотоп (UserGuide §8.5)",
+    },
+  ],
+  SINOT: [
+    {
+      label: "list",
+      documentation:
+        "Список нуклидов, не входящих в суммарный изотоп; остальные входят (UserGuide §8.5)",
+    },
+  ],
+  SIDEN: [
+    {
+      label: "value",
+      documentation:
+        "Порог ядерной плотности: нуклиды с плотностью меньше value входят в суммарный изотоп (UserGuide §8.5)",
+    },
+  ],
 };
 
 export function getCardLineParamGroups(cardLabel: string): CardLineParamHint[] | undefined {

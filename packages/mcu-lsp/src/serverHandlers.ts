@@ -10,9 +10,11 @@ import {
   resolveScopeAtLine,
   resolveIncludeFilePath,
   resolveIncludeFileUri,
+  collectSumIsotopeMarks,
   type DocumentIndex,
   type DiagnosticMessage,
 } from "@mcuhelper/mcu-language";
+import { isGeoBodyLabel } from "@mcuhelper/mcu-schema";
 import { buildScene, buildSliceGrid, queryPoint } from "@mcuhelper/mcu-geometry";
 import type { SliceAxis } from "@mcuhelper/mcu-geometry";
 import { SymbolInformation, SymbolKind, Diagnostic, DiagnosticSeverity, FoldingRange, FoldingRangeKind, DocumentLink } from "vscode-languageserver";
@@ -74,17 +76,70 @@ export function toLspDiagnostic(d: DiagnosticMessage): Diagnostic {
 
 const PROFILE_PARSE = process.env.MCUHELPER_PROFILE === "1";
 
+const MATR_BLOCK_STOP_LABELS = new Set(["MATR", "END", "FINISH", "DEF", "TEMPR", "PIN"]);
+
+function isDataRowLabel(label: string): boolean {
+  return (
+    /^T\d+/i.test(label) ||
+    /^P\d+/i.test(label) ||
+    /^O\d+/i.test(label) ||
+    /^M\d+/i.test(label) ||
+    /^E-?\d+/i.test(label) ||
+    /^I-?\d+/i.test(label) ||
+    /^F-?\d+/i.test(label)
+  );
+}
+
+/** Statements для панели «Навигация» — без тел/зон/нуклидов MATR/CONT/EQU (иначе JSON сотни МБ). */
+export function selectNavStatements(index: DocumentIndex): Array<{
+  label: string;
+  text: string;
+  fragment: DocumentIndex["ast"]["statements"][number]["fragment"];
+  range: DocumentIndex["ast"]["statements"][number]["range"];
+}> {
+  const zoneAtLine = new Set(
+    index.summaries.zones.map((z) => `${z.name.toUpperCase()}@${z.range.start.line}`)
+  );
+  const out: Array<{
+    label: string;
+    text: string;
+    fragment: DocumentIndex["ast"]["statements"][number]["fragment"];
+    range: DocumentIndex["ast"]["statements"][number]["range"];
+  }> = [];
+  let inMatrBlock = false;
+  for (const stmt of index.ast.statements) {
+    const label = stmt.label.toUpperCase();
+    let keep = false;
+    if (label && /^[A-Za-z]/.test(label) && label !== "FINISH" && label !== "CONT" && label !== "EQU" && label !== "SET") {
+      if (!isGeoBodyLabel(label) && !zoneAtLine.has(`${label}@${stmt.range.start.line}`) && !isDataRowLabel(label)) {
+        if (!(inMatrBlock && !MATR_BLOCK_STOP_LABELS.has(label))) {
+          keep = true;
+        }
+      }
+    }
+    if (label === "MATR") inMatrBlock = true;
+    else if (MATR_BLOCK_STOP_LABELS.has(label)) inMatrBlock = false;
+    if (!keep) continue;
+    const text = stmt.text.length > 120 ? `${stmt.text.slice(0, 119)}…` : stmt.text;
+    out.push({ label: stmt.label, text, fragment: stmt.fragment, range: stmt.range });
+  }
+  return out;
+}
+
 /** Единая точка получения индекса: version-cache в analyzeDocument + проверка version. */
 export function ensureDocumentIndex(doc: TextDocument): DocumentIndex {
   const uri = doc.uri;
-  const cached = getDocumentIndex(uri, true);
+  const text = doc.getText();
+  // Без #include expanded≡source — один parse на diagnostics+getIndex. С include нужен expand.
+  const expandInclude = /#\s*include\b/i.test(text);
+  const cached = getDocumentIndex(uri, expandInclude);
   if (cached && cached.version === doc.version) {
     return cached;
   }
   const t0 = performance.now();
-  const textLen = doc.getText().length;
+  const textLen = text.length;
   const baseDir = uriToBaseDir(uri);
-  const index = analyzeDocument(uri, doc.getText(), doc.version, { baseDir, expandInclude: true });
+  const index = analyzeDocument(uri, text, doc.version, { baseDir, expandInclude });
   const ms = performance.now() - t0;
   if (PROFILE_PARSE) {
     console.error(`[mcuhelper] analyzeDocument ${ms.toFixed(1)}ms uri=${uri} v=${doc.version} len=${textLen}`);
@@ -97,6 +152,7 @@ export function collectDiagnostics(
   extraSolverDiags: Diagnostic[] = []
 ): Diagnostic[] {
   const baseDir = uriToBaseDir(doc.uri);
+  // Всегда source (без expand): иначе диагностики из #include «прилипают» к строкам исходника.
   const index = analyzeDocument(doc.uri, doc.getText(), doc.version, { baseDir, expandInclude: false });
   const lineCount = doc.lineCount;
   const diags = index.ast.diagnostics
@@ -106,16 +162,19 @@ export function collectDiagnostics(
   // Solver-диагностики: либо уже переданы в extra (после runMcuStep), либо из кэша.
   // Не мержить оба источника — иначе дубли (одна и та же ошибка дважды).
   const solverFromExtra = extraSolverDiags.filter((d) => d.range.start.line < lineCount);
+  let out: Diagnostic[];
   if (solverFromExtra.length > 0) {
-    return [...diags, ...solverFromExtra];
+    out = [...diags, ...solverFromExtra];
+  } else {
+    const cached = getCachedSolverResult(index.hash);
+    if (cached) {
+      diags.push(
+        ...cached.diagnostics.map(toLspDiagnostic).filter((d) => d.range.start.line < lineCount)
+      );
+    }
+    out = diags;
   }
-  const cached = getCachedSolverResult(index.hash);
-  if (cached) {
-    diags.push(
-      ...cached.diagnostics.map(toLspDiagnostic).filter((d) => d.range.start.line < lineCount)
-    );
-  }
-  return diags;
+  return out;
 }
 
 export interface McuDiagnosticPayload {
@@ -378,6 +437,22 @@ export function resolveDocumentIndex(
   return ensureDocumentIndex(doc);
 }
 
+const INDEX_NUCLIDE_SOFT_LIMIT = 20_000;
+
+/** На full-core нуклиды в summaries раздувают JSON до 100+ МБ — для UI оставляем счётчики.
+ * Нуклиды суммарного изотопа оставляем (серый UI / sidebar muted). */
+export function slimSummariesForIndex<T extends DocumentIndex["summaries"]>(summaries: T): T {
+  const nuc = summaries.materials.reduce((n, m) => n + m.nuclides.length, 0);
+  if (nuc <= INDEX_NUCLIDE_SOFT_LIMIT) return summaries;
+  return {
+    ...summaries,
+    materials: summaries.materials.map((m) => ({
+      ...m,
+      nuclides: m.nuclides.filter((n) => Boolean(n.sumIsotope)) as typeof m.nuclides,
+    })),
+  };
+}
+
 export function handleGetIndex(
   args: string | { uri: string; line?: number; character?: number },
   getDoc: (uri: string) => TextDocument | undefined
@@ -388,7 +463,7 @@ export function handleGetIndex(
   const index = resolveDocumentIndex(uri, getDoc);
   if (!index) return null;
 
-  const summaries = { ...index.summaries };
+  let summaries = { ...index.summaries };
   let editorContext: { line: number; character: number; scope: string } | undefined;
 
   if (line != null && line >= 0) {
@@ -398,14 +473,24 @@ export function handleGetIndex(
     summaries.constants = listVisibleConstants(index.ast.constants, scope, line, char);
   }
 
-  const statements = index.ast.statements.map((stmt) => ({
-    label: stmt.label,
-    text: stmt.text,
-    fragment: stmt.fragment,
-    range: stmt.range,
+  /** Компактный список для decorations — не зависит от slim nuclides. */
+  const sumIsotopeMarks = collectSumIsotopeMarks(index.ast).map((m) => ({
+    name: m.name,
+    concentration: m.concentration,
+    range: m.range,
+    reasons: m.reasons,
   }));
 
-  return { summaries, fragments: index.ast.fragments, statements, hash: index.hash, editorContext };
+  summaries = slimSummariesForIndex(summaries);
+  const statements = selectNavStatements(index);
+  return {
+    summaries,
+    fragments: index.ast.fragments,
+    statements,
+    hash: index.hash,
+    editorContext,
+    sumIsotopeMarks,
+  };
 }
 
 export function handleGetGeometry(uri: string, getDoc: (uri: string) => TextDocument | undefined) {
