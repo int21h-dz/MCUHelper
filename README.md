@@ -351,7 +351,6 @@ npm run coverage:check
 
 | Ресурс | Описание |
 |--------|----------|
-| [structure.md](structure.md) | Структура репозитория, LSP, экспериментальные сценарии |
 | [mcuproject.ru](https://mcuproject.ru/rabout.html) | Официальный сайт семейства программ MCU |
 
 ---
