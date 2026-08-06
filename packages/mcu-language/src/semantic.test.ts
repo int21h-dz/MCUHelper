@@ -22,7 +22,7 @@ FINISH`;
     assert.ok(d.some((x) => x.code === "transf-ref" && x.message.includes("MISSING")));
   });
 
-  it("errors on MATR number gap", () => {
+  it("errors on MATR number gap (ordinal mismatch)", () => {
     const text = `PIN 1 0
 MATR 1
 U235 1.E-3
@@ -30,7 +30,139 @@ MATR 3
 U238 1.E-3
 FINISH`;
     const d = diags(text);
-    assert.ok(d.some((x) => x.code === "matr-gap" && x.message.includes("MATR 2")));
+    assert.ok(
+      d.some((x) => x.code === "matr-gap" && x.message.includes("порядковому") && x.message.includes("2")),
+      d.filter((x) => x.code === "matr-gap").map((x) => x.message).join("; ")
+    );
+  });
+
+  it("errors on empty MATR without nuclides", () => {
+    const d = diags("MATR 1\nEND\nFINISH");
+    const empty = d.find((x) => x.code === "matr-empty");
+    assert.ok(empty);
+    assert.match(empty!.message, /пуст/i);
+  });
+
+  it("errors when all MATR nuclides fall into SIDEN sum isotope", () => {
+    const text = `PIN
+SIDEN 1.0E-6
+MATR 1 T=300
+O 1E-10
+END
+FINISH`;
+    const d = diags(text);
+    const empty = d.find((x) => x.code === "matr-empty");
+    assert.ok(empty, d.map((x) => `${x.code}:${x.message}`).join("; "));
+    assert.match(empty!.message, /суммарн/i);
+    assert.match(empty!.message, /SIDEN/i);
+  });
+
+  it("errors when all MATR nuclides are listed in SI", () => {
+    const text = `PIN
+SI U235 U238
+MATR 1
+U235 1.0E-2
+U238 1.0E-2
+END
+FINISH`;
+    const d = diags(text);
+    const empty = d.find((x) => x.code === "matr-empty");
+    assert.ok(empty);
+    assert.match(empty!.message, /SI/i);
+  });
+
+  it("does not flag MATR empty when at least one nuclide stays outside sum isotope", () => {
+    const text = `PIN
+SIDEN 1.0E-6
+MATR 1
+O 1E-10
+U235 1.0E-2
+END
+FINISH`;
+    const d = diags(text);
+    assert.ok(!d.some((x) => x.code === "matr-empty"));
+  });
+
+  it("errors on MATR redefinition with the same number", () => {
+    const text = `PIN 1 0
+MATR 1
+U235 1.E-3
+MATR 1
+U238 1.E-3
+FINISH`;
+    const d = diags(text);
+    const redef = d.find((x) => x.code === "matr-redef");
+    assert.ok(redef, d.map((x) => `${x.code}:${x.message}`).join("; "));
+    assert.ok(redef!.message.includes("MATR 1"));
+    assert.ok(redef!.message.includes("строке 2"), redef!.message);
+    assert.ok(redef!.related?.length === 1);
+    assert.ok(!d.some((x) => x.code === "matr-gap"));
+  });
+
+  it("matr-redef prior ref points into #include path:line, not expanded line", () => {
+    const fs = require("fs") as typeof import("fs");
+    const path = require("path") as typeof import("path");
+    const os = require("os") as typeof import("os");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-matr-redef-"));
+    try {
+      fs.writeFileSync(path.join(dir, "MATR5"), "MATR 5\nU235 1.E-3\n", "utf8");
+      const mainPath = path.join(dir, "main.mcu");
+      const text = `PIN 1 0
+#include MATR5
+** ---
+MATR 5
+U238 1.E-3
+FINISH
+`;
+      fs.writeFileSync(mainPath, text, "utf8");
+      const { pathToFileURL } = require("url") as typeof import("url");
+      const ast = parseDocument(text, { uri: pathToFileURL(mainPath).href, baseDir: dir });
+      const d = analyzeSemantics(ast);
+      const redef = d.find((x) => x.code === "matr-redef");
+      assert.ok(redef, d.map((x) => `${x.code}:${x.message}`).join("; "));
+      assert.ok(
+        /MATR5:1/.test(redef!.message),
+        `expected include path:line in message, got: ${redef!.message}`
+      );
+      assert.ok(!/ранее на строке \d+/.test(redef!.message), redef!.message);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("errors when later MATR reuses an earlier number", () => {
+    const text = `PIN 1 0
+MATR 1
+U235 1.E-3
+MATR 2
+U238 1.E-3
+MATR 1
+H 1.E-2
+FINISH`;
+    const d = diags(text);
+    assert.ok(d.some((x) => x.code === "matr-redef" && x.message.includes("MATR 1")));
+  });
+
+  it("allows same local number in different GROUP materials", () => {
+    const text = `PIN 1 0
+MATR 1 GROUP=A
+U235 1.E-3
+MATR 1 GROUP=B
+U238 1.E-3
+FINISH`;
+    const d = diags(text);
+    assert.ok(!d.some((x) => x.code === "matr-redef" || x.code === "matr-gap"));
+  });
+
+  it("errors on duplicate number inside the same GROUP", () => {
+    const text = `PIN 1 0
+MATR 1 GROUP=FUEL
+U235 1.E-3
+MATR 1 GROUP=FUEL
+U238 1.E-3
+FINISH`;
+    const d = diags(text);
+    assert.ok(d.some((x) => x.code === "matr-redef" && /GROUP=FUEL/i.test(x.message)));
   });
 
   it("errors on zone with unknown body reference", () => {

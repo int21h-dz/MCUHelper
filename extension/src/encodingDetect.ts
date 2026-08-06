@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
+import { isMcuOutputArtifact } from "./contentDetect";
 
 interface EncodingDetectionResult {
   encoding: string;
@@ -10,17 +11,31 @@ interface EncodingDetectionResult {
 }
 type DetectFn = (buf: Buffer) => EncodingDetectionResult;
 type MatchFn = (buf: Buffer, editorText: string) => boolean;
+type ReadTextFn = (filePath: string) => string;
+type EncodeFn = (text: string, encoding?: string) => Buffer;
 
 /** Загрузка детектора из собранного mcu-language (общая логика с LSP и тестами). */
-function loadEncodingModule(): { detect: DetectFn; diskMatches: MatchFn } {
+function loadEncodingModule(): {
+  detect: DetectFn;
+  diskMatches: MatchFn;
+  readText: ReadTextFn;
+  encode: EncodeFn;
+} {
   const modPath = path.join(__dirname, "..", "..", "packages", "mcu-language", "dist", "encodingDetect.js");
   if (fs.existsSync(modPath)) {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const mod = require(modPath) as {
       detectEncodingFromBuffer: DetectFn;
       diskTextMatchesEditor: MatchFn;
+      readTextFileWithDetectedEncoding: ReadTextFn;
+      encodeBuffer: EncodeFn;
     };
-    return { detect: mod.detectEncodingFromBuffer, diskMatches: mod.diskTextMatchesEditor };
+    return {
+      detect: mod.detectEncodingFromBuffer,
+      diskMatches: mod.diskTextMatchesEditor,
+      readText: mod.readTextFileWithDetectedEncoding,
+      encode: mod.encodeBuffer,
+    };
   }
   return {
     detect: () => ({
@@ -30,12 +45,31 @@ function loadEncodingModule(): { detect: DetectFn; diskMatches: MatchFn } {
       shouldReopen: false,
     }),
     diskMatches: () => true,
+    readText: (filePath: string) => fs.readFileSync(filePath, "utf8"),
+    encode: (text: string) => Buffer.from(text, "utf8"),
   };
 }
 
-const { detect: detectEncodingFromBuffer, diskMatches: diskTextMatchesEditor } = loadEncodingModule();
+const {
+  detect: detectEncodingFromBuffer,
+  diskMatches: diskTextMatchesEditor,
+  readText: readTextFileWithDetectedEncoding,
+  encode: encodeBuffer,
+} = loadEncodingModule();
 
-export { detectEncodingFromBuffer, diskTextMatchesEditor };
+export { detectEncodingFromBuffer, diskTextMatchesEditor, readTextFileWithDetectedEncoding, encodeBuffer };
+
+/** Запись текста с сохранением кодировки существующего файла (или UTF-8 для нового). */
+export function writeTextFilePreservingEncoding(filePath: string, content: string): void {
+  let encoding = "utf8";
+  if (fs.existsSync(filePath)) {
+    const buf = fs.readFileSync(filePath);
+    encoding = detectEncodingFromBuffer(buf).encoding;
+  }
+  const dir = path.dirname(filePath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(filePath, encodeBuffer(content, encoding));
+}
 
 /** URI, для которых уже пробовали переоткрыть (защита от циклов). */
 const attemptedReopen = new Set<string>();
@@ -45,6 +79,8 @@ function canAutoDetectEncoding(doc: vscode.TextDocument): boolean {
   if (!cfg.get<boolean>("autoDetectEncoding", true)) return false;
   if (doc.uri.scheme !== "file") return false;
   if (doc.isDirty) return false;
+  // LST/FIN и пр. — не трогаем: workbench.action.reopenWithEncoding часто срывает вкладку.
+  if (isMcuOutputArtifact(doc)) return false;
   return true;
 }
 
@@ -58,6 +94,7 @@ async function reopenDocumentWithEncoding(
   vscodeEncoding: string
 ): Promise<boolean> {
   const uriKey = doc.uri.toString();
+  const uri = doc.uri;
 
   try {
     const editor =
@@ -69,7 +106,7 @@ async function reopenDocumentWithEncoding(
         viewColumn: editor.viewColumn,
       });
     } else {
-      await vscode.window.showTextDocument(doc.uri, { preview: false });
+      await vscode.window.showTextDocument(uri, { preview: false });
     }
 
     await vscode.commands.executeCommand("workbench.action.reopenWithEncoding", {
@@ -77,6 +114,12 @@ async function reopenDocumentWithEncoding(
     });
     return true;
   } catch {
+    // Команда часто бросает после закрытия вкладки — вернём файл на экран.
+    try {
+      await vscode.window.showTextDocument(uri, { preview: false, preserveFocus: false });
+    } catch {
+      // ignore
+    }
     return false;
   }
 }

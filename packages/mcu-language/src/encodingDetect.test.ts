@@ -5,6 +5,7 @@ import {
   decodeBuffer,
   detectEncodingFromBuffer,
   diskTextMatchesEditor,
+  encodeBuffer,
   readTextFileWithDetectedEncoding,
 } from "./encodingDetect";
 import * as fs from "fs";
@@ -62,5 +63,10 @@ describe("encodingDetect", () => {
     const buf = iconv.encode(SAMPLE, "win1251");
     const wrong = buf.toString("utf8");
     assert.ok(!diskTextMatchesEditor(buf, wrong));
+  });
+
+  it("encodeBuffer round-trips win1251", () => {
+    const buf = encodeBuffer(SAMPLE, "win1251");
+    assert.strictEqual(decodeBuffer(buf, "win1251"), SAMPLE);
   });
 });

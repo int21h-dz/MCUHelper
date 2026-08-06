@@ -4,6 +4,8 @@ import {
   THANKS_URL,
   isAllowedThanksUrl,
   shouldFocusDiagnosticsAfterRun,
+  resolvePostRunOpenTarget,
+  lstPathCandidates,
 } from "./runPanelHelpers";
 
 describe("runPanelHelpers", () => {
@@ -22,5 +24,46 @@ describe("runPanelHelpers", () => {
     assert.equal(shouldFocusDiagnosticsAfterRun({ diagnosticCount: 0, hasFirstError: false }), false);
     assert.equal(shouldFocusDiagnosticsAfterRun({ diagnosticCount: 2, hasFirstError: false }), true);
     assert.equal(shouldFocusDiagnosticsAfterRun({ diagnosticCount: 0, hasFirstError: true }), true);
+  });
+
+  it("lstPathCandidates prefers LSP path then runDir variants", () => {
+    assert.deepEqual(
+      lstPathCandidates({
+        lstPath: "C:/tmp/NAME.LST",
+        runDir: "C:/tmp",
+        variantName: "NAME",
+      }),
+      ["C:/tmp/NAME.LST", "C:/tmp/NAME.lst"]
+    );
+    assert.deepEqual(lstPathCandidates({ runDir: "D:\\runs\\v", variantName: "958" }), [
+      "D:\\runs\\v\\958.LST",
+      "D:\\runs\\v\\958.lst",
+    ]);
+  });
+
+  it("resolvePostRunOpenTarget opens LST after Debug", () => {
+    assert.deepEqual(
+      resolvePostRunOpenTarget({ mode: "i", lstPath: "C:/tmp/NAME.LST" }),
+      { kind: "lst", path: "C:/tmp/NAME.LST", reason: "debug" }
+    );
+    assert.equal(resolvePostRunOpenTarget({ mode: "i" }), undefined);
+  });
+
+  it("resolvePostRunOpenTarget prefers FIN for Run/Final, else LST", () => {
+    assert.deepEqual(
+      resolvePostRunOpenTarget({
+        mode: "c",
+        finCopiedPath: "C:/work/NAME.FIN",
+        finOverwritten: true,
+        lstPath: "C:/tmp/NAME.LST",
+      }),
+      { kind: "fin", path: "C:/work/NAME.FIN", overwritten: true }
+    );
+    assert.deepEqual(
+      resolvePostRunOpenTarget({ mode: "f", lstPath: "C:/tmp/NAME.LST" }),
+      { kind: "lst", path: "C:/tmp/NAME.LST", reason: "fin-missing" }
+    );
+    assert.equal(resolvePostRunOpenTarget({ mode: "c" }), undefined);
+    assert.equal(resolvePostRunOpenTarget({ mode: "continue", lstPath: "C:/tmp/NAME.LST" }), undefined);
   });
 });

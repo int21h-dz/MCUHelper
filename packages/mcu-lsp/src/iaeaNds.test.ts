@@ -23,4 +23,14 @@ describe("iaeaNds", () => {
     assert.ok(ms < 500, `expected instant bundled path, took ${ms.toFixed(0)}ms`);
     assert.ok(lines.some((l) => l.mcuName.startsWith("U2")));
   });
+
+  it("getNaturalIsotopeLines returns bundled Hf isotopes without network", async () => {
+    const t0 = performance.now();
+    const lines = await getNaturalIsotopeLines("Hf", "1.0E-6");
+    const ms = performance.now() - t0;
+    assert.ok(lines && lines.length >= 2);
+    assert.ok(ms < 500, `expected instant bundled path, took ${ms.toFixed(0)}ms`);
+    assert.ok(lines.some((l) => l.mcuName === "HF174"));
+    assert.ok(lines.some((l) => l.mcuName === "HF180"));
+  });
 });

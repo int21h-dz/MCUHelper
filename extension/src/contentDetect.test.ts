@@ -4,18 +4,20 @@ import * as vscode from "vscode";
 import {
   detectMcunrContent,
   isLanguageDetectCandidate,
+  isMcuOutputArtifactPath,
   scoreMcunrContent,
 } from "./contentDetect";
 
 function mockDoc(
   text: string,
   languageId = "plaintext",
-  scheme: "file" | "untitled" = "file"
+  scheme: "file" | "untitled" = "file",
+  fsPath = "/test.mcu"
 ): vscode.TextDocument {
   const uri =
     scheme === "untitled"
       ? { scheme: "untitled", fsPath: "", toString: () => "untitled:Untitled-1" }
-      : { scheme: "file", fsPath: "/test.mcu", toString: () => "file:///test.mcu" };
+      : { scheme: "file", fsPath, toString: () => `file://${fsPath}` };
   return {
     languageId,
     uri,
@@ -45,5 +47,21 @@ describe("contentDetect", () => {
   it("isLanguageDetectCandidate rejects mcunr and unrelated languages", () => {
     assert.ok(!isLanguageDetectCandidate(mockDoc("", "mcunr")));
     assert.ok(!isLanguageDetectCandidate(mockDoc("", "javascript")));
+  });
+
+  it("isMcuOutputArtifactPath matches LST/FIN and run-dir MCU", () => {
+    assert.ok(isMcuOutputArtifactPath("Z:/runs/958.LST"));
+    assert.ok(isMcuOutputArtifactPath("Z:/runs/958.fin"));
+    assert.ok(isMcuOutputArtifactPath("Z:/proj/.mcuhelper-runs/958/958.MCU"));
+    assert.ok(!isMcuOutputArtifactPath("Z:/proj/958.mcu"));
+    assert.ok(!isMcuOutputArtifactPath("Z:/proj/RUNTEST/958"));
+  });
+
+  it("isLanguageDetectCandidate rejects LST/FIN artifacts", () => {
+    assert.ok(
+      !isLanguageDetectCandidate(
+        mockDoc("PIN 1\nFINISH", "plaintext", "file", "Z:/proj/.mcuhelper-runs/958/958.LST")
+      )
+    );
   });
 });

@@ -1,7 +1,10 @@
 import * as crypto from "crypto";
+import * as fs from "fs";
 import type { DocumentAst } from "./ast";
 import { parseDocument, type ParseOptions } from "./parser";
 import { analyzeSemantics, buildSummaries } from "./semantic";
+import { normalizeIncludeFsKey, parseIncludeLine, resolveIncludeFilePath } from "./includeResolve";
+import type { IncludeTextOverrides } from "./preprocessor";
 
 export interface DocumentIndex {
   uri: string;
@@ -28,6 +31,42 @@ export function resetDocumentParseCount(): void {
   parseCount = 0;
 }
 
+/**
+ * Отпечаток содержимого #include-файлов.
+ * Открытый буфер → hash текста (правка SI до Save сбрасывает кэш main);
+ * иначе mtime+size на диске.
+ */
+export function includeFilesFingerprint(
+  text: string,
+  baseDir: string | undefined,
+  includeTextOverrides?: IncludeTextOverrides
+): string {
+  if (!baseDir || !/#\s*include\b/i.test(text)) return "";
+  const parts: string[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    const parsed = parseIncludeLine(line);
+    if (!parsed) continue;
+    const { fsPath, exists } = resolveIncludeFilePath(baseDir, parsed.path);
+    const override = includeTextOverrides?.get(normalizeIncludeFsKey(fsPath));
+    if (override != null) {
+      const h = crypto.createHash("sha256").update(override).digest("hex").slice(0, 16);
+      parts.push(`${fsPath}:buf:${h}`);
+      continue;
+    }
+    if (!exists) {
+      parts.push(`${parsed.path}:missing`);
+      continue;
+    }
+    try {
+      const st = fs.statSync(fsPath);
+      parts.push(`${fsPath}:${st.size}:${st.mtimeMs}`);
+    } catch {
+      parts.push(`${parsed.path}:error`);
+    }
+  }
+  return parts.join("|");
+}
+
 function buildIndex(
   uri: string,
   text: string,
@@ -36,7 +75,12 @@ function buildIndex(
   options?: Partial<ParseOptions>
 ): DocumentIndex {
   parseCount++;
-  const ast = parseDocument(text, { uri, baseDir: options?.baseDir, expandInclude: options?.expandInclude });
+  const ast = parseDocument(text, {
+    uri,
+    baseDir: options?.baseDir,
+    expandInclude: options?.expandInclude,
+    includeTextOverrides: options?.includeTextOverrides,
+  });
   ast.diagnostics = analyzeSemantics(ast);
   const summaries = buildSummaries(ast);
   return { uri, version, ast, hash, summaries };
@@ -48,8 +92,11 @@ export function analyzeDocument(
   version: number,
   options?: Partial<ParseOptions>
 ): DocumentIndex {
-  const hash = crypto.createHash("sha256").update(text).digest("hex");
   const expanded = options?.expandInclude !== false;
+  const includeFp = expanded
+    ? includeFilesFingerprint(text, options?.baseDir, options?.includeTextOverrides)
+    : "";
+  const hash = crypto.createHash("sha256").update(text).update("\0").update(includeFp).digest("hex");
   const key = cacheKey(uri, expanded);
   const cached = cache.get(key);
   if (cached && cached.version === version && cached.hash === hash) {

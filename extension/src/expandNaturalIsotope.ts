@@ -34,9 +34,14 @@ export function findNuclideSpan(
   return null;
 }
 
+const HOVER_ENABLED_COMMANDS = [
+  "mcuhelper.expandNaturalIsotope",
+  "mcuhelper.addToSumIsotope",
+];
+
 function toTrustedHoverMarkdown(value: string): vscode.MarkdownString {
   const md = new vscode.MarkdownString(value);
-  md.isTrusted = { enabledCommands: ["mcuhelper.expandNaturalIsotope"] };
+  md.isTrusted = { enabledCommands: HOVER_ENABLED_COMMANDS };
   md.supportThemeIcons = true;
   return md;
 }
@@ -130,7 +135,7 @@ export function hoverMiddleware(): NonNullable<
           return toTrustedHoverMarkdown(String(part.value));
         }
         if (part instanceof vscode.MarkdownString) {
-          part.isTrusted = { enabledCommands: ["mcuhelper.expandNaturalIsotope"] };
+          part.isTrusted = { enabledCommands: HOVER_ENABLED_COMMANDS };
           part.supportThemeIcons = true;
           return part;
         }

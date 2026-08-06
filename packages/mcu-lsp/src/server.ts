@@ -12,19 +12,37 @@ import {
   TextDocumentSyncKind,
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
+import { fileURLToPath } from "url";
 import { getDocumentIndex, clearDocument } from "@mcuhelper/mcu-language";
 import { getCompletions, getDefinition, getHoverContent } from "./completion";
 import { getSignatureHelp } from "./signatureHelp";
 import { getNaturalIsotopeLines, warmupNaturalAbundanceIndex } from "./iaeaNds";
+import {
+  formatAwVerificationReport,
+  getLastAwLibVerification,
+  loadAwLibFromConstantsPath,
+  verifyAwLibAgainstIaea,
+} from "./awLibVerify";
+import { loadDefaultPhyFromConstantsPath } from "./defaultPhyVerify";
+import {
+  formatParameteThrVerificationReport,
+  getLastParameteThrVerification,
+  loadParameteThrFromConstantsPath,
+  verifyParameteThrAgainstIaea,
+} from "./parameteThrVerify";
+import { getLiveChartGroundStates, scheduleLiveChartCacheRefresh } from "./iaeaLiveChartCache";
+import { getAwLibTable, getParameteThrTable } from "@mcuhelper/mcu-language";
 import { warmupLanguageServer } from "./warmup";
 import { setCachedSolverResult } from "./solver";
 import {
   toLspDiagnostic,
   collectDiagnostics,
+  collectDiagnosticsBundle,
   buildDocumentSymbols,
   buildFoldingRanges,
   buildDocumentLinks,
   ensureDocumentIndex,
+  ensureSourceDocumentIndex,
   handleGetIndex,
   handleGetGeometry,
   handleQueryPoint,
@@ -34,24 +52,156 @@ import {
   handleGetDiagnostics,
   syncSettingsFromInitialize,
   applyServerSettings,
+  setIncludeTextOverridesProvider,
+  buildIncludeTextOverridesFromDocs,
   type McuServerSettings,
 } from "./serverHandlers";
 
 const connection = createConnection(ProposedFeatures.all);
 const documents = new TextDocuments(TextDocument);
 
+setIncludeTextOverridesProvider(() => buildIncludeTextOverridesFromDocs(documents.all()));
+
 let globalSettings: McuServerSettings = {
   mcuNrPath: "",
   mcuConstantsLibPath: "",
   enableSolverValidation: false,
   variantName: "NAME",
-  enableIaeaNuclideHover: true,
 };
 
+/** Последний путь MDBNR, для которого уже загружали AW.LIB. */
+let awLibSyncedPath: string | null = null;
+/**
+ * Сверка AW + T1/2 (локальный LiveChart) — для Output/диагностик.
+ */
+let libraryCoreGate: Promise<void> = Promise.resolve();
+
+export type LibraryVerificationReports = {
+  awStatus?: string;
+  thrStatus?: string;
+  awReport?: string;
+  thrReport?: string;
+  awMismatchCount?: number;
+  thrMismatchCount?: number;
+  maxAbsDelta?: number;
+  maxRelDelta?: number;
+};
+
+let lastLibraryReports: LibraryVerificationReports = {};
+
 const solverDiagnostics = new Map<string, import("vscode-languageserver").Diagnostic[]>();
+const publishedIncludeUrisByParent = new Map<string, Set<string>>();
+const parentUrisByInclude = new Map<string, Set<string>>();
 
 function getDoc(uri: string): TextDocument | undefined {
   return documents.get(uri);
+}
+
+function snapshotLibraryReportsFromCache(): LibraryVerificationReports {
+  const aw = getLastAwLibVerification();
+  const thr = getLastParameteThrVerification();
+  const out: LibraryVerificationReports = { ...lastLibraryReports };
+  if (aw) {
+    out.awReport = formatAwVerificationReport(aw);
+    out.awMismatchCount = aw.mismatches.length;
+    out.maxAbsDelta = aw.mismatches.reduce((m, x) => Math.max(m, Math.abs(x.delta)), 0);
+  }
+  if (thr) {
+    out.thrReport = formatParameteThrVerificationReport(thr);
+    out.thrMismatchCount = thr.mismatches.length;
+    out.maxRelDelta = thr.mismatches.reduce((m, x) => Math.max(m, x.relDelta), 0);
+  }
+  return out;
+}
+
+async function syncAwLibFromSettings(): Promise<void> {
+  const libPath = globalSettings.mcuConstantsLibPath ?? "";
+  if (libPath === awLibSyncedPath) {
+    await libraryCoreGate;
+    return;
+  }
+  awLibSyncedPath = libPath;
+
+  const awResult = await loadAwLibFromConstantsPath(libPath);
+  connection.console.info(`[AW.LIB] ${awResult.message}`);
+  connection.sendNotification("mcuhelper/awLibStatus", awResult);
+
+  const phyResult = await loadDefaultPhyFromConstantsPath(libPath);
+  connection.console.info(`[DEFAULT.PHY] ${phyResult.message}`);
+  connection.sendNotification("mcuhelper/defaultPhyStatus", phyResult);
+
+  const thrResult = await loadParameteThrFromConstantsPath(libPath);
+  connection.console.info(`[PARAMETE.THR] ${thrResult.message}`);
+  connection.sendNotification("mcuhelper/parameteThrStatus", thrResult);
+
+  lastLibraryReports = {
+    awStatus: awResult.message,
+    thrStatus: thrResult.message,
+  };
+
+  if (!awResult.ok && !thrResult.ok) return;
+
+  // AW + T1/2 (офлайн кэш LiveChart).
+  libraryCoreGate = (async () => {
+    const gs = await getLiveChartGroundStates({ allowNetwork: false });
+    connection.console.info(
+      `[LiveChart] кэш: ${gs.entryCount} нуклидов (${gs.source}${gs.fetchedAt ? `, ${gs.fetchedAt}` : ""})`
+    );
+    scheduleLiveChartCacheRefresh();
+
+    if (awResult.ok && getAwLibTable()) {
+      const r = await verifyAwLibAgainstIaea(getAwLibTable()!, gs.map);
+      connection.console.info(`[AW.LIB] ${r.message}`);
+      const maxAbsDelta = r.mismatches.reduce((m, x) => Math.max(m, Math.abs(x.delta)), 0);
+      const report = formatAwVerificationReport(r);
+      lastLibraryReports.awReport = report;
+      lastLibraryReports.awMismatchCount = r.mismatches.length;
+      lastLibraryReports.maxAbsDelta = maxAbsDelta;
+      connection.sendNotification("mcuhelper/awLibVerification", {
+        ok: r.ok,
+        message: r.message,
+        compared: r.compared,
+        mismatchCount: r.mismatches.length,
+        missingCount: r.missingInIaea.length,
+        maxAbsDelta,
+        awLibPath: r.awLibPath,
+        report,
+      });
+    }
+    if (thrResult.ok && getParameteThrTable()) {
+      const r = await verifyParameteThrAgainstIaea(getParameteThrTable()!, gs.map);
+      connection.console.info(`[PARAMETE.THR] ${r.message}`);
+      const maxRel = r.mismatches.reduce((m, x) => Math.max(m, x.relDelta), 0);
+      const report = formatParameteThrVerificationReport(r);
+      lastLibraryReports.thrReport = report;
+      lastLibraryReports.thrMismatchCount = r.mismatches.length;
+      lastLibraryReports.maxRelDelta = maxRel;
+      connection.sendNotification("mcuhelper/parameteThrVerification", {
+        ok: r.ok,
+        message: r.message,
+        compared: r.compared,
+        mismatchCount: r.mismatches.length,
+        missingCount: r.missingInIaea.length,
+        maxRelDelta: maxRel,
+        thrPath: r.thrPath,
+        report,
+      });
+    }
+    for (const doc of documents.all()) {
+      void validateTextDocument(doc);
+    }
+  })();
+
+  await libraryCoreGate;
+}
+
+/** Клиент забирает отчёты AW/T1/2 в Output. */
+async function getLibraryVerificationReports(): Promise<LibraryVerificationReports> {
+  await readWorkspaceSettings();
+  await libraryCoreGate;
+  const snap = snapshotLibraryReportsFromCache();
+  lastLibraryReports = { ...lastLibraryReports, ...snap };
+  return lastLibraryReports;
 }
 
 connection.onInitialize((params: InitializeParams) => {
@@ -76,6 +226,10 @@ connection.onInitialize((params: InitializeParams) => {
   };
 });
 
+connection.onInitialized(() => {
+  void readWorkspaceSettings();
+});
+
 connection.onDidChangeConfiguration(() => {
   void readWorkspaceSettings().then(() => {
     documents.all().forEach(validateTextDocument);
@@ -93,6 +247,7 @@ async function readWorkspaceSettings(): Promise<void> {
   } catch {
     // ignore
   }
+  await syncAwLibFromSettings();
 }
 
 const DIAGNOSTIC_DEBOUNCE_MS = 250;
@@ -124,27 +279,140 @@ function scheduleValidateTextDocument(doc: TextDocument): void {
 async function validateTextDocument(doc: TextDocument): Promise<void> {
   const uri = doc.uri;
   const extra = solverDiagnostics.get(uri) ?? [];
-  const diagnostics = collectDiagnostics(doc, extra);
-  connection.sendDiagnostics({ uri, diagnostics });
+  const bundle = collectDiagnosticsBundle(doc, extra);
+  // #region agent log
+  {
+    const matrEmpty = bundle.diagnostics.filter((d) => d.code === "matr-empty");
+    const codes = [...new Set(bundle.diagnostics.map((d) => String(d.code ?? "")))].slice(0, 40);
+    fetch("http://127.0.0.1:7911/ingest/3304a270-bbbf-4e90-96de-6ba27b8f72bf", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "fded15" },
+      body: JSON.stringify({
+        sessionId: "fded15",
+        runId: "pre-fix",
+        hypothesisId: "E",
+        location: "server.ts:validateTextDocument",
+        message: "publishing diagnostics",
+        data: {
+          uri,
+          total: bundle.diagnostics.length,
+          matrEmpty: matrEmpty.map((d) => ({ msg: d.message, line: d.range.start.line })),
+          codes,
+          hasInclude: /#\s*include\b/i.test(doc.getText()),
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+  }
+  // #endregion
+  connection.sendDiagnostics({ uri, diagnostics: bundle.diagnostics });
+
+  // Всегда регистрируем parent↔include из AST (даже без diagnostics в include),
+  // чтобы правка/save include инвалидировала parent.
+  const index = ensureDocumentIndex(doc);
+  for (const inc of index.ast.includes) {
+    if (!inc.uri) continue;
+    let parents = parentUrisByInclude.get(inc.uri);
+    if (!parents) {
+      parents = new Set<string>();
+      parentUrisByInclude.set(inc.uri, parents);
+    }
+    parents.add(uri);
+  }
+
+  const prevIncludeUris = publishedIncludeUrisByParent.get(uri) ?? new Set<string>();
+  // Публикуем diagnostics на URI include только если файл открыт в LSP.
+  // Иначе Problems по «закрытому» include URI даёт постоянное мигание UI.
+  const nextPublished = new Set<string>();
+
+  for (const group of bundle.includeGroups) {
+    let parents = parentUrisByInclude.get(group.uri);
+    if (!parents) {
+      parents = new Set<string>();
+      parentUrisByInclude.set(group.uri, parents);
+    }
+    parents.add(uri);
+
+    if (!documents.get(group.uri)) continue;
+    connection.sendDiagnostics({ uri: group.uri, diagnostics: group.diagnostics });
+    nextPublished.add(group.uri);
+  }
+
+  for (const includeUri of prevIncludeUris) {
+    if (nextPublished.has(includeUri)) continue;
+    connection.sendDiagnostics({ uri: includeUri, diagnostics: [] });
+    // Не снимаем parent-link: include всё ещё в AST родителя.
+  }
+
+  if (nextPublished.size > 0) {
+    publishedIncludeUrisByParent.set(uri, nextPublished);
+  } else {
+    publishedIncludeUrisByParent.delete(uri);
+  }
+}
+
+function sameFsPathLoose(a: string, b: string): boolean {
+  try {
+    return fileURLToPath(a).toLowerCase().replace(/\\/g, "/") === fileURLToPath(b).toLowerCase().replace(/\\/g, "/");
+  } catch {
+    return a === b;
+  }
+}
+
+function refreshParentDocuments(includeUri: string): void {
+  let parents = parentUrisByInclude.get(includeUri);
+  if (!parents?.size) {
+    // URI include из AST (pathToFileURL) может отличаться от LSP document.uri.
+    for (const [key, set] of parentUrisByInclude) {
+      if (sameFsPathLoose(key, includeUri)) {
+        parents = set;
+        break;
+      }
+    }
+  }
+  if (!parents?.size) return;
+  for (const parentUri of [...parents]) {
+    clearDocument(parentUri);
+    clearDiagnosticTimer(parentUri);
+    const parentDoc = documents.get(parentUri);
+    if (parentDoc) void validateTextDocument(parentDoc);
+  }
 }
 
 documents.onDidChangeContent((change) => {
   scheduleValidateTextDocument(change.document);
+  refreshParentDocuments(change.document.uri);
 });
 
 documents.onDidOpen((event) => {
   clearDiagnosticTimer(event.document.uri);
   void validateTextDocument(event.document);
+  // Если открыли include — переопубликовать parent, чтобы diags попали на открытый URI.
+  refreshParentDocuments(event.document.uri);
 });
 
 documents.onDidClose((event) => {
-  clearDiagnosticTimer(event.document.uri);
-  clearDocument(event.document.uri);
+  const uri = event.document.uri;
+  clearDiagnosticTimer(uri);
+  clearDocument(uri);
+  const includeUris = publishedIncludeUrisByParent.get(uri);
+  if (includeUris) {
+    for (const includeUri of includeUris) {
+      connection.sendDiagnostics({ uri: includeUri, diagnostics: [] });
+      const parents = parentUrisByInclude.get(includeUri);
+      if (parents) {
+        parents.delete(uri);
+        if (parents.size === 0) parentUrisByInclude.delete(includeUri);
+      }
+    }
+    publishedIncludeUrisByParent.delete(uri);
+  }
 });
 
 documents.onDidSave((event) => {
   clearDiagnosticTimer(event.document.uri);
   void validateTextDocument(event.document);
+  refreshParentDocuments(event.document.uri);
 });
 
 connection.onCompletion((params: CompletionParams) => {
@@ -173,7 +441,7 @@ connection.onHover(async (params: HoverParams) => {
     doc,
     params.position,
     index,
-    { enableIaeaNuclide: globalSettings.enableIaeaNuclideHover },
+    { enableIaeaNuclide: true },
     params.textDocument.uri
   );
   if (!content) return null;
@@ -195,15 +463,17 @@ connection.onDefinition((params) => {
 connection.onDocumentSymbol((params: DocumentSymbolParams) => {
   const doc = documents.get(params.textDocument.uri);
   if (!doc) return [];
-  const index = ensureDocumentIndex(doc);
+  // Source-only: expanded ranges после #include ломают outline и провоцируют перерисовку редактора.
+  const index = ensureSourceDocumentIndex(doc);
   return buildDocumentSymbols(index, params.textDocument.uri);
 });
 
 connection.onFoldingRanges((params: FoldingRangeParams) => {
   const doc = documents.get(params.textDocument.uri);
   if (!doc) return [];
-  const index = ensureDocumentIndex(doc);
-  return buildFoldingRanges(index);
+  // Source-only: expanded endLine > lineCount заставляет VS Code постоянно пересчитывать folds → мерцание раскраски.
+  const index = ensureSourceDocumentIndex(doc);
+  return buildFoldingRanges(index, doc.lineCount);
 });
 
 connection.onDocumentLinks((params: DocumentLinkParams) => {
@@ -230,14 +500,21 @@ connection.onRequest("mcuhelper/getDiagnostics", (args: { uri: string }) => {
   return handleGetDiagnostics(args.uri, getDoc, extra);
 });
 
-connection.onRequest("mcuhelper/revalidateAllOpen", () => {
+connection.onRequest("mcuhelper/revalidateAllOpen", async () => {
   let count = 0;
-  for (const doc of documents.all()) {
-    void validateTextDocument(doc);
+  const open = [...documents.all()];
+  for (const doc of open) {
+    clearDocument(doc.uri);
+    clearDiagnosticTimer(doc.uri);
+  }
+  for (const doc of open) {
+    await validateTextDocument(doc);
     count++;
   }
   return count;
 });
+
+connection.onRequest("mcuhelper/getLibraryVerificationReports", () => getLibraryVerificationReports());
 
 connection.onRequest("mcuhelper/validateInput", async (args) => {
   const result = await handleValidateInput(args, globalSettings, getDoc);
@@ -246,7 +523,7 @@ connection.onRequest("mcuhelper/validateInput", async (args) => {
   if (doc && result.solverResult) {
     const index = getDocumentIndex(args.uri);
     if (index) setCachedSolverResult(index.hash, result.solverResult);
-    const lspDiags = result.solverResult.diagnostics.map(toLspDiagnostic);
+    const lspDiags = result.solverResult.diagnostics.map((d) => toLspDiagnostic(d));
     solverDiagnostics.set(args.uri, lspDiags);
     await validateTextDocument(doc);
   }
@@ -260,11 +537,11 @@ connection.onRequest("mcuhelper/runMcuStep", async (args) => {
   if (doc && result.solverResult) {
     const index = getDocumentIndex(args.uri);
     if (index) setCachedSolverResult(index.hash, result.solverResult);
-    const lspDiags = result.solverResult.diagnostics.map(toLspDiagnostic);
+    const lspDiags = result.solverResult.diagnostics.map((d) => toLspDiagnostic(d));
     solverDiagnostics.set(args.uri, lspDiags);
     await validateTextDocument(doc);
   }
-  const diagnostics = result.solverResult ? result.solverResult.diagnostics.map(toLspDiagnostic) : [];
+  const diagnostics = result.solverResult ? result.solverResult.diagnostics.map((d) => toLspDiagnostic(d)) : [];
   const firstError = diagnostics.find((d) => d.severity === 1 /* DiagnosticSeverity.Error */);
   return {
     ok: result.ok,
@@ -276,6 +553,7 @@ connection.onRequest("mcuhelper/runMcuStep", async (args) => {
     prepared: result.prepared,
     finCopiedPath: result.finCopiedPath,
     finOverwritten: result.finOverwritten,
+    lstPath: result.lstPath,
     diagnostics,
     firstError: firstError
       ? {

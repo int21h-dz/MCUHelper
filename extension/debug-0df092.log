@@ -1,1 +1,0 @@
-{"sessionId":"0df092","runId":"post-fix","hypothesisId":"A","location":"document.ts:buildIndex","message":"analyze phases","data":{"uri":"file:///fixtures/full_variant.mcu","version":1,"textLen":385,"expandInclude":true,"parseMs":9,"semanticMs":4,"summaryMs":2,"totalMs":14,"stmts":22,"bodies":4,"zones":4,"materials":2},"timestamp":1785497133265}

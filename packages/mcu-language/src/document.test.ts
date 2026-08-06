@@ -76,4 +76,30 @@ describe("document", () => {
     assert.strictEqual(index.ast.includes[0]!.range.start.character, 9);
     fs.rmSync(dir, { recursive: true, force: true });
   });
+
+  it("re-parses when include file changes even if main text/version unchanged", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-doc-stale-"));
+    try {
+      const incPath = path.join(dir, "confpd.mcu");
+      fs.writeFileSync(incPath, "SI N\n", "utf8");
+      const mainPath = path.join(dir, "main.mcu");
+      const mainText = ["PIN", "#include confpd", "MATR 1", "N 1.0E-5", "FINISH"].join("\n");
+      fs.writeFileSync(mainPath, mainText, "utf8");
+      const fileUri = `file:///${mainPath.replace(/\\/g, "/")}`;
+      clearDocument(fileUri);
+      const first = analyzeDocument(fileUri, mainText, 1, { baseDir: dir, expandInclude: true });
+      const hasSi = first.ast.statements.some((s) => s.label.toUpperCase() === "SI");
+      assert.ok(hasSi);
+
+      // Windows mtime resolution — небольшая пауза не нужна если меняем size
+      fs.writeFileSync(incPath, "SI N, O\nSIDEN 1.0E-4\n", "utf8");
+      const second = analyzeDocument(fileUri, mainText, 1, { baseDir: dir, expandInclude: true });
+      assert.notStrictEqual(first.hash, second.hash);
+      assert.notStrictEqual(first, second);
+      const siText = second.ast.statements.find((s) => s.label.toUpperCase() === "SI")?.text ?? "";
+      assert.ok(/O/i.test(siText), siText);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

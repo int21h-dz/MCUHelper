@@ -179,6 +179,8 @@ function genericCardSignature(linePrefix: string): ParameterSignatureHelp | null
   if (tokens.length < 1) return null;
 
   const cardLabel = normalizeMcuLabel(tokens[0]);
+  // ⚠ АГЕНТАМ: `SI dens` — signature нуклида (nuclideLineSignature выше), не карта SI list.
+  if (cardLabel === "SI" && tokens.length >= 2 && /^[+\-.(0-9]/.test(tokens[1]!)) return null;
   if (cardLabel === "MATR" || getCardArgSpec(cardLabel) || getBodyParamGroups(cardLabel)) return null;
 
   const card = getCardByLabel(cardLabel);

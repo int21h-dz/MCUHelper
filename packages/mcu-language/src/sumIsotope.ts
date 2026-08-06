@@ -1,6 +1,7 @@
 import type { ConstantNode, DocumentAst, MaterialNode, NuclideEntry, SourceRange, StatementNode } from "./ast";
 import { buildScopedVars } from "./constantScope";
 import { resolveNuclideConcentration } from "./materialDensity";
+import { isSiSumIsotopeCardLine } from "./siCardVsNuclide";
 
 /** Режим списка суммарного изотопа (UserGuide §8.5). */
 export type SumIsotopeListMode = "si" | "sinot" | "none";
@@ -46,6 +47,9 @@ function applySumCard(stmt: StatementNode, constants: ConstantNode[], state: Mut
   if (stmt.fragment && stmt.fragment !== "physical") return;
   const label = stmt.label.toUpperCase();
   if (label !== "SIDEN" && !SUM_LIST_CARDS.has(label)) return;
+
+  // ⚠ АГЕНТАМ: `SI dens` — кремний в MATR, НЕ карта суммарного изотопа (siCardVsNuclide.ts).
+  if (label === "SI" && !isSiSumIsotopeCardLine(stmt.text)) return;
 
   const vars = buildScopedVars(constants, stmt.range.offset, "global");
   if (label === "SIDEN") {

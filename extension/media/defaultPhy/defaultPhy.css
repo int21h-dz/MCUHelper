@@ -1,0 +1,185 @@
+:root {
+  --phy-bg: var(--vscode-editor-background, #1e1e1e);
+  --phy-fg: var(--vscode-editor-foreground, #d4d4d4);
+  --phy-border: var(--vscode-panel-border, #3c3c3c);
+  --phy-input-bg: var(--vscode-input-background, #3c3c3c);
+  --phy-input-fg: var(--vscode-input-foreground, #cccccc);
+  --phy-accent: #e8913a;
+  --phy-warn-bg: color-mix(in srgb, #e8913a 18%, transparent);
+  --phy-row-hover: var(--vscode-list-hoverBackground, #2a2d2e);
+  --phy-row-sel: var(--vscode-list-activeSelectionBackground, #094771);
+  --phy-header: var(--vscode-sideBarSectionHeader-background, #252526);
+  --phy-muted: var(--vscode-descriptionForeground, #9d9d9d);
+  --phy-btn: var(--vscode-button-background, #0e639c);
+  --phy-btn-fg: var(--vscode-button-foreground, #fff);
+  --phy-btn-sec: var(--vscode-button-secondaryBackground, #3a3d41);
+  --phy-btn-sec-fg: var(--vscode-button-secondaryForeground, #ccc);
+  --phy-font: var(--vscode-editor-font-family, Consolas, "Courier New", monospace);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--phy-bg);
+  color: var(--phy-fg);
+  font: 12px/1.35 var(--vscode-font-family, system-ui, sans-serif);
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.phy-banner {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  background: var(--phy-warn-bg);
+  border-bottom: 1px solid var(--phy-border);
+  color: var(--phy-fg);
+  font-size: 12px;
+}
+
+.phy-banner strong { color: var(--phy-accent); }
+
+.phy-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--phy-border);
+  background: var(--phy-header);
+}
+
+.phy-toolbar .path {
+  flex: 1 1 180px;
+  min-width: 120px;
+  color: var(--phy-muted);
+  font-family: var(--phy-font);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.phy-toolbar .path.is-dirty::after {
+  content: " •";
+  color: var(--phy-accent);
+}
+
+.phy-filter {
+  width: 140px;
+  padding: 4px 8px;
+  border: 1px solid var(--phy-border);
+  border-radius: 3px;
+  background: var(--phy-input-bg);
+  color: var(--phy-input-fg);
+}
+
+.phy-btn {
+  appearance: none;
+  border: none;
+  border-radius: 3px;
+  padding: 5px 10px;
+  cursor: pointer;
+  font: inherit;
+  background: var(--phy-btn);
+  color: var(--phy-btn-fg);
+}
+
+.phy-btn:hover { filter: brightness(1.08); }
+.phy-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.phy-btn.secondary {
+  background: var(--phy-btn-sec);
+  color: var(--phy-btn-sec-fg);
+}
+
+.phy-btn.danger {
+  background: color-mix(in srgb, #c44 70%, var(--phy-btn-sec));
+}
+
+.phy-meta {
+  flex: 0 0 auto;
+  padding: 4px 12px;
+  font-size: 11px;
+  color: var(--phy-muted);
+  border-bottom: 1px solid var(--phy-border);
+}
+
+.phy-table-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+table.phy-table {
+  border-collapse: collapse;
+  width: max-content;
+  min-width: 100%;
+  font-family: var(--phy-font);
+  font-size: 12px;
+}
+
+.phy-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--phy-header);
+  border-bottom: 1px solid var(--phy-border);
+  padding: 6px 8px;
+  text-align: left;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.phy-table td {
+  border-bottom: 1px solid var(--phy-border);
+  padding: 2px 4px;
+  vertical-align: middle;
+}
+
+.phy-table tbody tr:hover { background: var(--phy-row-hover); }
+.phy-table tbody tr.is-selected { background: var(--phy-row-sel); }
+
+.phy-table input[type="text"],
+.phy-table select {
+  width: 100%;
+  min-width: 56px;
+  max-width: 110px;
+  padding: 3px 4px;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  background: var(--phy-input-bg);
+  color: var(--phy-input-fg);
+  font: inherit;
+}
+
+.phy-table input.col-name { min-width: 64px; max-width: 80px; }
+.phy-table input.col-num { min-width: 64px; max-width: 88px; }
+.phy-table input:focus,
+.phy-table select:focus {
+  outline: 1px solid var(--phy-accent);
+  border-color: var(--phy-accent);
+}
+
+.phy-table .col-idx {
+  color: var(--phy-muted);
+  text-align: right;
+  padding-right: 10px;
+  width: 40px;
+}
+
+.phy-table .col-check { width: 28px; text-align: center; }
+
+.phy-empty {
+  padding: 24px;
+  color: var(--phy-muted);
+  text-align: center;
+}

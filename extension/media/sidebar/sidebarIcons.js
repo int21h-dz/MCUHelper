@@ -45,6 +45,8 @@
       '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2" fill="currentColor"/><ellipse cx="8" cy="8" rx="6" ry="2.5" stroke="currentColor" fill="none" stroke-width="1"/><ellipse cx="8" cy="8" rx="6" ry="2.5" stroke="currentColor" fill="none" stroke-width="1" transform="rotate(60 8 8)"/><ellipse cx="8" cy="8" rx="6" ry="2.5" stroke="currentColor" fill="none" stroke-width="1" transform="rotate(120 8 8)"/></svg>',
     card:
       '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1.5" stroke="currentColor" fill="none" stroke-width="1.3"/><path d="M4 7h8M4 10h5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
+    include:
+      '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5h6.5L13 6v7.5H3V2.5z" stroke="currentColor" fill="none" stroke-width="1.3" stroke-linejoin="round"/><path d="M9.5 2.5V6H13" stroke="currentColor" fill="none" stroke-width="1.2" stroke-linejoin="round"/><path d="M5.5 9.5h5M8 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
     empty:
       '<svg class="mcu-icon mcu-icon-empty" viewBox="0 0 48 48" aria-hidden="true"><rect x="10" y="6" width="28" height="36" rx="3" stroke="currentColor" fill="none" stroke-width="2" opacity=".35"/><path d="M16 16h16M16 24h12M16 32h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity=".25"/></svg>',
     error:
@@ -65,6 +67,8 @@
       '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.2" stroke="currentColor" fill="none" stroke-width="1.3"/><path d="M8 2.2v1.6M8 12.2v1.6M2.2 8h1.6M12.2 8h1.6M3.9 3.9l1.1 1.1M11 11l1.1 1.1M12.1 3.9L11 5M5 11l-1.1 1.1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
     heart:
       '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13.2S2.5 9.6 2.5 5.8A2.9 2.9 0 018 4.2a2.9 2.9 0 015.5 1.6C13.5 9.6 8 13.2 8 13.2z" fill="currentColor"/></svg>',
+    table:
+      '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1" stroke="currentColor" fill="none" stroke-width="1.3"/><path d="M2 6.5h12M2 10h12M6.5 3v10M10.5 3v10" stroke="currentColor" stroke-width="1.1"/></svg>',
   };
 
   const PANELS = {
@@ -91,7 +95,7 @@
       title: "Навигация",
       icon: "fragment",
       accent: "#94a3b8",
-      hint: "Карты и операторы по фрагментам варианта — клик для перехода",
+      hint: "Карты, операторы и #include по фрагментам — клик к строке в варианте",
       searchPh: "Фильтр навигации…",
     },
     "mcuhelper.materials": {
@@ -172,8 +176,9 @@
     if (id.startsWith("latt-")) return "lattice";
     if (id.startsWith("obj-")) return "object";
     if (id.startsWith("frag-")) return "fragment";
+    if (id.startsWith("include-")) return "include";
     if (id.startsWith("scope-")) return "folder";
-    if (id.startsWith("diag-errors") || id.startsWith("diag-warn") || id.startsWith("diag-other")) return "folder";
+    if (id.startsWith("diag-errors") || id.startsWith("diag-warn") || id.startsWith("diag-other") || id.startsWith("diag-isotope")) return "folder";
     if (id.startsWith("diag-")) {
       if ((node.badges || []).includes("line-length")) return "warning";
       if ((node.badges || []).includes("warning")) return "warning";

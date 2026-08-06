@@ -172,6 +172,17 @@ describe("navData", () => {
     assert.strictEqual(tree[0]!.children![1]!.muted, false);
   });
 
+  it("materials tree adds SI action for suggested nuclides", () => {
+    const payload = richPayload();
+    const n = payload.summaries.materials[0]!.nuclides[1]!;
+    const key = `${n.range.start.line}:${n.name.toUpperCase()}`;
+    const tree = buildMaterialsTree(payload, "file:///t.mcu", new Set([key]));
+    const child = tree[0]!.children![1]!;
+    assert.ok(child.action);
+    assert.equal(child.action!.command, "mcuhelper.addToSumIsotope");
+    assert.equal((child.action!.args as { nuclideName: string }).nuclideName, n.name);
+  });
+
   it("fragments tree formats ranges and labels", () => {
     const tree = buildFragmentsTree(richPayload(), "file:///t.mcu");
     assert.strictEqual(tree.length, 2);
@@ -185,6 +196,94 @@ describe("navData", () => {
     assert.ok(!tree[1]!.children?.some((c) => c.label === "RCZ"));
     assert.ok(!tree[1]!.children?.some((c) => c.label === "Z0"));
     assert.ok(tree[1]!.children?.some((c) => c.label === "END"));
+  });
+
+  it("fragments tree inserts #include as leaf pointing to main directive", () => {
+    const payload: IndexPayload = {
+      fragments: [{ id: "physical", startLine: 0, endLine: 4 }],
+      includes: [
+        {
+          path: "si.inc",
+          exists: true,
+          fragment: "physical",
+          range: { start: { line: 1, character: 9 }, end: { line: 1, character: 15 } },
+        },
+      ],
+      statements: [
+        {
+          label: "PIN",
+          text: "PIN 0 0",
+          fragment: "physical",
+          range: { start: { line: 0, character: 0 }, end: { line: 0, character: 7 } },
+        },
+        {
+          label: "MATR",
+          text: "MATR 1",
+          fragment: "physical",
+          range: { start: { line: 2, character: 0 }, end: { line: 2, character: 6 } },
+        },
+      ],
+      summaries: {
+        materials: [],
+        zones: [],
+        objects: [],
+        constants: [],
+        bodies: [],
+        nets: [],
+        lattices: [],
+      },
+    };
+    const tree = buildFragmentsTree(payload, "file:///t.mcu");
+    const kids = tree[0]!.children ?? [];
+    assert.strictEqual(kids[0]!.label, "PIN");
+    const inc = kids.find((c) => c.id.startsWith("include-"));
+    assert.ok(inc);
+    assert.strictEqual(inc!.label, "#include si.inc");
+    assert.strictEqual(inc!.uri, "file:///t.mcu");
+    assert.strictEqual(inc!.range?.start.line, 1);
+    assert.ok(!inc!.children);
+    assert.ok(kids.some((c) => c.label === "MATR"));
+    const pinIdx = kids.findIndex((c) => c.label === "PIN");
+    const incIdx = kids.findIndex((c) => c.id.startsWith("include-"));
+    const matrIdx = kids.findIndex((c) => c.label === "MATR");
+    assert.ok(pinIdx < incIdx && incIdx < matrIdx);
+  });
+
+  it("fragments tree marks missing include", () => {
+    const payload: IndexPayload = {
+      fragments: [{ id: "physical", startLine: 0, endLine: 2 }],
+      includes: [
+        {
+          path: "missing.inc",
+          exists: false,
+          fragment: "physical",
+          range: { start: { line: 1, character: 9 }, end: { line: 1, character: 20 } },
+        },
+      ],
+      statements: [
+        {
+          label: "PIN",
+          text: "PIN",
+          fragment: "physical",
+          range: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } },
+        },
+      ],
+      summaries: {
+        materials: [],
+        zones: [],
+        objects: [],
+        constants: [],
+        bodies: [],
+        nets: [],
+        lattices: [],
+      },
+    };
+    const tree = buildFragmentsTree(payload, "file:///t.mcu");
+    const inc = tree[0]!.children?.find((c) => c.id.startsWith("include-"));
+    assert.ok(inc);
+    assert.strictEqual(inc!.muted, true);
+    assert.ok(inc!.badges?.includes("missing"));
+    assert.ok(inc!.description?.includes("не найден"));
   });
 
   it("fragments keeps card when zone name collides (filter zone by range)", () => {

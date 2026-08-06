@@ -5,25 +5,35 @@ import {
   LanguageClient,
   LanguageClientOptions,
   ServerOptions,
+  State,
   TransportKind,
 } from "vscode-languageclient/node";
 import { GeometryPanel } from "./geometryPanel";
+import { DefaultPhyPanel } from "./defaultPhyPanel";
 import { maybeSetMcunrLanguage, scoreMcunrContent, isMcunrDocument } from "./contentDetect";
 import { maybeFixDocumentEncoding, detectEncodingCommand } from "./encodingDetect";
 import { registerExpandNaturalIsotope, hoverMiddleware } from "./expandNaturalIsotope";
+import { registerAddToSumIsotope } from "./addToSumIsotope";
 import { createSidebarProviders, refreshSidebarsCoalesced, setSidebarReadyHandler, setSumIsotopeDecorationHandler, type SidebarViewId, type SidebarViewProvider } from "./sidebarView";
 import { registerTemplateInsert } from "./templateInsert";
 import { buildCatalogPayload } from "./catalogBridge";
 import { registerDiagnosticNavigation, fetchMcuDiagnostics } from "./diagnosticNavigation";
+import { registerIncludePreview } from "./includePreview";
 import { clearLanguageDetectState, scheduleLanguageDetectOnEdit } from "./languageDetectScheduler";
 import { registerRunPanel, type RunPanelViewProvider } from "./runPanelView";
 import { runMcuInTerminal } from "./mcuTerminalRun";
-import { shouldFocusDiagnosticsAfterRun } from "./runPanelHelpers";
+import { lstPathCandidates, resolvePostRunOpenTarget, shouldFocusDiagnosticsAfterRun } from "./runPanelHelpers";
+import { checkForExtensionUpdates } from "./updateCheck";
 import {
   applySumIsotopeDecorations,
   clearSumIsotopeDecorations,
   createSumIsotopeDecorationType,
 } from "./sumIsotopeDecorations";
+import {
+  applyStableIsotopeDecorations,
+  clearStableIsotopeDecorations,
+  createStableIsotopeDecorationType,
+} from "./stableIsotopeDecorations";
 
 const REFRESH_DEBOUNCE_MS = 500;
 const SELECTION_REFRESH_DEBOUNCE_MS = 300;
@@ -31,6 +41,9 @@ const SELECTION_REFRESH_DEBOUNCE_MS = 300;
 const SELECTION_AFTER_EDIT_QUIET_MS = 600;
 
 let lastDocChangeAt = 0;
+/** Output «MCU-NR Helper» — отчёты сверки AW/THR. */
+let helperOutput: vscode.OutputChannel | undefined;
+
 /** esbuild-бандл: предпочитаем более свежий из extension/server и packages/mcu-lsp/dist. */
 function pickNewerServerModule(bundled: string, monorepo: string): string {
   const hasBundled = fs.existsSync(bundled);
@@ -45,17 +58,23 @@ function pickNewerServerModule(bundled: string, monorepo: string): string {
 let client: LanguageClient | undefined;
 let sidebarProviders: Map<SidebarViewId, SidebarViewProvider>;
 let geometryPanel: GeometryPanel;
+let defaultPhyPanel: DefaultPhyPanel;
 let refreshTimer: ReturnType<typeof setTimeout> | undefined;
 let selectionRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 let runStatusItem: vscode.StatusBarItem | undefined;
 let runPanel: RunPanelViewProvider | undefined;
 let sumIsotopeDecorationType: vscode.TextEditorDecorationType | undefined;
+let stableIsotopeDecorationType: vscode.TextEditorDecorationType | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel("MCU-NR Helper");
+  helperOutput = output;
   context.subscriptions.push(output);
+  void checkForExtensionUpdates(context, output);
   sumIsotopeDecorationType = createSumIsotopeDecorationType();
   context.subscriptions.push(sumIsotopeDecorationType);
+  stableIsotopeDecorationType = createStableIsotopeDecorationType();
+  context.subscriptions.push(stableIsotopeDecorationType);
 
   const bundledServer = path.join(context.extensionPath, "server", "server.js");
   const monorepoServer = path.join(
@@ -76,6 +95,35 @@ export function activate(context: vscode.ExtensionContext): void {
     return;
   }
   output.appendLine(`LSP server: ${serverModule}`);
+  // #region agent log
+  {
+    let serverHasSumEmpty = false;
+    try {
+      serverHasSumEmpty = fs.readFileSync(serverModule, "utf8").includes("sumStatesByMat");
+    } catch {
+      /* ignore */
+    }
+    fetch("http://127.0.0.1:7911/ingest/3304a270-bbbf-4e90-96de-6ba27b8f72bf", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "fded15" },
+      body: JSON.stringify({
+        sessionId: "fded15",
+        runId: "pre-fix",
+        hypothesisId: "A",
+        location: "extension.ts:serverModule",
+        message: "LSP server module selected",
+        data: {
+          serverModule,
+          bundledExists: fs.existsSync(bundledServer),
+          monorepoExists: fs.existsSync(monorepoServer),
+          serverHasSumEmpty,
+          serverMtime: fs.existsSync(serverModule) ? fs.statSync(serverModule).mtimeMs : null,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+  }
+  // #endregion
 
   const serverOptions: ServerOptions = {
     run: { module: serverModule, transport: TransportKind.ipc, options: { cwd: serverDir } },
@@ -98,28 +146,46 @@ export function activate(context: vscode.ExtensionContext): void {
 
   client = new LanguageClient("mcuhelper", "MCU-NR Language Server", serverOptions, clientOptions);
   client.onDidChangeState((e) => {
-    output.appendLine(`LSP state: ${e.newState}`);
-    if (e.newState === 2) {
+    output.appendLine(`LSP state: ${e.oldState} → ${e.newState} (Running=${State.Running})`);
+    if (e.newState === State.Running) {
       scheduleRefresh();
-      void warmupExtensionAfterLspReady();
+      void warmupExtensionAfterLspReady(output);
     }
   });
-  client.start().catch((err) => {
-    const msg = `Не удалось запустить LSP MCU-NR: ${err}`;
-    output.appendLine(msg);
-    vscode.window.showErrorMessage(msg);
-  });
+  // До start(): сверка AW/THR/groups по локальному кэшу часто успевает до .then() и иначе теряется.
+  registerLspOutputNotifications(client, output);
+  client
+    .start()
+    .then(() => {
+      output.appendLine("LSP client.start() resolved — запрос отчёта сверки…");
+      void pullLibraryReportsToOutput(output);
+    })
+    .catch((err) => {
+      const msg = `Не удалось запустить LSP MCU-NR: ${err}`;
+      output.appendLine(msg);
+      vscode.window.showErrorMessage(msg);
+    });
 
   geometryPanel = new GeometryPanel(context, client);
+  defaultPhyPanel = new DefaultPhyPanel(context);
   registerExpandNaturalIsotope(context, client);
+  const lspClient = client;
+  registerAddToSumIsotope(context, {
+    revalidate: async () => {
+      await lspClient.sendRequest<number>("mcuhelper/revalidateAllOpen");
+    },
+    refreshUi: () => scheduleRefresh("all"),
+  });
   registerTemplateInsert(context);
   registerDiagnosticNavigation(context, () => client);
+  registerIncludePreview(context);
   sidebarProviders = createSidebarProviders(context, client);
   setSidebarReadyHandler(() => scheduleRefresh());
   setSumIsotopeDecorationHandler((editor, index) => {
-    if (!sumIsotopeDecorationType) return;
+    if (!sumIsotopeDecorationType || !stableIsotopeDecorationType) return;
     if (!index) {
       clearSumIsotopeDecorations(editor, sumIsotopeDecorationType);
+      clearStableIsotopeDecorations(editor, stableIsotopeDecorationType);
       return;
     }
     const fromMarks = index.sumIsotopeMarks;
@@ -140,14 +206,38 @@ export function activate(context: vscode.ExtensionContext): void {
               }))
           );
     applySumIsotopeDecorations(editor, sumIsotopeDecorationType, nuclides);
+    const sumKeys = new Set(nuclides.map((n) => `${n.range.start.line}:${n.name.toUpperCase()}`));
+    const stableNuclides = (index.stableIsotopeMarks ?? [])
+      .filter((n) => !sumKeys.has(`${n.range.start.line}:${n.name.toUpperCase()}`))
+      .map((n) => ({
+        name: n.name,
+        range: n.range,
+      }));
+    applyStableIsotopeDecorations(editor, stableIsotopeDecorationType, stableNuclides);
   });
   runPanel = registerRunPanel(context);
   runStatusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 30);
   runStatusItem.name = "MCU-NR Run Actions";
   runStatusItem.command = "mcuhelper.run.focus";
   runStatusItem.text = "$(play-circle) MCU-NR";
-  runStatusItem.tooltip = "Открыть панель запуска MCU-NR";
+  updateConfiguredPathsTooltips();
   context.subscriptions.push(runStatusItem);
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (
+        e.affectsConfiguration("mcuhelper.mcuNrPath") ||
+        e.affectsConfiguration("mcuhelper.mcuConstantsLibPath")
+      ) {
+        updateConfiguredPathsTooltips();
+        if (e.affectsConfiguration("mcuhelper.mcuConstantsLibPath") && helperOutput && client) {
+          // Дать LSP применить settings, затем забрать свежий отчёт T1/2.
+          setTimeout(() => {
+            void pullLibraryReportsToOutput(helperOutput!);
+          }, 800);
+        }
+      }
+    })
+  );
 
   try {
     buildCatalogPayload();
@@ -171,12 +261,19 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("mcuhelper.showNets", () => vscode.commands.executeCommand("mcuhelper.nets.focus")),
     vscode.commands.registerCommand("mcuhelper.showLattices", () => vscode.commands.executeCommand("mcuhelper.lattices.focus")),
     vscode.commands.registerCommand("mcuhelper.showGeometry", () => geometryPanel.show()),
+    vscode.commands.registerCommand("mcuhelper.editDefaultPhy", () => defaultPhyPanel.show()),
     vscode.commands.registerCommand("mcuhelper.validateInput", () => validateInput()),
     vscode.commands.registerCommand("mcuhelper.debugInput", () => runMcuStepCommand("i")),
     vscode.commands.registerCommand("mcuhelper.runCalculation", () => runMcuStepCommand("c")),
     vscode.commands.registerCommand("mcuhelper.continueCalculation", () => runMcuStepCommand("continue")),
     vscode.commands.registerCommand("mcuhelper.finalOutput", () => runMcuStepCommand("f")),
     vscode.commands.registerCommand("mcuhelper.exportDiagnostics", () => exportDiagnostics(output)),
+    vscode.commands.registerCommand("mcuhelper.showLibraryVerificationReport", async () => {
+      output.show(true);
+      output.appendLine("Ручной запрос отчёта сверки AW.LIB / PARAMETE.THR…");
+      printedOutputChunks.clear();
+      await pullLibraryReportsToOutput(output);
+    }),
     vscode.commands.registerCommand("mcuhelper.detectLanguage", () => detectLanguage(output)),
     vscode.commands.registerCommand("mcuhelper.detectEncoding", () => detectEncodingCommand(output)),
     vscode.window.onDidChangeActiveTextEditor(() => {
@@ -197,14 +294,36 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.onDidOpenTextDocument(async (doc) => {
       await maybeFixDocumentEncoding(doc, output);
       const langChanged = await maybeSetMcunrLanguage(doc, output);
-      if (langChanged) scheduleRefresh();
-      else if (isMcunrDocument(doc)) scheduleRefresh();
+      // #region agent log
+      if (/958/i.test(doc.uri.fsPath) || /#\s*include\s+confpd/i.test(doc.getText().slice(0, 5000))) {
+        fetch("http://127.0.0.1:7911/ingest/3304a270-bbbf-4e90-96de-6ba27b8f72bf", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "fded15" },
+          body: JSON.stringify({
+            sessionId: "fded15",
+            runId: "pre-fix",
+            hypothesisId: "D",
+            location: "extension.ts:onDidOpenTextDocument",
+            message: "opened candidate deck",
+            data: {
+              fsPath: doc.uri.fsPath,
+              languageId: doc.languageId,
+              langChanged,
+              lineCount: doc.lineCount,
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+      }
+      // #endregion
+      // Только явный mcunr: isMcunrDocument(content) при language=ini раздувает refresh при автодетекте.
+      if (langChanged || doc.languageId === "mcunr") scheduleRefresh();
     }),
     vscode.workspace.onDidSaveTextDocument(() => scheduleRefresh()),
     vscode.workspace.onDidChangeTextDocument((e) => {
       geometryPanel.onDocumentChanged(e.document);
       scheduleLanguageDetectOnEdit(e.document, e.contentChanges, output);
-      if (isMcunrDocument(e.document)) {
+      if (e.document.languageId === "mcunr") {
         lastDocChangeAt = Date.now();
         if (selectionRefreshTimer) {
           clearTimeout(selectionRefreshTimer);
@@ -218,7 +337,34 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.languages.onDidChangeDiagnostics((e) => {
       const editor = vscode.window.activeTextEditor;
-      if (!editor || !isMcunrDocument(editor.document)) return;
+      // #region agent log
+      for (const u of e.uris) {
+        if (!/958/i.test(u.fsPath)) continue;
+        const diags = vscode.languages.getDiagnostics(u);
+        fetch("http://127.0.0.1:7911/ingest/3304a270-bbbf-4e90-96de-6ba27b8f72bf", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "fded15" },
+          body: JSON.stringify({
+            sessionId: "fded15",
+            runId: "pre-fix",
+            hypothesisId: "E",
+            location: "extension.ts:onDidChangeDiagnostics",
+            message: "client diagnostics changed for 958",
+            data: {
+              fsPath: u.fsPath,
+              total: diags.length,
+              matrEmpty: diags
+                .filter((d) => String(d.code) === "matr-empty" || /пуст/i.test(d.message))
+                .map((d) => ({ code: d.code, msg: d.message, line: d.range.start.line, source: d.source })),
+              sources: [...new Set(diags.map((d) => d.source ?? ""))],
+              activeLang: editor?.document.languageId ?? null,
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+      }
+      // #endregion
+      if (!editor || editor.document.languageId !== "mcunr") return;
       const activeUri = editor.document.uri.toString();
       if (e.uris.some((u) => u.toString() === activeUri)) {
         sidebarProviders.get("mcuhelper.lexerErrors")?.applyLexerErrors();
@@ -321,7 +467,8 @@ async function configureSolverPaths(): Promise<void> {
     { label: "User", description: "Сохранить в глобальных настройках пользователя" },
   ];
   const selectedScope = await vscode.window.showQuickPick(scopeItems, {
-    placeHolder: "Куда сохранить пути MCU-NR?",
+    placeHolder: `Пути: exe=${currentExe || "не задан"} · MDBNR=${currentLib || "не задан"}`,
+    title: "MCU-NR: куда сохранить пути?",
     ignoreFocusOut: true,
   });
   if (!selectedScope) return;
@@ -357,9 +504,9 @@ async function configureSolverPaths(): Promise<void> {
   await cfg.update("mcuConstantsLibPath", libPick[0].fsPath, target);
 
   vscode.window.showInformationMessage(
-    `Пути MCU-NR сохранены: exe = ${exePick[0].fsPath}, MDBNR = ${libPick[0].fsPath}`
+    `Пути MCU-NR сохранены: exe = ${exePick[0].fsPath}, MDBNR = ${libPick[0].fsPath} (ожидается AW.LIB)`
   );
-  runPanel?.refresh();
+  updateConfiguredPathsTooltips();
 }
 
 async function openRunKeybindings(): Promise<void> {
@@ -374,13 +521,21 @@ async function showRunActions(): Promise<void> {
     return;
   }
 
+  const cfg = vscode.workspace.getConfiguration("mcuhelper");
+  const exe = (cfg.get<string>("mcuNrPath") ?? "").trim() || "не задан";
+  const lib = (cfg.get<string>("mcuConstantsLibPath") ?? "").trim() || "не задан";
   const action = await vscode.window.showQuickPick(
     [
       { label: "Debug (INPUT)", description: "Проверка входа и переход к первой ошибке", command: "mcuhelper.debugInput" },
       { label: "Run (CALCULATION)", description: "Запустить расчёт", command: "mcuhelper.runCalculation" },
       { label: "Continue (CALCULATION)", description: "Продолжить расчёт", command: "mcuhelper.continueCalculation" },
       { label: "Final (OUTPUT)", description: "Получить финальную выдачу", command: "mcuhelper.finalOutput" },
-      { label: "Настроить пути запуска", description: "Выбрать exe MCU-NR и папку MDBNR", command: "mcuhelper.configureSolver" },
+      {
+        label: "Настроить пути запуска",
+        description: `exe: ${exe}`,
+        detail: `MDBNR: ${lib}`,
+        command: "mcuhelper.configureSolver",
+      },
     ],
     {
       placeHolder: `Действия MCU-NR для ${pathBasename(editor.document)}`,
@@ -398,7 +553,7 @@ function updateRunUiVisibility(): void {
   } else {
     runStatusItem?.hide();
   }
-  runPanel?.refresh();
+  updateConfiguredPathsTooltips();
 }
 
 async function focusDiagnosticsPanel(): Promise<void> {
@@ -475,6 +630,7 @@ async function runMcuStepCommand(mode: "i" | "c" | "f" | "b" | "continue"): Prom
     prepared?: boolean;
     finCopiedPath?: string;
     finOverwritten?: boolean;
+    lstPath?: string;
     firstError?: {
       message: string;
       range: { start: { line: number; character: number }; end: { line: number; character: number } };
@@ -513,41 +669,15 @@ async function runMcuStepCommand(mode: "i" | "c" | "f" | "b" | "continue"): Prom
     exitCode: exitCode ?? null,
   });
 
+
   if (result.message) {
     vscode.window.showErrorMessage(result.message);
     return;
   }
 
   const cnt = result.diagnosticCount ?? 0;
-  void refreshSidebarsCoalesced(sidebarProviders, "all");
-  await sidebarProviders.get("mcuhelper.lexerErrors")?.applyLexerErrors();
 
-  if (
-    shouldFocusDiagnosticsAfterRun({
-      diagnosticCount: cnt,
-      hasFirstError: !!result.firstError,
-    })
-  ) {
-    await focusDiagnosticsPanel();
-  }
-
-  if (exitCode === undefined) {
-    vscode.window.showWarningMessage(
-      `${stepTitle}: MCU завершился в терминале (код неизвестен). Диагностик из LST: ${cnt}`
-    );
-  } else if ((exitCode ?? 0) === 0 && cnt === 0) {
-    vscode.window.showInformationMessage(`${stepTitle} завершён успешно (код 0).`);
-  } else if (cnt > 0) {
-    vscode.window.showWarningMessage(
-      `${stepTitle} завершён (код ${exitCode}). Ошибок/предупреждений из LST: ${cnt}`
-    );
-  } else {
-    vscode.window.showWarningMessage(
-      `${stepTitle} завершён с кодом ${exitCode}, но явных ошибок в LST не найдено.`
-    );
-  }
-
-  // Переход к первой ошибке из LST (любой режим).
+  // Сначала подсветить ошибку в исходнике — затем открыть LST/FIN (не ждать sidebar).
   if (result.firstError?.range?.start) {
     const start = result.firstError.range.start;
     const pos = new vscode.Position(start.line, start.character);
@@ -555,27 +685,129 @@ async function runMcuStepCommand(mode: "i" | "c" | "f" | "b" | "continue"): Prom
     editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
   }
 
-  // Успешный Run/Final: открыть скопированный NAME.FIN рядом с вариантом.
-  if (result.finCopiedPath) {
+  // LST: путь из LSP + локальный fallback по runDir (на случай старого сервера / рассинхрона путей).
+  const lstPath = resolveExistingLstOnDisk({
+    lstPath: result.lstPath,
+    runDir: result.runDir ?? prepared.runDir,
+    variantName,
+  });
+
+  // Артефакт до refresh Диагностики — await applyLexerErrors раньше блокировал open (hang на LSP).
+  const openTarget = resolvePostRunOpenTarget({
+    mode,
+    finCopiedPath: result.finCopiedPath && fs.existsSync(result.finCopiedPath) ? result.finCopiedPath : undefined,
+    finOverwritten: result.finOverwritten,
+    lstPath,
+  });
+  if (openTarget) {
     try {
-      const finUri = vscode.Uri.file(result.finCopiedPath);
-      const finDoc = await vscode.workspace.openTextDocument(finUri);
-      await vscode.window.showTextDocument(finDoc, { preview: false, viewColumn: vscode.ViewColumn.Beside });
-      const label = result.finOverwritten
-        ? `FIN скопирован (перезаписан): ${path.basename(result.finCopiedPath)}`
-        : `FIN скопирован: ${path.basename(result.finCopiedPath)}`;
-      vscode.window.showInformationMessage(label);
+      helperOutput?.appendLine(`Post-run open ${openTarget.kind}: ${openTarget.path}`);
+      const uri = vscode.Uri.file(openTarget.path);
+      const doc = await vscode.workspace.openTextDocument(uri);
+      await vscode.window.showTextDocument(doc, {
+        preview: false,
+        viewColumn: vscode.ViewColumn.Beside,
+        preserveFocus: false,
+      });
+      if (openTarget.kind === "fin") {
+        const label = openTarget.overwritten
+          ? `FIN скопирован (перезаписан): ${path.basename(openTarget.path)}`
+          : `FIN скопирован: ${path.basename(openTarget.path)}`;
+        vscode.window.showInformationMessage(label);
+      } else if (openTarget.reason === "debug") {
+        vscode.window.showInformationMessage(`Открыт LST: ${path.basename(openTarget.path)}`);
+      } else {
+        vscode.window.showWarningMessage(
+          `${stepTitle}: ${variantName}.FIN не найден — открыт LST из каталога запуска.`
+        );
+      }
     } catch (e) {
-      vscode.window.showWarningMessage(
-        `FIN скопирован, но не удалось открыть: ${e instanceof Error ? e.message : String(e)}`
-      );
+      const kind = openTarget.kind === "fin" ? "FIN" : "LST";
+      const msg = `${kind} найден, но не удалось открыть: ${e instanceof Error ? e.message : String(e)}`;
+      helperOutput?.appendLine(msg);
+      vscode.window.showWarningMessage(msg);
     }
+  } else if (mode === "i") {
+    const runDir = result.runDir ?? prepared.runDir ?? "?";
+    const msg = `${stepTitle}: файл ${variantName}.LST не найден в каталоге запуска (${runDir}).`;
+    helperOutput?.appendLine(msg);
+    vscode.window.showWarningMessage(msg);
   } else if ((mode === "c" || mode === "f") && (exitCode ?? 0) === 0 && !result.firstError) {
     // Как isSuccessfulMcuCollect: exit 0 и нет error (warnings допускаются).
     vscode.window.showWarningMessage(
-      `${stepTitle}: расчёт успешен, но файл ${variantName}.FIN в каталоге запуска не найден.`
+      `${stepTitle}: расчёт успешен, но файлы ${variantName}.FIN и ${variantName}.LST не найдены.`
     );
   }
+
+  // Sidebar после open, без await — иначе applyLexerErrors/getDiagnostics может зависнуть и не дать открыть LST.
+  void refreshSidebarsCoalesced(sidebarProviders, "all");
+  void sidebarProviders.get("mcuhelper.lexerErrors")?.applyLexerErrors();
+
+  // Диагностику фокусируем только если артефакт не открыли — иначе панель перебивает LST/FIN.
+  if (
+    !openTarget &&
+    shouldFocusDiagnosticsAfterRun({
+      diagnosticCount: cnt,
+      hasFirstError: !!result.firstError,
+    })
+  ) {
+    try {
+      await focusDiagnosticsPanel();
+    } catch (e) {
+      helperOutput?.appendLine(
+        `focusDiagnosticsPanel failed: ${e instanceof Error ? e.message : String(e)}`
+      );
+    }
+  }
+
+  if (exitCode === undefined) {
+    vscode.window.showWarningMessage(
+      `${stepTitle}: MCU завершился в терминале (код неизвестен). Диагностик из LST: ${cnt}`
+    );
+  } else if (result.ok === false || !!result.firstError) {
+    const errHint = result.firstError?.message
+      ? ` Первая: ${result.firstError.message}`
+      : "";
+    vscode.window.showWarningMessage(
+      `${stepTitle}: ошибки в LST (${cnt}), код MCU ${exitCode}.${errHint}`
+    );
+  } else if ((exitCode ?? 0) === 0 && cnt === 0) {
+    vscode.window.showInformationMessage(`${stepTitle} завершён успешно (код 0).`);
+  } else if (cnt > 0) {
+    vscode.window.showWarningMessage(
+      `${stepTitle} завершён (код ${exitCode}). Предупреждений из LST: ${cnt}`
+    );
+  } else {
+    vscode.window.showWarningMessage(
+      `${stepTitle} завершён с кодом ${exitCode}, но явных ошибок в LST не найдено.`
+    );
+  }
+}
+
+/** Ищет NAME.LST на диске: ответ LSP, затем runDir (без учёта регистра). */
+function resolveExistingLstOnDisk(opts: {
+  lstPath?: string;
+  runDir?: string;
+  variantName: string;
+}): string | undefined {
+  for (const p of lstPathCandidates(opts)) {
+    try {
+      if (fs.existsSync(p)) return p;
+    } catch {
+      // ignore
+    }
+  }
+  const runDir = opts.runDir;
+  if (!runDir || !opts.variantName) return undefined;
+  try {
+    const want = `${opts.variantName}.lst`.toLowerCase();
+    for (const entry of fs.readdirSync(runDir)) {
+      if (entry.toLowerCase() === want) return path.join(runDir, entry);
+    }
+  } catch {
+    // ignore
+  }
+  return undefined;
 }
 
 function pathBasename(doc: vscode.TextDocument): string {
@@ -639,8 +871,167 @@ export function deactivate(): Promise<void> | undefined {
   return client.stop();
 }
 
-async function warmupExtensionAfterLspReady(): Promise<void> {
+/** Дедуп строк в Output (push + pull могут прийти оба). */
+const printedOutputChunks = new Set<string>();
+
+function appendOutputOnce(output: vscode.OutputChannel, chunk: string): void {
+  const key = chunk.length > 240 ? chunk.slice(0, 120) + "…" + chunk.slice(-120) + String(chunk.length) : chunk;
+  if (printedOutputChunks.has(key)) return;
+  printedOutputChunks.add(key);
+  output.appendLine(chunk);
+}
+
+function printLibraryReportsToOutput(
+  output: vscode.OutputChannel,
+  r: {
+    awStatus?: string;
+    thrStatus?: string;
+    awReport?: string;
+    thrReport?: string;
+  }
+): void {
+  output.appendLine("——— Сверка библиотек MDBNR (AW.LIB / PARAMETE.THR) ———");
+  if (r.awStatus) appendOutputOnce(output, `[AW.LIB] ${r.awStatus}`);
+  if (r.awReport) appendOutputOnce(output, r.awReport);
+  if (r.thrStatus) appendOutputOnce(output, `[PARAMETE.THR] ${r.thrStatus}`);
+  if (r.thrReport) appendOutputOnce(output, r.thrReport);
+  if (!r.awReport && !r.thrReport) {
+    output.appendLine(
+      "(нет отчётов сверки — проверьте mcuhelper.mcuConstantsLibPath и наличие AW.LIB / BURN6/PARAMETE.THR)"
+    );
+  }
+}
+
+/** Подписка на уведомления сверки — до client.start(); полный T1/2 также тянем pull-ом после ready. */
+function registerLspOutputNotifications(
+  lsp: LanguageClient,
+  output: vscode.OutputChannel
+): void {
+  lsp.onNotification(
+    "mcuhelper/awLibStatus",
+    (msg: { ok: boolean; message: string; entryCount?: number; path?: string }) => {
+      appendOutputOnce(output, `[AW.LIB] ${msg.message}`);
+    }
+  );
+  lsp.onNotification(
+    "mcuhelper/awLibVerification",
+    (msg: {
+      ok: boolean;
+      message: string;
+      mismatchCount: number;
+      compared: number;
+      maxAbsDelta?: number;
+      report: string;
+    }) => {
+      appendOutputOnce(output, `[AW.LIB verify] ${msg.message}`);
+      if (msg.report) appendOutputOnce(output, msg.report);
+      const maxAbs = msg.maxAbsDelta ?? 0;
+      if (!msg.ok && msg.mismatchCount > 0 && maxAbs >= 0.01) {
+        void vscode.window
+          .showWarningMessage(
+            `AW.LIB: ${msg.mismatchCount} расхождений атомных масс с IAEA (макс |Δ|=${maxAbs.toExponential(2)}). Подробности — Output «MCU-NR Helper».`,
+            "Открыть Output"
+          )
+          .then((pick) => {
+            if (pick === "Открыть Output") output.show(true);
+          });
+      }
+    }
+  );
+  lsp.onNotification("mcuhelper/parameteThrStatus", (msg: { ok: boolean; message: string }) => {
+    appendOutputOnce(output, `[PARAMETE.THR] ${msg.message}`);
+  });
+  lsp.onNotification(
+    "mcuhelper/parameteThrVerification",
+    (msg: {
+      ok: boolean;
+      message: string;
+      mismatchCount: number;
+      compared: number;
+      maxRelDelta?: number;
+      report: string;
+    }) => {
+      appendOutputOnce(output, `[PARAMETE.THR verify] ${msg.message}`);
+      if (msg.report) appendOutputOnce(output, msg.report);
+      const maxRel = msg.maxRelDelta ?? 0;
+      if (!msg.ok && msg.mismatchCount > 0 && maxRel >= 0.2) {
+        void vscode.window
+          .showWarningMessage(
+            `PARAMETE.THR: ${msg.mismatchCount} расхождений T1/2 с IAEA (макс Δrel=${(maxRel * 100).toFixed(0)}%). Подробности — Output «MCU-NR Helper».`,
+            "Открыть Output"
+          )
+          .then((pick) => {
+            if (pick === "Открыть Output") output.show(true);
+          });
+      }
+    }
+  );
+}
+
+async function pullLibraryReportsToOutput(output: vscode.OutputChannel): Promise<void> {
+  if (!client) {
+    output.appendLine("Сверка библиотек: LSP client ещё не создан");
+    return;
+  }
+  output.appendLine("Сверка библиотек: запрос getLibraryVerificationReports…");
+  try {
+    const r = await Promise.race([
+      client.sendRequest<{
+        awStatus?: string;
+        thrStatus?: string;
+        awReport?: string;
+        thrReport?: string;
+        thrMismatchCount?: number;
+        maxRelDelta?: number;
+      }>("mcuhelper/getLibraryVerificationReports"),
+      new Promise<null>((resolve) => {
+        setTimeout(() => resolve(null), 20000);
+      }),
+    ]);
+    if (r == null) {
+      output.appendLine(
+        "Сверка библиотек: таймаут 20с. Команда «MCU-NR: Отчёт сверки библиотек» — повторить."
+      );
+      return;
+    }
+    printLibraryReportsToOutput(output, r);
+  } catch (e) {
+    output.appendLine(
+      `Сверка библиотек: не удалось получить отчёт (${e instanceof Error ? e.message : String(e)})`
+    );
+  }
+}
+
+function formatConfiguredPathsTooltip(): vscode.MarkdownString {
+  const cfg = vscode.workspace.getConfiguration("mcuhelper");
+  const exe = (cfg.get<string>("mcuNrPath") ?? "").trim();
+  const lib = (cfg.get<string>("mcuConstantsLibPath") ?? "").trim();
+  const md = new vscode.MarkdownString(undefined, true);
+  md.isTrusted = false;
+  md.appendMarkdown("**Пути MCU-NR**\n\n");
+  md.appendMarkdown(`- **exe:** \`${exe || "не задан"}\`\n`);
+  md.appendMarkdown(`- **MDBNR:** \`${lib || "не задан"}\`\n`);
+  md.appendMarkdown("\nНастройка: шестерёнка на панели Запуск или `Ctrl+Alt+P`");
+  return md;
+}
+
+function updateConfiguredPathsTooltips(): void {
+  if (runStatusItem) {
+    const base = "Открыть панель запуска MCU-NR";
+    const tip = formatConfiguredPathsTooltip();
+    tip.appendMarkdown(`\n\n---\n\n${base}`);
+    runStatusItem.tooltip = tip;
+  }
+  runPanel?.refresh();
+}
+
+async function warmupExtensionAfterLspReady(output?: vscode.OutputChannel): Promise<void> {
   if (!client) return;
+  const out = output ?? helperOutput;
+  // Полный отчёт T1/2 / AW в Output — pull, не push (уведомления часто теряются).
+  if (out) {
+    await pullLibraryReportsToOutput(out);
+  }
   try {
     await client.sendRequest<number>("mcuhelper/revalidateAllOpen");
   } catch {

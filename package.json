@@ -3,7 +3,8 @@
   "private": true,
   "scripts": {
     "build": "npm run build --prefix packages/mcu-schema && npm run build --prefix packages/mcu-language && npm run build --prefix packages/mcu-lsp && npm run build --prefix extension && npm run copy-extension-assets",
-    "copy-extension-assets": "node -e \"const fs=require('fs');const p=require('path');const d=p.join('extension','server');fs.mkdirSync(d,{recursive:true});fs.copyFileSync(p.join('packages','mcu-lsp','dist','server.js'),p.join(d,'server.js'));const v=p.join('extension','vendor','mcu-schema');fs.rmSync(v,{recursive:true,force:true});fs.cpSync(p.join('packages','mcu-schema','dist'),v,{recursive:true});console.log('LSP + mcu-schema copied to extension/');\"",
+    "refresh-livechart-cache": "node scripts/refresh-livechart-cache.js",
+    "copy-extension-assets": "node -e \"const fs=require('fs');const p=require('path');const d=p.join('extension','server');fs.mkdirSync(d,{recursive:true});fs.copyFileSync(p.join('packages','mcu-lsp','dist','server.js'),p.join(d,'server.js'));const v=p.join('extension','vendor','mcu-schema');fs.rmSync(v,{recursive:true,force:true});fs.cpSync(p.join('packages','mcu-schema','dist'),v,{recursive:true});const vl=p.join('extension','vendor','mcu-language');fs.mkdirSync(vl,{recursive:true});for (const f of ['defaultPhy.js','encodingDetect.js','detect.js','includeResolve.js']) { const src=p.join('packages','mcu-language','dist',f); if (fs.existsSync(src)) fs.copyFileSync(src,p.join(vl,f)); } console.log('LSP + mcu-schema + mcu-language (defaultPhy) copied to extension/');\"",
     "test": "npm run test --prefix packages/mcu-schema && npm run test --prefix packages/mcu-language && npm run test --prefix packages/mcu-geometry && npm run test --prefix packages/mcu-lsp && npm run test --prefix extension",
     "test:coverage": "c8 npm test",
     "coverage:check": "c8 check-coverage --lines 95 --branches 80 --functions 88 --statements 95"

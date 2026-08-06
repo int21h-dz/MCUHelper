@@ -47,6 +47,11 @@ export function resolveIncludeFileUri(baseDir: string, includePath: string): str
   return pathToFileURL(fsPath).href;
 }
 
+/** Ключ для сопоставления путей include (Windows: регистр/слэши). */
+export function normalizeIncludeFsKey(fsPath: string): string {
+  return path.resolve(fsPath).replace(/\\/g, "/").toLowerCase();
+}
+
 /** Диапазоны `#include` в исходном тексте (до expandIncludes). */
 export interface IncludeSourceSpan {
   path: string;

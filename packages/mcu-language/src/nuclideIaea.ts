@@ -1,3 +1,5 @@
+import { awLibToIaeaTarget } from "./awLib";
+
 /** Двухбуквенные символы актинидов/трансуранов — масса кодируется двумя последними цифрами с префиксом «2». */
 const ACTINIDE_TWO_LETTER = new Set([
   "AC", "TH", "PA", "NP", "PU", "AM", "CM", "BK", "CF", "ES", "FM", "MD", "NO", "LR",
@@ -8,15 +10,19 @@ function formatElement(sym: string): string {
 }
 
 /**
- * MCU-NR (4-символьное имя) → IAEA Target (U-235, Th-230, He-3).
+ * MCU-NR (4-символьное имя) → IAEA Target (U-235, Th-230, He-3, Cs-133).
+ * При загруженном AW.LIB — A из ZAID (CS33→Cs-133); иначе эвристика имени.
  * Без массового числа возвращает null.
  */
 export function mcuNuclideToIaeaTarget(name: string): string | null {
+  const fromLib = awLibToIaeaTarget(name);
+  if (fromLib) return fromLib;
+
   const raw = name.trim().toUpperCase();
   const m = raw.match(/^([A-Z]{1,2})(\d+)$/);
   if (!m) return null;
 
-  let sym = m[1];
+  const sym = m[1];
   const digits = m[2];
 
   let mass: string;

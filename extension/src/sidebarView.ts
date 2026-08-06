@@ -4,7 +4,29 @@ import { LanguageClient } from "vscode-languageclient/node";
 import { isMcunrDocument } from "./contentDetect";
 import { buildNavTree, type IndexPayload, type NavViewId } from "./navData";
 import { goToSymbol, insertTemplate } from "./templateInsert";
-import { applyDiagnosticsToSidebar } from "./diagnosticNavigation";
+import { applyDiagnosticsToSidebar, extractIsotopeNameFromDiag } from "./diagnosticNavigation";
+import { ADD_TO_SUM_ISOTOPE_DIAG_CODES } from "./addToSumIsotope";
+
+function diagnosticCodeOf(d: vscode.Diagnostic): string | undefined {
+  if (typeof d.code === "string") return d.code;
+  if (d.code && typeof d.code === "object" && "value" in d.code) {
+    return String(d.code.value);
+  }
+  return undefined;
+}
+
+/** Ключи `line:NAME` для нуклидов с рекомендацией «добавить в SI». */
+function collectSumIsotopeSuggestions(uri: vscode.Uri): Set<string> {
+  const out = new Set<string>();
+  for (const d of vscode.languages.getDiagnostics(uri)) {
+    const code = diagnosticCodeOf(d);
+    if (!code || !ADD_TO_SUM_ISOTOPE_DIAG_CODES.has(code)) continue;
+    const name = extractIsotopeNameFromDiag(d);
+    if (!name) continue;
+    out.add(`${d.range.start.line}:${name.toUpperCase()}`);
+  }
+  return out;
+}
 
 export type SidebarViewId =
   | "mcuhelper.catalog"
@@ -71,6 +93,7 @@ function sidebarHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string 
 
 export class SidebarViewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
+  private lexerErrorsTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
     private readonly viewId: SidebarViewId,
@@ -88,12 +111,18 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
 
   applyLexerErrors(): Promise<void> {
     if (!this.view || !this.isLexerErrors) return Promise.resolve();
-    return applyDiagnosticsToSidebar(
-      this.view.webview,
-      this.viewId,
-      vscode.window.activeTextEditor?.document,
-      this.client
-    );
+    if (this.lexerErrorsTimer) clearTimeout(this.lexerErrorsTimer);
+    return new Promise((resolve) => {
+      this.lexerErrorsTimer = setTimeout(() => {
+        this.lexerErrorsTimer = undefined;
+        void applyDiagnosticsToSidebar(
+          this.view!.webview,
+          this.viewId,
+          vscode.window.activeTextEditor?.document,
+          this.client
+        ).finally(resolve);
+      }, 200);
+    });
   }
 
   resolveWebviewView(
@@ -122,8 +151,15 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         await goToSymbol(msg.uri, msg.range);
         return;
       }
+      if (msg.type === "runCommand" && typeof msg.command === "string") {
+        await vscode.commands.executeCommand(msg.command, msg.args);
+        return;
+      }
       if (msg.type === "copyText" && typeof msg.text === "string") {
         await vscode.env.clipboard.writeText(msg.text);
+        if (typeof msg.notify === "string" && msg.notify.trim()) {
+          vscode.window.showInformationMessage(msg.notify);
+        }
       }
     });
   }
@@ -177,7 +213,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       });
       return;
     }
-    const nodes = buildNavTree(navId, index, uri);
+    const suggestSumIsotope =
+      navId === "materials" ? collectSumIsotopeSuggestions(editor.document.uri) : undefined;
+    const nodes = buildNavTree(navId, index, uri, suggestSumIsotope);
     webview.postMessage({ type: "tree", panel: this.viewId, nodes });
   }
 

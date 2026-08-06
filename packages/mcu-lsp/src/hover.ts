@@ -11,10 +11,13 @@ import {
   type FragmentId,
 } from "@mcuhelper/mcu-schema";
 import {
+  analyzeMaterialActivity,
   analyzeMaterialMassDensity,
   buildScopedVars,
   computeBodyVolumeCm3FromAst,
+  computeNuclideActivityBqPerCm3,
   evaluateExpression,
+  formatActivityBqPerCm3,
   formatBodyVolumeCm3,
   buildZoneRegistrationMap,
   formatBurnupLoadHover,
@@ -24,17 +27,27 @@ import {
   formatSourceSpectrumHover,
   getBurnupLoadAnalysis,
   getTotalHistoriesEstimate,
-  findSourceSpectrumAtLine,
   collectZoneBodyRefs,
   getCompositionLineParameterHover,
   getBodyLineParameterHover,
   looksLikeZoneStatement,
   mcuNuclideAtomicWeight,
   mcuNuclideToIaeaElement,
+  getAwLibEntry,
+  getAwLibTable,
+  getDefaultPhyEntry,
+  getDefaultPhyTable,
+  formatAtomicWeightAmu,
   sumIsotopeForNuclide,
+  isSumIsotopeCardLine,
+  remapRangeToMainDocument,
+  rangeCoversEditorLine,
+  collectSourceSpectra,
   type DocumentIndex,
 } from "@mcuhelper/mcu-language";
 import { getCachedNuclideIaeaMarkdown, formatNaturalInsertHoverButton, prefetchNuclideIaeaHover, type NaturalInsertContext } from "./iaeaNds";
+import { formatAwMismatchHoverLine, getAwMassMismatch } from "./awLibVerify";
+import { formatParameteThrHoverLines } from "./parameteThrVerify";
 import type { Position } from "vscode-languageserver";
 
 export function fullLine(
@@ -77,7 +90,7 @@ function findBodyByNumericZoneRef(
   line: string,
   pos: Position
 ): DocumentIndex["ast"]["bodies"][number] | null {
-  const zone = index.ast.zones.find((z) => z.range.start.line <= pos.line && z.range.end.line >= pos.line);
+  const zone = index.ast.zones.find((z) => rangeCoversEditorLine(z.range, pos.line, index.ast.includeLineMap));
   if (!zone) return null;
 
   const token = numericTokenAtPosition(line, pos.character);
@@ -133,11 +146,16 @@ function hoverForKeyword(word: string): string | null {
 
 function resolveFragmentAtLine(index: DocumentIndex | null, line: number): FragmentId | undefined {
   if (!index) return undefined;
-  const fromStmt = index.ast.statements.find(
-    (s) => s.range.start.line <= line && s.range.end.line >= line
-  )?.fragment;
+  const lineMap = index.ast.includeLineMap;
+  const fromStmt = index.ast.statements.find((s) => rangeCoversEditorLine(s.range, line, lineMap))?.fragment;
   if (fromStmt) return fromStmt;
-  const span = index.ast.fragments.find((f) => f.startLine <= line && f.endLine >= line);
+  const span = index.ast.fragments.find((f) => {
+    const start = remapRangeToMainDocument(
+      { start: { line: f.startLine, character: 0 }, end: { line: f.endLine, character: 0 } },
+      lineMap
+    );
+    return start != null && start.start.line <= line && start.end.line >= line;
+  });
   return span?.id;
 }
 
@@ -166,6 +184,7 @@ const HISTORY_CARD_LABELS = new Set(["NTOT", "MAXS", "MAXSER"]);
 const BURNUP_LOAD_LABELS = new Set(["POWER", "POWE", "STEP"]);
 const VOL_LABELS = new Set(["VOL"]);
 const SOURCE_SPECTRUM_LABELS = new Set(["EMES", "EPRO"]);
+const SUM_CARD_LABELS = new Set(["SI", "SINOT"]);
 
 function appendBurnupLoadToKeywordHover(base: string, index: DocumentIndex, word: string): string {
   if (!BURNUP_LOAD_LABELS.has(word.toUpperCase())) return base;
@@ -187,9 +206,41 @@ function appendTotalHistoriesToKeywordHover(base: string, index: DocumentIndex, 
 }
 
 function appendSourceSpectrumToHover(base: string, index: DocumentIndex, line: number): string {
-  const block = findSourceSpectrumAtLine(index.ast, line);
+  const block = findSourceSpectrumAtEditorLine(index, line);
   if (!block) return base;
   return base + formatSourceSpectrumHover(block);
+}
+
+function appendSumCardListToHover(base: string, index: DocumentIndex, word: string, line: number): string {
+  if (!SUM_CARD_LABELS.has(word.toUpperCase())) return base;
+  const lineMap = index.ast.includeLineMap;
+  const stmt = index.ast.statements.find((s) => rangeCoversEditorLine(s.range, line, lineMap));
+  if (!stmt || stmt.fragment !== "physical" || stmt.label.toUpperCase() !== word.toUpperCase()) return base;
+  // ⚠ АГЕНТАМ: `SI dens` — кремний, не карта SI list (siCardVsNuclide / isSumIsotopeCardLine).
+  if (word.toUpperCase() === "SI" && !isSumIsotopeCardLine(stmt.text)) return base;
+  const list = stmt.text
+    .trim()
+    .split(/[\s,]+/)
+    .filter(Boolean)
+    .slice(1);
+  if (!list.length) return `${base}\n\nСписок нуклидов пуст.`;
+  const items = list.map((token) => `- \`${token}\``).join("\n");
+  return `${base}
+
+<details>
+<summary>Нуклиды в карте ${word.toUpperCase()} (${list.length})</summary>
+
+${items}
+</details>`;
+}
+
+function findSourceSpectrumAtEditorLine(index: DocumentIndex, editorLine: number) {
+  const lineMap = index.ast.includeLineMap;
+  for (const block of collectSourceSpectra(index.ast)) {
+    if (rangeCoversEditorLine(block.emesRange, editorLine, lineMap)) return block;
+    if (block.eproRange && rangeCoversEditorLine(block.eproRange, editorLine, lineMap)) return block;
+  }
+  return null;
 }
 
 function appendKeywordExtrasToHover(
@@ -202,6 +253,7 @@ function appendKeywordExtrasToHover(
   if (fragmentAtLine != null && !labelAllowedInFragment(word, fragmentAtLine)) return base;
   let out = appendBurnupLoadToKeywordHover(appendTotalHistoriesToKeywordHover(base, index, word), index, word);
   out = appendVolToKeywordHover(out, index, word);
+  out = appendSumCardListToHover(out, index, word, line);
   if (SOURCE_SPECTRUM_LABELS.has(word.toUpperCase()) && (fragmentAtLine == null || fragmentAtLine === "source")) {
     out = appendSourceSpectrumToHover(out, index, line);
   }
@@ -245,10 +297,11 @@ export function findNuclideAtPosition(
   rawWord: string
 ): { materialNumber: number; concentration: string } | null {
   const word = rawWord.toUpperCase();
+  const lineMap = index.ast.includeLineMap;
   for (const m of index.ast.materials) {
     for (const n of m.nuclides) {
       if (n.name.toUpperCase() !== word || n.name.length !== rawWord.length) continue;
-      if (n.range.start.line <= pos.line && n.range.end.line >= pos.line) {
+      if (rangeCoversEditorLine(n.range, pos.line, lineMap)) {
         return { materialNumber: m.number, concentration: n.density };
       }
     }
@@ -260,23 +313,95 @@ export interface HoverOptions {
   enableIaeaNuclide?: boolean;
 }
 
+type NuclideHoverSource =
+  | { kind: "material"; materialNumber: number; concentration: string }
+  | { kind: "sum-card"; cardLabel: "SI" | "SINOT" };
+
+function findSumCardNuclideAtPosition(
+  index: DocumentIndex,
+  pos: Position,
+  rawWord: string
+): Extract<NuclideHoverSource, { kind: "sum-card" }> | null {
+  const lineMap = index.ast.includeLineMap;
+  const stmt = index.ast.statements.find((s) => rangeCoversEditorLine(s.range, pos.line, lineMap));
+  if (!stmt || stmt.fragment !== "physical") return null;
+  const label = stmt.label.toUpperCase();
+  if (label !== "SI" && label !== "SINOT") return null;
+  // ⚠ АГЕНТАМ: не считать `SI dens` (кремний) картой суммарного изотопа.
+  if (label === "SI" && !isSumIsotopeCardLine(stmt.text)) return null;
+  if (isOnStatementKeyword(fullLine({ getText: () => stmt.text }, pos), pos.character, rawWord)) return null;
+
+  const tokens = stmt.text.trim().split(/[\s,]+/).filter(Boolean);
+  if (tokens.length < 2) return null;
+  const list = tokens.slice(1);
+  if (!list.some((token) => token.toUpperCase() === rawWord.toUpperCase())) return null;
+  return { kind: "sum-card", cardLabel: label };
+}
+
+function findNuclideHoverSourceAtPosition(
+  index: DocumentIndex,
+  pos: Position,
+  rawWord: string
+): NuclideHoverSource | null {
+  const materialHit = findNuclideAtPosition(index, pos, rawWord);
+  if (materialHit) {
+    return {
+      kind: "material",
+      materialNumber: materialHit.materialNumber,
+      concentration: materialHit.concentration,
+    };
+  }
+  return findSumCardNuclideAtPosition(index, pos, rawWord);
+}
+
 function formatNuclideHoverLocal(
   word: string,
-  nuclHit: { materialNumber: number; concentration: string },
+  source: NuclideHoverSource,
   index: DocumentIndex
 ): string {
-  const mat = index.ast.materials.find((m) => m.number === nuclHit.materialNumber);
+  const mat = source.kind === "material" ? index.ast.materials.find((m) => m.number === source.materialNumber) : null;
   const vars = mat
     ? buildScopedVars(index.ast.constants, mat.range.offset, "global")
     : new Map<string, number>();
   const density = mat ? analyzeMaterialMassDensity(mat, vars) : null;
-  const aw = mcuNuclideAtomicWeight(word);
-  const lines = [
-    `Нуклид **${word}** в материале ${nuclHit.materialNumber}`,
-    `Концентрация: **${nuclHit.concentration}** яд/см³`,
-  ];
+  const awEntry = getAwLibEntry(word);
+  const aw = awEntry?.atomicWeight ?? mcuNuclideAtomicWeight(word);
+  const lines =
+    source.kind === "material"
+      ? [`Нуклид **${word}** в материале ${source.materialNumber}`, `Концентрация: **${source.concentration}** яд/см³`]
+      : [`Нуклид **${word}** в списке карты ${source.cardLabel}`];
   if (aw != null) {
-    lines.push(`Атомная масса: **${aw}** а.е.м.`);
+    const awStr = formatAtomicWeightAmu(aw);
+    if (awEntry) {
+      const aNote = awEntry.a != null ? `A=${awEntry.a}, ` : "";
+      lines.push(`Атомная масса: **${awStr}** а.е.м. (${aNote}AW.LIB)`);
+      const mismatch = getAwMassMismatch(word);
+      if (mismatch) lines.push(formatAwMismatchHoverLine(mismatch));
+    } else {
+      lines.push(`Атомная масса: **${awStr}** а.е.м.`);
+    }
+  }
+  lines.push(...formatParameteThrHoverLines(word));
+  if (mat) {
+    const nuclAct = computeNuclideActivityBqPerCm3(mat, word, vars);
+    const matAct = analyzeMaterialActivity(mat, vars);
+    if (nuclAct) {
+      let nuclActLine = `Объёмная активность: **${formatActivityBqPerCm3(nuclAct.activityBqPerCm3)}**`;
+      if (matAct.totalBqPerCm3 != null && matAct.totalBqPerCm3 > 0) {
+        const sharePct = (nuclAct.activityBqPerCm3 / matAct.totalBqPerCm3) * 100;
+        const shareText =
+          sharePct >= 0.01 && sharePct < 99.995
+            ? sharePct.toPrecision(4).replace(/\.?0+$/, "").replace(/(\.\d*?)0+$/, "$1")
+            : sharePct.toFixed(2).replace(/\.?0+$/, "");
+        nuclActLine += ` _(вклад в А мат.: ${shareText}% )_`;
+      } else {
+        nuclActLine += ` _(по T½ PARAMETE.THR)_`;
+      }
+      lines.push(nuclActLine);
+    }
+    if (matAct.totalBqPerCm3 != null && matAct.usedCount > 0) {
+      lines.push(`Активность материала: **${formatActivityBqPerCm3(matAct.totalBqPerCm3)}**`);
+    }
   }
   if (density?.rho != null) {
     let rhoLine = `Плотность материала: **${formatMassDensityGcm3(density.rho)}**`;
@@ -290,16 +415,49 @@ function formatNuclideHoverLocal(
     }
     lines.push(rhoLine);
   }
-  if (mat) {
+  if (mat && source.kind === "material") {
     const sum = sumIsotopeForNuclide(index.ast, mat, {
       name: word,
-      density: nuclHit.concentration,
+      density: source.concentration,
     });
     if (sum.inSum) {
       lines.push(`_${sum.reasons.join("; ")}_`);
     }
   }
   return lines.join("\n\n");
+}
+
+/** Нуклид рекомендован к явному SI: нет в AW.LIB и/или DEFAULT.PHY и не покрыт SI/SINOT. */
+export function shouldSuggestAddToSumIsotope(
+  index: DocumentIndex,
+  materialNumber: number,
+  nuclideName: string,
+  concentration: string
+): boolean {
+  const mat = index.ast.materials.find((m) => m.number === materialNumber);
+  if (!mat) return false;
+  const sum = sumIsotopeForNuclide(index.ast, mat, {
+    name: nuclideName,
+    density: concentration,
+  });
+  if (sum.kinds.includes("si") || sum.kinds.includes("sinot")) return false;
+
+  const awLoaded = Boolean(getAwLibTable()?.entryCount);
+  const phyLoaded = Boolean(getDefaultPhyTable()?.entryCount);
+  if (!awLoaded && !phyLoaded) return false;
+
+  const missingAw = awLoaded && !getAwLibEntry(nuclideName);
+  const missingPhy = phyLoaded && !getDefaultPhyEntry(nuclideName);
+  return Boolean(missingAw || missingPhy);
+}
+
+export function formatAddToSumIsotopeHoverButton(args: {
+  uri: string;
+  line: number;
+  nuclideName: string;
+}): string {
+  const query = encodeURIComponent(JSON.stringify([args]));
+  return `\n\n**[+ Добавить в суммарный изотоп](command:mcuhelper.addToSumIsotope?${query})**`;
 }
 
 /**
@@ -322,35 +480,56 @@ export function getHoverContent(
   }
 
   if (index && rawWord) {
-    const nuclHit = findNuclideAtPosition(index, pos, rawWord);
-    if (nuclHit && (fragmentAtLine === "physical" || fragmentAtLine == null)) {
+    const nuclSource = findNuclideHoverSourceAtPosition(index, pos, rawWord);
+    if (nuclSource && (fragmentAtLine === "physical" || fragmentAtLine == null)) {
       const nuclName = rawWord.toUpperCase();
-      const base = formatNuclideHoverLocal(nuclName, nuclHit, index);
-      if (options.enableIaeaNuclide === false) return base;
-
+      const base = formatNuclideHoverLocal(nuclName, nuclSource, index);
+      // IAEA NDS в hover по нуклидам — всегда (настройка снята).
       const isNatural = mcuNuclideToIaeaElement(nuclName) != null;
       const insert: NaturalInsertContext | undefined =
-        isNatural && documentUri
+        nuclSource.kind === "material" && isNatural && documentUri
           ? {
               uri: documentUri,
               line: pos.line,
               character: pos.character,
               nuclideName: nuclName,
-              concentration: nuclHit.concentration,
+              concentration: nuclSource.concentration,
             }
           : undefined;
 
+      const addToSi =
+        nuclSource.kind === "material" &&
+        documentUri &&
+        shouldSuggestAddToSumIsotope(index, nuclSource.materialNumber, nuclName, nuclSource.concentration)
+          ? formatAddToSumIsotopeHoverButton({
+              uri: documentUri,
+              line: pos.line,
+              nuclideName: nuclName,
+            })
+          : "";
+
+      if (options.enableIaeaNuclide === false) {
+        // Тесты могут отключить сеть/IAEA; кнопка ICE для природных всё равно нужна.
+        let out = base;
+        if (insert) out += `\n\n${formatNaturalInsertHoverButton(insert).replace(/^\n+/, "")}`;
+        if (addToSi) out += addToSi;
+        return out;
+      }
+
       const iaea = getCachedNuclideIaeaMarkdown(rawWord, insert);
-      if (iaea) return `${base}\n\n${iaea.replace(/^\n+/, "")}`;
+      if (iaea) return `${base}\n\n${iaea.replace(/^\n+/, "")}${addToSi}`;
       prefetchNuclideIaeaHover(rawWord, insert);
-      if (insert) return `${base}\n\n${formatNaturalInsertHoverButton(insert).replace(/^\n+/, "")}`;
-      return base;
+      if (insert) return `${base}\n\n${formatNaturalInsertHoverButton(insert).replace(/^\n+/, "")}${addToSi}`;
+      return addToSi ? `${base}${addToSi}` : base;
     }
   }
 
+  // ⚠ АГЕНТАМ: SI dens (кремний) не блокирует composition hover как «карта SI».
+  const onCardKeyword =
+    Boolean(rawWord && isOnStatementKeyword(line, pos.character, rawWord) && getCardByLabel(rawWord)) &&
+    !(rawWord!.toUpperCase() === "SI" && !isSumIsotopeCardLine(line));
   let paramHover =
-    !(rawWord && isOnStatementKeyword(line, pos.character, rawWord) && getCardByLabel(rawWord)) &&
-    fragmentAtLine === "physical"
+    !onCardKeyword && fragmentAtLine === "physical"
       ? getCompositionLineParameterHover(line, pos.character)
       : null;
   if (
@@ -407,7 +586,10 @@ export function getHover(
     return lines.join("\n\n");
   }
   const word = rawWord.toUpperCase();
-  const onKeyword = isOnStatementKeyword(line, pos.character, rawWord);
+  // ⚠ АГЕНТАМ: SI dens (кремний) — не карта SI; не показывать card hover / wrong-fragment.
+  const onKeyword =
+    isOnStatementKeyword(line, pos.character, rawWord) &&
+    !(word === "SI" && !isSumIsotopeCardLine(line));
   const fragmentAtLine = resolveFragmentAtLine(index, pos.line);
 
   const contextual = hoverContextual(line, word);
@@ -443,7 +625,9 @@ export function getHover(
             return null;
           }
         } else {
-          const bodyOnLine = index.ast.bodies.find((b) => b.range.start.line === pos.line);
+          const bodyOnLine = index.ast.bodies.find((b) =>
+            rangeCoversEditorLine(b.range, pos.line, index.ast.includeLineMap)
+          );
           if (bodyOnLine) {
             const vol = computeBodyVolumeCm3FromAst(bodyOnLine, index.ast);
             if (vol != null) {
@@ -460,7 +644,7 @@ export function getHover(
   }
 
   if (index) {
-    const specBlock = findSourceSpectrumAtLine(index.ast, pos.line);
+    const specBlock = findSourceSpectrumAtEditorLine(index, pos.line);
     if (specBlock && !onKeyword && (fragmentAtLine == null || fragmentAtLine === "source")) {
       const base =
         hoverForKeyword("EMES") ??
@@ -507,12 +691,14 @@ export function getHover(
     return lines.join("\n");
   }
 
-  const nuclHit = findNuclideAtPosition(index, pos, rawWord);
-  if (nuclHit && (fragmentAtLine === "physical" || fragmentAtLine == null)) {
-    return formatNuclideHoverLocal(word, nuclHit, index);
+  const nuclSource = findNuclideHoverSourceAtPosition(index, pos, rawWord);
+  if (nuclSource && (fragmentAtLine === "physical" || fragmentAtLine == null)) {
+    return formatNuclideHoverLocal(word, nuclSource, index);
   }
 
   if (!onKeyword) {
+    // ⚠ АГЕНТАМ: `SI dens` (кремний) — не карта SI. Не подсовывать card hover по getCardByLabel("SI").
+    if (word === "SI" && !isSumIsotopeCardLine(line)) return null;
     const card = getCardByLabel(word);
     if (card) {
       if (fragmentAtLine != null && !cardHoverAllowed(word, fragmentAtLine)) {

@@ -9,6 +9,7 @@ import type {
   DocumentAst,
   FragmentSpan,
   IncludeNode,
+  IncludeLineMapEntry,
   LatticeElementNode,
   LatticeNode,
   MaterialNode,
@@ -23,7 +24,7 @@ import type {
 import { lexDocument, type LineInfo } from "./lexer";
 import { mergeTrailingMultiplyOperands } from "./expression";
 import { expandCartogramTokens } from "./netCartogram";
-import { collectIncludesFromSource } from "./includeResolve";
+import { collectIncludesFromSource, resolveIncludeFilePath, resolveIncludeFileUri } from "./includeResolve";
 import { expandIncludes, expandRepeats } from "./preprocessor";
 import { applyGeometryScopeTransition, initialGeometryScopeState } from "./geometryScope";
 import { isG2mpCartogramRow, latticeTypeUsesCartogram, looksLikeZoneOverridingFragment, looksLikeZoneStatement } from "./zoneStatement";
@@ -301,7 +302,10 @@ function isExcludedNuclideLikeLine(text: string): boolean {
   return false;
 }
 
-/** Строка состава MATR: U235 1.10E-03 | ZR CZR | U238 owl.… (опечатка → matr-nuclide-conc). */
+/**
+ * Строка состава MATR: U235 1.10E-03 | ZR CZR | U238 owl.… (опечатка → matr-nuclide-conc).
+ * ⚠ АГЕНТАМ: `SI dens` (`SI 0.00055`) — нуклид кремния, НЕ карта SI list (siCardVsNuclide.ts).
+ */
 function isNuclideLine(text: string): boolean {
   const t = text.trim();
   if (isExcludedNuclideLikeLine(t)) return false;
@@ -364,10 +368,12 @@ export interface ParseOptions {
   uri: string;
   baseDir?: string;
   expandInclude?: boolean;
+  /** Открытые буферы include: normalizeIncludeFsKey(fsPath) → текст. */
+  includeTextOverrides?: import("./preprocessor").IncludeTextOverrides;
 }
 
 /** `#include` из исходного текста — до expandIncludes, чтобы LSP сохранил ссылки на строки редактора. */
-function includeNodesFromSource(text: string): IncludeNode[] {
+function includeNodesFromSource(text: string, baseDir?: string): IncludeNode[] {
   const lines = text.split(/\r?\n/);
   const lineStarts: number[] = [];
   let offset = 0;
@@ -378,9 +384,13 @@ function includeNodesFromSource(text: string): IncludeNode[] {
   return collectIncludesFromSource(text).map((span) => {
     const startOffset = lineStarts[span.line]! + span.pathStart;
     const len = span.pathEnd - span.pathStart;
+    const resolved = baseDir ? resolveIncludeFilePath(baseDir, span.path) : undefined;
     return {
       kind: "include" as const,
       path: span.path,
+      fsPath: resolved?.fsPath,
+      uri: baseDir ? resolveIncludeFileUri(baseDir, span.path) : undefined,
+      exists: resolved?.exists,
       range: {
         start: { line: span.line, character: span.pathStart },
         end: { line: span.line, character: span.pathEnd },
@@ -392,19 +402,29 @@ function includeNodesFromSource(text: string): IncludeNode[] {
 }
 
 export function parseDocument(text: string, options: ParseOptions): DocumentAst {
-  const includes = includeNodesFromSource(text);
+  const includes = includeNodesFromSource(text, options.baseDir);
   let sourceText = expandRepeats(text);
   const diagnostics: DiagnosticMessage[] = [];
+  let includeLineMap: IncludeLineMapEntry[] | undefined;
+  const originalLines = text.split(/\r?\n/);
 
   if (options.expandInclude !== false && options.baseDir) {
-    const expanded = expandIncludes(sourceText, options.baseDir);
+    const expanded = expandIncludes(sourceText, options.baseDir, options.includeTextOverrides);
     sourceText = expanded.text;
+    includeLineMap = expanded.lineMap;
     for (const err of expanded.errors) {
+      const lineNo = Math.max(0, Math.min(err.mainLine, originalLines.length - 1));
+      const lineText = originalLines[lineNo] ?? "";
       diagnostics.push({
         severity: "error",
-        message: err,
+        message: err.message,
         code: "include",
-        range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 }, offset: 0, endOffset: 0 },
+        range: {
+          start: { line: lineNo, character: 0 },
+          end: { line: lineNo, character: lineText.length },
+          offset: 0,
+          endOffset: 0,
+        },
       });
     }
   }
@@ -481,7 +501,15 @@ export function parseDocument(text: string, options: ParseOptions): DocumentAst 
       // В geometry имена зон часто совпадают с картами регистрации (GROU, CROD, GZAZI…).
       const zoneHomonym =
         frag === "geometry" && looksLikeZoneStatement(stmt.text);
-      if (isKnownMcuLabel(label) && !labelAllowedInFragment(label, frag) && !zoneHomonym) {
+      // ⚠ АГЕНТАМ: `SI dens` — кремний в MATR, не карта SI (siCardVsNuclide.ts).
+      const siSiliconHomonym =
+        label === "SI" && looksLikeNuclideLine(stmt.text);
+      if (
+        isKnownMcuLabel(label) &&
+        !labelAllowedInFragment(label, frag) &&
+        !zoneHomonym &&
+        !siSiliconHomonym
+      ) {
         const allowedFrags = fragmentsForLabel(label);
         const allowedNames = allowedFrags
           .map((f) => FRAGMENT_DISPLAY[f as keyof typeof FRAGMENT_DISPLAY] ?? f)
@@ -781,6 +809,7 @@ export function parseDocument(text: string, options: ParseOptions): DocumentAst 
     latticeElements,
     lattices,
     includes,
+    includeLineMap,
     fragments,
     diagnostics,
     cameraPresets,

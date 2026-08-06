@@ -3,8 +3,10 @@ import assert from "node:assert";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { pathToFileURL } from "url";
 import { TextDocument } from "vscode-languageserver-textdocument";
-import { analyzeDocument } from "@mcuhelper/mcu-language";
+import { analyzeDocument, clearAwLibTable, clearParameteThrTable, parseAwLib, parseParameteThr, setAwLibTable, setParameteThrTable } from "@mcuhelper/mcu-language";
+import { setAwMassMismatchesForTest } from "./awLibVerify";
 import { setCachedSolverResult } from "./solver";
 import {
   buildDocumentSymbols,
@@ -12,6 +14,7 @@ import {
   buildDocumentLinks,
   buildSemanticTokenData,
   collectDiagnostics,
+  collectDiagnosticsBundle,
   handleGetDiagnostics,
   handleGetIndex,
   handleGetSlice,
@@ -124,7 +127,7 @@ describe("serverHandlers extended", () => {
     assert.strictEqual(diags.filter((d) => d.message === solverDiag.message).length, 1);
   });
 
-  it("collectDiagnostics ignores expanded #include ghost lines", () => {
+  it("collectDiagnostics keeps main clean but exposes include diagnostics in bundle", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-diag-inc-"));
     fs.writeFileSync(path.join(dir, "frag.mcu"), "MATR 1 T=\nU235 1.E-3\nFINISH", "utf8");
     const mainText = "#include frag\nFINISH\n";
@@ -134,15 +137,86 @@ describe("serverHandlers extended", () => {
     const doc = TextDocument.create(uri, "mcunr", 1, mainText);
     const expanded = analyzeDocument(uri, mainText, 1, { baseDir: dir, expandInclude: true });
     const published = collectDiagnostics(doc);
+    const bundle = collectDiagnosticsBundle(doc);
     assert.ok(expanded.ast.diagnostics.some((d) => d.code === "matr-param-empty"));
     assert.ok(!published.some((d) => d.code === "matr-param-empty"));
+    assert.ok(published.some((d) => d.code === "include-diag"));
+    assert.ok(bundle.includeGroups.some((g) => g.diagnostics.some((d) => d.code === "matr-param-empty")));
     for (const d of published) {
       assert.ok(d.range.start.line < doc.lineCount);
     }
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it("handleGetDiagnostics matches collectDiagnostics without include ghosts", () => {
+  it("collectDiagnostics treats include as part of unified variant (EQU from include)", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-diag-equ-"));
+    try {
+      fs.writeFileSync(path.join(dir, "consts.mcu"), "EQU DENSU = 1.0E-3\n", "utf8");
+      const mainText = ["PIN", "#include consts", "MATR 1", "U235 DENSU", "FINISH"].join("\n");
+      const mainPath = path.join(dir, "main.mcu");
+      fs.writeFileSync(mainPath, mainText, "utf8");
+      const uri = `file:///${mainPath.replace(/\\/g, "/")}`;
+      const doc = TextDocument.create(uri, "mcunr", 1, mainText);
+      const diags = collectDiagnostics(doc);
+      assert.ok(
+        !diags.some((d) => d.code === "matr-nuclide-conc" && /DENSU/i.test(d.message)),
+        diags.map((d) => `${d.code}:${d.message}`).join(" | ") || "(none)"
+      );
+      for (const d of diags) {
+        assert.ok(d.range.start.line < doc.lineCount);
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("collectDiagnostics flags MATR empty when SIDEN from #include swallows all nuclides", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-diag-siden-"));
+    try {
+      fs.writeFileSync(path.join(dir, "confpd"), "SIDEN 1.0E-6\n", "utf8");
+      const mainText = ["PIN", "#include confpd", "MATR 1 T=300", "O 1E-10", "FINISH"].join("\n");
+      const mainPath = path.join(dir, "main.mcu");
+      fs.writeFileSync(mainPath, mainText, "utf8");
+      const uri = `file:///${mainPath.replace(/\\/g, "/")}`;
+      const doc = TextDocument.create(uri, "mcunr", 1, mainText);
+      const diags = collectDiagnostics(doc);
+      const empty = diags.filter((d) => d.code === "matr-empty");
+      assert.strictEqual(empty.length, 1, diags.map((d) => `${d.code}:${d.message}`).join(" | "));
+      assert.match(empty[0]!.message, /SIDEN/i);
+      assert.strictEqual(empty[0]!.range.start.line, 2);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("collectDiagnostics treats geometry from include as unified (zone body ref)", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-diag-geo-"));
+    try {
+      fs.writeFileSync(path.join(dir, "geo.mcu"), "GEO\nRCZ FU 0 0 0 1 10\n", "utf8");
+      const mainText = ["PIN", "#include geo", "FU :1", "FINISH", "FINISH"].join("\n");
+      const mainPath = path.join(dir, "main.mcu");
+      fs.writeFileSync(mainPath, mainText, "utf8");
+      const uri = `file:///${mainPath.replace(/\\/g, "/")}`;
+      const doc = TextDocument.create(uri, "mcunr", 1, mainText);
+      const diags = collectDiagnostics(doc);
+      assert.ok(
+        !diags.some((d) => d.code === "zone-body"),
+        diags.map((d) => `${d.code}:${d.message}`).join(" | ") || "(none)"
+      );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("collectDiagnostics reports matr-nuclide-conc when EQU name is undefined", () => {
+    const mainText = ["PIN", "MATR 1", "U235 DENSU", "FINISH"].join("\n");
+    const uri = "file:///inline-no-equ.mcu";
+    const doc = TextDocument.create(uri, "mcunr", 1, mainText);
+    const diags = collectDiagnostics(doc);
+    assert.ok(diags.some((d) => d.code === "matr-nuclide-conc" && /DENSU/i.test(d.message)));
+  });
+
+  it("handleGetDiagnostics returns main diagnostics and include groups", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-diag-get-"));
     fs.writeFileSync(path.join(dir, "frag.mcu"), "MATR 1 T=\nU235 1.E-3\nFINISH", "utf8");
     const mainText = "#include frag\nFINISH\n";
@@ -153,9 +227,46 @@ describe("serverHandlers extended", () => {
     const getDoc = (u: string) => (u === uri ? doc : undefined);
     const published = collectDiagnostics(doc);
     const payload = handleGetDiagnostics(uri, getDoc);
-    assert.equal(payload.length, published.length);
-    assert.ok(!payload.some((d) => d.code === "matr-param-empty"));
+    assert.equal(payload.diagnostics.length, published.length);
+    assert.ok(!payload.diagnostics.some((d) => d.code === "matr-param-empty"));
+    assert.ok(payload.includeGroups.some((g) => g.diagnostics.some((d) => d.code === "matr-param-empty")));
     fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("routes aw-mass-mismatch for include-only nuclide into includeGroups", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-aw-inc-"));
+    try {
+      fs.writeFileSync(path.join(dir, "mat.mcu"), "MATR 1\nCS37 1.0E-3\n", "utf8");
+      const mainText = ["PIN", "#include mat", "FINISH"].join("\n");
+      const mainPath = path.join(dir, "main.mcu");
+      fs.writeFileSync(mainPath, mainText, "utf8");
+      const uri = `file:///${mainPath.replace(/\\/g, "/")}`;
+      const doc = TextDocument.create(uri, "mcunr", 1, mainText);
+      setAwMassMismatchesForTest([
+        {
+          name: "CS37",
+          zaid: 55037,
+          awLib: 136.9,
+          iaea: 136.907,
+          delta: -0.007,
+          relDelta: 5e-5,
+          source: "livechart",
+          iaeaTarget: "Cs-137",
+        },
+      ]);
+      const bundle = collectDiagnosticsBundle(doc);
+      assert.ok(
+        !bundle.diagnostics.some((d) => d.code === "aw-mass-mismatch"),
+        "mismatch must not sit on main Problems"
+      );
+      assert.ok(
+        bundle.includeGroups.some((g) => g.diagnostics.some((d) => d.code === "aw-mass-mismatch" && /CS37/i.test(d.message))),
+        JSON.stringify(bundle.includeGroups)
+      );
+    } finally {
+      setAwMassMismatchesForTest([]);
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("handleGetSlice returns grid for trx", () => {
@@ -180,7 +291,6 @@ describe("serverHandlers extended", () => {
       mcuConstantsLibPath: "",
       enableSolverValidation: false,
       variantName: "VAR",
-      enableIaeaNuclideHover: false,
     };
     const result = await handleValidateInput(
       { uri, mcuNrPath: "mcu", variantName: "VAR" },
@@ -212,7 +322,7 @@ describe("serverHandlers extended", () => {
     const text = fs.readFileSync(path.join(fixtures, "full_variant.mcu"), "utf8");
     const uri = "file:///fixtures/full_variant.mcu";
     const index = analyzeDocument(uri, text, 1);
-    const ranges = buildFoldingRanges(index);
+    const ranges = buildFoldingRanges(index, text.split(/\r?\n/).length);
     assert.ok(ranges.some((r) => r.startLine === 0 && r.endLine >= 8));
     assert.ok(ranges.some((r) => r.startLine === 2 && r.endLine === 5));
     assert.ok(ranges.some((r) => r.startLine === 6 && r.endLine === 7));
@@ -243,7 +353,7 @@ LFIXSO 2,1
 FINISH`;
     const uri = "file:///fold-latt.mcu";
     const index = analyzeDocument(uri, text, 1);
-    const ranges = buildFoldingRanges(index);
+    const ranges = buildFoldingRanges(index, text.split(/\r?\n/).length);
     const lcellA = index.ast.statements.find((s) => /^LCELL\s+A\b/i.test(s.text))!;
     const endlA = index.ast.statements.find(
       (s) => s.label.toUpperCase() === "ENDL" && s.range.start.line > lcellA.range.start.line
@@ -326,6 +436,40 @@ FINISH ALL`;
     assert.ok(result!.summaries.materials.some((m) => m.nuclides.some((n) => n.name === "U235")));
   });
 
+  it("handleGetIndex projects #include into navigation payload", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-nav-inc-"));
+    try {
+      fs.writeFileSync(path.join(dir, "si.inc"), "SI FP1 FP2\nSIDEN 1e-6\n", "utf8");
+      const mainPath = path.join(dir, "main.mcu");
+      const text = ["PIN 0 0", "#include si.inc", "MATR 1", "U235 1e-3", "FINISH"].join("\n");
+      fs.writeFileSync(mainPath, text, "utf8");
+      const uri = pathToFileURL(mainPath).href;
+      const doc = TextDocument.create(uri, "mcunr", 1, text);
+      const getDoc = (u: string) => (u === uri ? doc : undefined);
+      const result = handleGetIndex(uri, getDoc);
+      assert.ok(result);
+      assert.ok(Array.isArray(result!.includes));
+      assert.strictEqual(result!.includes!.length, 1);
+      assert.strictEqual(result!.includes![0]!.path, "si.inc");
+      assert.strictEqual(result!.includes![0]!.fragment, "physical");
+      assert.strictEqual(result!.includes![0]!.range.start.line, 1);
+      assert.strictEqual(result!.includes![0]!.exists, true);
+
+      const si = result!.statements?.find((s) => s.label.toUpperCase() === "SI");
+      assert.ok(!si, "SI from include must not appear in nav statements");
+
+      const matr = result!.statements?.find((s) => s.label.toUpperCase() === "MATR");
+      assert.ok(matr);
+      assert.strictEqual(matr!.range.start.line, 2, "MATR stays on main line");
+
+      const pinFrag = result!.fragments?.find((f) => f.id === "physical");
+      assert.ok(pinFrag);
+      assert.ok(pinFrag!.endLine < 20, "fragment end should be remapped to main lines, not expanded");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("slimSummariesForIndex drops ordinary nuclides above soft limit but keeps sum-isotope", () => {
     const materials = Array.from({ length: 100 }, (_, i) => ({
       number: i + 1,
@@ -367,13 +511,45 @@ FINISH ALL`;
     assert.ok(result!.sumIsotopeMarks!.some((m) => m.name.toUpperCase() === "FP1"));
   });
 
+  it("handleGetIndex returns stableIsotopeMarks without overriding sum-isotope priority", () => {
+    setAwLibTable(
+      parseAwLib(`
+CS33  55133 132.905451
+CS37  55137 136.907089
+`)
+    );
+    setParameteThrTable(
+      parseParameteThr(`
+LONGLIFE ISOTOPES
+LIST
+Cs-133  551330   133.
+Cs-137  551370   137.      3.000E+00 y
+stop
+`)
+    );
+    try {
+      const text = ["PIN", "SI CS33", "MATR 1", "CS33 1e-4", "CS37 1e-6", "FINISH"].join("\n");
+      const uri = "file:///stable-marks.mcu";
+      const doc = TextDocument.create(uri, "mcunr", 1, text);
+      const getDoc = (u: string) => (u === uri ? doc : undefined);
+      const result = handleGetIndex(uri, getDoc);
+      assert.ok(result);
+      assert.ok(Array.isArray(result!.stableIsotopeMarks));
+      assert.ok(result!.stableIsotopeMarks!.some((m) => m.name.toUpperCase() === "CS33"));
+      assert.ok(!result!.stableIsotopeMarks!.some((m) => m.name.toUpperCase() === "CS37"));
+      assert.ok(result!.sumIsotopeMarks!.some((m) => m.name.toUpperCase() === "CS33"));
+    } finally {
+      clearParameteThrTable();
+      clearAwLibTable();
+    }
+  });
+
   it("handleValidateInput without document returns error", async () => {
     const settings = {
       mcuNrPath: "",
       mcuConstantsLibPath: "",
       enableSolverValidation: false,
       variantName: "VAR",
-      enableIaeaNuclideHover: false,
     };
     const result = await handleValidateInput(
       { uri: "file:///missing", mcuNrPath: "", variantName: "" },
@@ -438,7 +614,6 @@ FINISH ALL`;
         mcuConstantsLibPath: "y",
         enableSolverValidation: false,
         variantName: "burnup",
-        enableIaeaNuclideHover: false,
       };
       const result = await handleRunMcuStep(
         {
@@ -455,7 +630,9 @@ FINISH ALL`;
       );
       assert.ok(result.ok);
       assert.ok(result.finCopiedPath);
+      assert.ok(result.lstPath);
       assert.strictEqual(fs.readFileSync(result.finCopiedPath!, "utf8"), "FIN BODY\n");
+      assert.match(result.lstPath!, /burnup\.lst$/i);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }

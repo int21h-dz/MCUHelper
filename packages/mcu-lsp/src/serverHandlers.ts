@@ -11,13 +11,26 @@ import {
   resolveIncludeFilePath,
   resolveIncludeFileUri,
   collectSumIsotopeMarks,
+  getParameteThrForMcuNuclide,
+  expandIncludes,
+  mapExpandedLineToMain,
+  mapMainLineToExpanded,
+  remapRangeToMainDocument,
+  resolveExpandedLineLocation,
+  normalizeIncludeFsKey,
   type DocumentIndex,
   type DiagnosticMessage,
+  type IncludeLineMapEntry,
+  type IncludeTextOverrides,
 } from "@mcuhelper/mcu-language";
+import { fileURLToPath } from "url";
 import { isGeoBodyLabel } from "@mcuhelper/mcu-schema";
 import { buildScene, buildSliceGrid, queryPoint } from "@mcuhelper/mcu-geometry";
 import type { SliceAxis } from "@mcuhelper/mcu-geometry";
 import { SymbolInformation, SymbolKind, Diagnostic, DiagnosticSeverity, FoldingRange, FoldingRangeKind, DocumentLink } from "vscode-languageserver";
+import { collectAwLibMassDiagnostics, collectAwLibMissingDiagnostics } from "./awLibVerify";
+import { collectDefaultPhyMissingDiagnostics } from "./defaultPhyVerify";
+import { collectHalfLifeMismatchDiagnostics } from "./parameteThrVerify";
 import {
   collectMcuRunResult,
   getCachedSolverResult,
@@ -39,7 +52,36 @@ export interface McuServerSettings {
   mcuConstantsLibPath: string;
   enableSolverValidation: boolean;
   variantName: string;
-  enableIaeaNuclideHover: boolean;
+}
+
+/** Провайдер текстов открытых include-буферов для expandIncludes (ключ normalizeIncludeFsKey). */
+let includeTextOverridesProvider: (() => IncludeTextOverrides | undefined) | undefined;
+
+export function setIncludeTextOverridesProvider(
+  provider: (() => IncludeTextOverrides | undefined) | undefined
+): void {
+  includeTextOverridesProvider = provider;
+}
+
+/** Собрать overrides из открытых TextDocument (file: URI). */
+export function buildIncludeTextOverridesFromDocs(
+  docs: Iterable<{ uri: string; getText: () => string }>
+): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const doc of docs) {
+    if (!doc.uri.startsWith("file:")) continue;
+    try {
+      const fsPath = fileURLToPath(doc.uri);
+      map.set(normalizeIncludeFsKey(fsPath), doc.getText());
+    } catch {
+      /* ignore non-file */
+    }
+  }
+  return map;
+}
+
+function currentIncludeTextOverrides(): IncludeTextOverrides | undefined {
+  return includeTextOverridesProvider?.();
 }
 
 export function uriToFsPath(uri: string): string {
@@ -59,7 +101,17 @@ export function uriToBaseDir(uri: string): string {
   return path.dirname(uriToFsPath(uri));
 }
 
-export function toLspDiagnostic(d: DiagnosticMessage): Diagnostic {
+export function toLspDiagnostic(d: DiagnosticMessage, documentUri?: string): Diagnostic {
+  const relatedInformation =
+    d.related && documentUri
+      ? d.related.map((r) => ({
+          message: r.message,
+          location: {
+            uri: documentUri,
+            range: { start: r.range.start, end: r.range.end },
+          },
+        }))
+      : undefined;
   return {
     severity:
       d.severity === "error"
@@ -71,6 +123,7 @@ export function toLspDiagnostic(d: DiagnosticMessage): Diagnostic {
     range: { start: d.range.start, end: d.range.end },
     code: d.code,
     source: "mcuhelper",
+    relatedInformation,
   };
 }
 
@@ -89,6 +142,27 @@ function isDataRowLabel(label: string): boolean {
     /^F-?\d+/i.test(label)
   );
 }
+
+export type NavStatementPayload = {
+  label: string;
+  text: string;
+  fragment: DocumentIndex["ast"]["statements"][number]["fragment"];
+  range: {
+    start: { line: number; character: number };
+    end: { line: number; character: number };
+  };
+};
+
+export type NavIncludePayload = {
+  path: string;
+  uri?: string;
+  exists?: boolean;
+  fragment: DocumentIndex["ast"]["statements"][number]["fragment"];
+  range: {
+    start: { line: number; character: number };
+    end: { line: number; character: number };
+  };
+};
 
 /** Statements для панели «Навигация» — без тел/зон/нуклидов MATR/CONT/EQU (иначе JSON сотни МБ). */
 export function selectNavStatements(index: DocumentIndex): Array<{
@@ -126,20 +200,118 @@ export function selectNavStatements(index: DocumentIndex): Array<{
   return out;
 }
 
-/** Единая точка получения индекса: version-cache в analyzeDocument + проверка version. */
+function fragmentIdAtExpandedLine(
+  index: DocumentIndex,
+  expandedLine: number
+): DocumentIndex["ast"]["statements"][number]["fragment"] {
+  for (const f of index.ast.fragments) {
+    if (expandedLine >= f.startLine && expandedLine <= f.endLine) return f.id;
+  }
+  let best: DocumentIndex["ast"]["statements"][number]["fragment"] = "physical";
+  let bestDist = Number.POSITIVE_INFINITY;
+  for (const stmt of index.ast.statements) {
+    const dist = Math.abs(stmt.range.start.line - expandedLine);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = stmt.fragment;
+    }
+  }
+  return best;
+}
+
+/** Перенос span фрагмента из expanded в строки main-редактора. */
+export function remapFragmentSpanForEditor(
+  fragment: DocumentIndex["ast"]["fragments"][number],
+  lineMap: IncludeLineMapEntry[] | undefined
+): DocumentIndex["ast"]["fragments"][number] {
+  if (!lineMap?.length) return fragment;
+  const startLine = mapExpandedLineToMain(lineMap, fragment.startLine);
+  let endLine: number | null = null;
+  for (let line = fragment.endLine; line >= fragment.startLine; line--) {
+    const mapped = mapExpandedLineToMain(lineMap, line);
+    if (mapped != null) {
+      endLine = mapped;
+      break;
+    }
+  }
+  if (startLine == null || endLine == null) return fragment;
+  return { ...fragment, startLine, endLine: Math.max(startLine, endLine) };
+}
+
+/**
+ * Карты навигации только из main (не из тела `#include`), в координатах редактора.
+ * Содержимое include в панели не показываем — только директивы через `projectNavIncludes`.
+ */
+export function projectNavStatements(index: DocumentIndex): NavStatementPayload[] {
+  const lineMap = index.ast.includeLineMap;
+  const out: NavStatementPayload[] = [];
+  for (const stmt of selectNavStatements(index)) {
+    const loc = resolveExpandedLineLocation(lineMap, stmt.range.start.line);
+    if (loc.kind !== "main") continue;
+    const range = remapRangeToMainDocument(stmt.range, lineMap) ?? {
+      start: { line: loc.line, character: stmt.range.start.character },
+      end: { line: loc.line, character: stmt.range.end.character },
+    };
+    out.push({
+      label: stmt.label,
+      text: stmt.text,
+      fragment: stmt.fragment,
+      range: {
+        start: { line: range.start.line, character: range.start.character },
+        end: { line: range.end.line, character: range.end.character },
+      },
+    });
+  }
+  return out;
+}
+
+/** `#include` для панели «Навигация» — директива в main + fragment. */
+export function projectNavIncludes(index: DocumentIndex): NavIncludePayload[] {
+  const lineMap = index.ast.includeLineMap;
+  return index.ast.includes.map((inc) => {
+    const expanded = mapMainLineToExpanded(lineMap, inc.range.start.line);
+    return {
+      path: inc.path,
+      uri: inc.uri,
+      exists: inc.exists,
+      fragment: fragmentIdAtExpandedLine(index, expanded),
+      range: {
+        start: { line: inc.range.start.line, character: inc.range.start.character },
+        end: { line: inc.range.end.line, character: inc.range.end.character },
+      },
+    };
+  });
+}
+
+export { mapExpandedLineToMain, remapRangeToMainDocument };
+
+function clampFoldingRangesToDocument(ranges: FoldingRange[], lineCount: number): FoldingRange[] {
+  if (lineCount <= 0) return [];
+  const last = lineCount - 1;
+  return ranges
+    .map((r) => ({
+      ...r,
+      startLine: Math.max(0, Math.min(r.startLine, last)),
+      endLine: Math.max(0, Math.min(r.endLine, last)),
+    }))
+    .filter((r) => r.endLine > r.startLine);
+}
+
+/** Единая точка получения индекса: version-cache в analyzeDocument + отпечаток include-файлов. */
 export function ensureDocumentIndex(doc: TextDocument): DocumentIndex {
   const uri = doc.uri;
   const text = doc.getText();
-  // Без #include expanded≡source — один parse на diagnostics+getIndex. С include нужен expand.
+  // Без #include expanded≡source — один parse. С include — expand + fingerprint файлов.
   const expandInclude = /#\s*include\b/i.test(text);
-  const cached = getDocumentIndex(uri, expandInclude);
-  if (cached && cached.version === doc.version) {
-    return cached;
-  }
   const t0 = performance.now();
   const textLen = text.length;
   const baseDir = uriToBaseDir(uri);
-  const index = analyzeDocument(uri, text, doc.version, { baseDir, expandInclude });
+  const includeTextOverrides = expandInclude ? currentIncludeTextOverrides() : undefined;
+  const index = analyzeDocument(uri, text, doc.version, {
+    baseDir,
+    expandInclude,
+    includeTextOverrides,
+  });
   const ms = performance.now() - t0;
   if (PROFILE_PARSE) {
     console.error(`[mcuhelper] analyzeDocument ${ms.toFixed(1)}ms uri=${uri} v=${doc.version} len=${textLen}`);
@@ -147,34 +319,290 @@ export function ensureDocumentIndex(doc: TextDocument): DocumentIndex {
   return index;
 }
 
+/** Индекс в координатах редактора (без expand) — folding/symbols, чтобы не мигала подсветка. */
+export function ensureSourceDocumentIndex(doc: TextDocument): DocumentIndex {
+  const baseDir = uriToBaseDir(doc.uri);
+  return analyzeDocument(doc.uri, doc.getText(), doc.version, { baseDir, expandInclude: false });
+}
+
 export function collectDiagnostics(
   doc: TextDocument,
   extraSolverDiags: Diagnostic[] = []
 ): Diagnostic[] {
-  const baseDir = uriToBaseDir(doc.uri);
-  // Всегда source (без expand): иначе диагностики из #include «прилипают» к строкам исходника.
-  const index = analyzeDocument(doc.uri, doc.getText(), doc.version, { baseDir, expandInclude: false });
-  const lineCount = doc.lineCount;
-  const diags = index.ast.diagnostics
-    .map(toLspDiagnostic)
-    .filter((d) => d.range.start.line < lineCount);
+  return collectDiagnosticsBundle(doc, extraSolverDiags).diagnostics;
+}
 
-  // Solver-диагностики: либо уже переданы в extra (после runMcuStep), либо из кэша.
-  // Не мержить оба источника — иначе дубли (одна и та же ошибка дважды).
+export interface McuIncludeDiagnosticGroup {
+  path: string;
+  uri: string;
+  mainIncludeLine: number;
+  diagnostics: Diagnostic[];
+}
+
+export interface McuDiagnosticsBundle {
+  diagnostics: Diagnostic[];
+  includeGroups: McuIncludeDiagnosticGroup[];
+}
+
+function mapLineMapRange(
+  lineMap: IncludeLineMapEntry[] | undefined,
+  startLine: number,
+  endLine: number
+): { uri: string; startLine: number; endLine: number; mainIncludeLine: number; path: string } | null {
+  if (!lineMap?.length) return null;
+  const start = lineMap[startLine];
+  const end = lineMap[endLine];
+  if (!start || !end) return null;
+  if (start.source !== "include" || end.source !== "include") return null;
+  if (!start.includeUri || !start.includePath || start.includeLine == null) return null;
+  if (start.includeUri !== end.includeUri) return null;
+  return {
+    uri: start.includeUri,
+    path: start.includePath,
+    startLine: start.includeLine,
+    endLine: end.includeLine ?? start.includeLine,
+    mainIncludeLine: start.mainIncludeLine ?? start.mainLine,
+  };
+}
+
+function groupIncludeDiagnostics(groups: McuIncludeDiagnosticGroup[]): McuIncludeDiagnosticGroup[] {
+  const byUri = new Map<string, McuIncludeDiagnosticGroup>();
+  for (const group of groups) {
+    const existing = byUri.get(group.uri);
+    if (existing) {
+      existing.diagnostics.push(...group.diagnostics);
+      continue;
+    }
+    byUri.set(group.uri, {
+      path: group.path,
+      uri: group.uri,
+      mainIncludeLine: group.mainIncludeLine,
+      diagnostics: [...group.diagnostics],
+    });
+  }
+  for (const group of byUri.values()) {
+    group.diagnostics.sort((a, b) =>
+      a.range.start.line !== b.range.start.line
+        ? a.range.start.line - b.range.start.line
+        : a.range.start.character - b.range.start.character
+    );
+  }
+  return [...byUri.values()].sort((a, b) =>
+    a.mainIncludeLine !== b.mainIncludeLine ? a.mainIncludeLine - b.mainIncludeLine : a.path.localeCompare(b.path)
+  );
+}
+
+/**
+ * Документ-обёртка над expanded-текстом: collect* читают строки по expanded line numbers,
+ * затем routeExpandedDiagnostic раскладывает ranges в main / includeGroups.
+ */
+export function makeExpandedDocView(
+  doc: TextDocument,
+  index: DocumentIndex
+): {
+  getText: (r: { start: { line: number; character: number }; end: { line: number; character: number } }) => string;
+  lineCount: number;
+} {
+  const lineMap = index.ast.includeLineMap;
+  if (!lineMap?.length) return doc;
+  const baseDir = uriToBaseDir(doc.uri);
+  const { text } = expandIncludes(doc.getText(), baseDir, currentIncludeTextOverrides());
+  const lines = text.split(/\r?\n/);
+  return {
+    lineCount: lines.length,
+    getText(r) {
+      const line = lines[r.start.line] ?? "";
+      const end = Math.min(r.end.character, line.length);
+      return line.slice(r.start.character, end);
+    },
+  };
+}
+
+/**
+ * Раскладка диагностики из единого expanded-AST:
+ * main-строки → Problems основного файла; include-строки → includeGroups.
+ * relatedInformation переводится в URI/строки редактора или файла include.
+ */
+function routeExpandedDiagnostic(
+  diagnostic: Diagnostic,
+  lineMap: IncludeLineMapEntry[] | undefined,
+  lineCount: number,
+  out: Diagnostic[],
+  includeGroups: McuIncludeDiagnosticGroup[],
+  documentUri?: string
+): void {
+  const startLine = diagnostic.range.start.line;
+  const endLine = diagnostic.range.end.line;
+
+  // Ошибки препроцессора #include уже в координатах main.
+  if (diagnostic.code === "include") {
+    if (startLine >= 0 && startLine < lineCount) out.push(diagnostic);
+    return;
+  }
+
+  const relatedInformation = remapRelatedInformation(
+    diagnostic.relatedInformation,
+    lineMap,
+    documentUri
+  );
+
+  const includeMapped = mapLineMapRange(lineMap, startLine, endLine);
+  if (includeMapped) {
+    includeGroups.push({
+      path: includeMapped.path,
+      uri: includeMapped.uri,
+      mainIncludeLine: includeMapped.mainIncludeLine,
+      diagnostics: [
+        {
+          ...diagnostic,
+          relatedInformation,
+          range: {
+            start: { line: includeMapped.startLine, character: diagnostic.range.start.character },
+            end: { line: includeMapped.endLine, character: diagnostic.range.end.character },
+          },
+        },
+      ],
+    });
+    return;
+  }
+
+  const mainRange = remapRangeToMainDocument(diagnostic.range, lineMap);
+  if (!mainRange) return;
+  if (mainRange.start.line < 0 || mainRange.start.line >= lineCount) return;
+  out.push({
+    ...diagnostic,
+    relatedInformation,
+    range: { start: mainRange.start, end: mainRange.end },
+  });
+}
+
+function remapRelatedInformation(
+  related: Diagnostic["relatedInformation"],
+  lineMap: IncludeLineMapEntry[] | undefined,
+  documentUri?: string
+): Diagnostic["relatedInformation"] {
+  if (!related?.length) return related;
+  const out: NonNullable<Diagnostic["relatedInformation"]> = [];
+  for (const item of related) {
+    const expandedLine = item.location.range.start.line;
+    const loc = resolveExpandedLineLocation(lineMap, expandedLine);
+    if (loc.kind === "include" && loc.uri) {
+      out.push({
+        message: item.message,
+        location: {
+          uri: loc.uri,
+          range: {
+            start: { line: loc.line, character: item.location.range.start.character },
+            end: { line: loc.line, character: item.location.range.end.character },
+          },
+        },
+      });
+      continue;
+    }
+    if (loc.kind === "main" && documentUri) {
+      out.push({
+        message: item.message,
+        location: {
+          uri: documentUri,
+          range: {
+            start: { line: loc.line, character: item.location.range.start.character },
+            end: { line: loc.line, character: item.location.range.end.character },
+          },
+        },
+      });
+      continue;
+    }
+    const mainRange = remapRangeToMainDocument(item.location.range, lineMap);
+    if (mainRange && documentUri) {
+      out.push({
+        message: item.message,
+        location: { uri: documentUri, range: { start: mainRange.start, end: mainRange.end } },
+      });
+    }
+  }
+  return out.length > 0 ? out : undefined;
+}
+
+export function collectDiagnosticsBundle(
+  doc: TextDocument,
+  extraSolverDiags: Diagnostic[] = []
+): McuDiagnosticsBundle {
+  // Единый разбор варианта: #include встраивается, семантика как у MCU после препроцессора.
+  // Координаты редактора — через includeLineMap (main vs файл include).
+  const index = ensureDocumentIndex(doc);
+  const lineMap = index.ast.includeLineMap;
+  const lineCount = doc.lineCount;
+  const out: Diagnostic[] = [];
+  const includeGroups: McuIncludeDiagnosticGroup[] = [];
+
+  for (const diagMsg of index.ast.diagnostics) {
+    routeExpandedDiagnostic(toLspDiagnostic(diagMsg, doc.uri), lineMap, lineCount, out, includeGroups, doc.uri);
+  }
+
+  // Solver-диагностики уже в координатах main (remap из LST).
   const solverFromExtra = extraSolverDiags.filter((d) => d.range.start.line < lineCount);
-  let out: Diagnostic[];
   if (solverFromExtra.length > 0) {
-    out = [...diags, ...solverFromExtra];
+    out.push(...solverFromExtra);
   } else {
     const cached = getCachedSolverResult(index.hash);
     if (cached) {
-      diags.push(
-        ...cached.diagnostics.map(toLspDiagnostic).filter((d) => d.range.start.line < lineCount)
+      out.push(
+        ...cached.diagnostics.map((d) => toLspDiagnostic(d)).filter((d) => d.range.start.line < lineCount)
       );
     }
-    out = diags;
   }
-  return out;
+
+  // AW/THR: полный expanded AST + чтение строк из expanded view; routing через lineMap.
+  const expandedView = makeExpandedDocView(doc, index);
+  for (const d of collectAwLibMissingDiagnostics(expandedView, index.ast)) {
+    routeExpandedDiagnostic(d, lineMap, lineCount, out, includeGroups, doc.uri);
+  }
+  for (const d of collectDefaultPhyMissingDiagnostics(expandedView, index.ast)) {
+    routeExpandedDiagnostic(d, lineMap, lineCount, out, includeGroups, doc.uri);
+  }
+  for (const d of collectAwLibMassDiagnostics(expandedView, index.ast.materials)) {
+    routeExpandedDiagnostic(d, lineMap, lineCount, out, includeGroups, doc.uri);
+  }
+  for (const d of collectHalfLifeMismatchDiagnostics(expandedView, index.ast.materials)) {
+    routeExpandedDiagnostic(d, lineMap, lineCount, out, includeGroups, doc.uri);
+  }
+
+  const grouped = groupIncludeDiagnostics(includeGroups);
+  for (const group of grouped) {
+    if (group.diagnostics.length === 0) continue;
+    const errCount = group.diagnostics.filter((d) => d.severity === DiagnosticSeverity.Error).length;
+    const warnCount = group.diagnostics.length - errCount;
+    const parts: string[] = [];
+    if (errCount > 0) parts.push(`${errCount} ошибок`);
+    if (warnCount > 0) parts.push(`${warnCount} предупреждений`);
+    const includeNode = index.ast.includes.find((inc) => inc.range.start.line === group.mainIncludeLine);
+    const range = includeNode
+      ? {
+          start: { line: includeNode.range.start.line, character: includeNode.range.start.character },
+          end: { line: includeNode.range.end.line, character: includeNode.range.end.character },
+        }
+      : {
+          start: { line: group.mainIncludeLine, character: 0 },
+          end: { line: group.mainIncludeLine, character: 1 },
+        };
+    out.push({
+      severity: errCount > 0 ? DiagnosticSeverity.Error : DiagnosticSeverity.Warning,
+      message: `В ${group.path}: ${parts.join(", ") || `${group.diagnostics.length} диагностик`}`,
+      code: "include-diag",
+      source: "mcuhelper",
+      range,
+      relatedInformation: group.diagnostics.slice(0, 20).map((d) => ({
+        location: { uri: group.uri, range: d.range },
+        message: d.message,
+      })),
+    });
+  }
+  out.sort((a, b) =>
+    a.range.start.line !== b.range.start.line
+      ? a.range.start.line - b.range.start.line
+      : a.range.start.character - b.range.start.character
+  );
+  return { diagnostics: out, includeGroups: grouped };
 }
 
 export interface McuDiagnosticPayload {
@@ -188,6 +616,18 @@ export interface McuDiagnosticPayload {
   };
 }
 
+export interface McuIncludeDiagnosticPayload {
+  path: string;
+  uri: string;
+  mainIncludeLine: number;
+  diagnostics: McuDiagnosticPayload[];
+}
+
+export interface McuDiagnosticsResponse {
+  diagnostics: McuDiagnosticPayload[];
+  includeGroups: McuIncludeDiagnosticPayload[];
+}
+
 function lspDiagnosticCode(code: Diagnostic["code"]): string | undefined {
   if (code == null) return undefined;
   if (typeof code === "string" || typeof code === "number") return String(code);
@@ -195,21 +635,36 @@ function lspDiagnosticCode(code: Diagnostic["code"]): string | undefined {
   return obj.value != null ? String(obj.value) : undefined;
 }
 
-/** Диагностики только по тексту открытого файла (без развёрнутого #include). */
+/** Диагностики единого варианта (#include развёрнут); include → отдельная группа. */
 export function handleGetDiagnostics(
   uri: string,
   getDoc: (uri: string) => TextDocument | undefined,
   extraSolverDiags: Diagnostic[] = []
-): McuDiagnosticPayload[] {
+): McuDiagnosticsResponse {
   const doc = getDoc(uri);
-  if (!doc) return [];
-  return collectDiagnostics(doc, extraSolverDiags).map((d) => ({
-    severity: d.severity ?? DiagnosticSeverity.Error,
-    message: d.message,
-    code: lspDiagnosticCode(d.code),
-    source: d.source ?? "mcuhelper",
-    range: d.range,
-  }));
+  if (!doc) return { diagnostics: [], includeGroups: [] };
+  const bundle = collectDiagnosticsBundle(doc, extraSolverDiags);
+  return {
+    diagnostics: bundle.diagnostics.map((d) => ({
+      severity: d.severity ?? DiagnosticSeverity.Error,
+      message: d.message,
+      code: lspDiagnosticCode(d.code),
+      source: d.source ?? "mcuhelper",
+      range: d.range,
+    })),
+    includeGroups: bundle.includeGroups.map((group) => ({
+      path: group.path,
+      uri: group.uri,
+      mainIncludeLine: group.mainIncludeLine,
+      diagnostics: group.diagnostics.map((d) => ({
+        severity: d.severity ?? DiagnosticSeverity.Error,
+        message: d.message,
+        code: lspDiagnosticCode(d.code),
+        source: d.source ?? "mcuhelper",
+        range: d.range,
+      })),
+    })),
+  };
 }
 
 export function buildSemanticTokenData(doc: TextDocument): number[] {
@@ -398,19 +853,33 @@ function buildLatticeFoldingRanges(index: DocumentIndex): FoldingRange[] {
   return ranges;
 }
 
-export function buildFoldingRanges(index: DocumentIndex): FoldingRange[] {
+export function buildFoldingRanges(index: DocumentIndex, documentLineCount?: number): FoldingRange[] {
+  const lineMap = index.ast.includeLineMap;
   const ranges: FoldingRange[] = [];
   for (const fragment of index.ast.fragments) {
-    if (fragment.endLine <= fragment.startLine) continue;
+    const startLine = mapExpandedLineToMain(lineMap, fragment.startLine);
+    const endLine = mapExpandedLineToMain(lineMap, fragment.endLine);
+    if (startLine == null || endLine == null || endLine <= startLine) continue;
     ranges.push({
-      startLine: fragment.startLine,
-      endLine: fragment.endLine,
+      startLine,
+      endLine,
       kind: FoldingRangeKind.Region,
     });
   }
-  ranges.push(...buildMaterialFoldingRanges(index));
-  ranges.push(...buildLatticeFoldingRanges(index));
-  return ranges.sort((a, b) => a.startLine - b.startLine || a.endLine - b.endLine);
+  for (const r of buildMaterialFoldingRanges(index)) {
+    const startLine = mapExpandedLineToMain(lineMap, r.startLine);
+    const endLine = mapExpandedLineToMain(lineMap, r.endLine);
+    if (startLine == null || endLine == null || endLine <= startLine) continue;
+    ranges.push({ ...r, startLine, endLine });
+  }
+  for (const r of buildLatticeFoldingRanges(index)) {
+    const startLine = mapExpandedLineToMain(lineMap, r.startLine);
+    const endLine = mapExpandedLineToMain(lineMap, r.endLine);
+    if (startLine == null || endLine == null || endLine <= startLine) continue;
+    ranges.push({ ...r, startLine, endLine });
+  }
+  const sorted = ranges.sort((a, b) => a.startLine - b.startLine || a.endLine - b.endLine);
+  return documentLineCount != null ? clampFoldingRangesToDocument(sorted, documentLineCount) : sorted;
 }
 
 export function buildDocumentLinks(index: DocumentIndex, documentUri: string): DocumentLink[] {
@@ -453,6 +922,26 @@ export function slimSummariesForIndex<T extends DocumentIndex["summaries"]>(summ
   };
 }
 
+function collectStableIsotopeMarks(index: DocumentIndex) {
+  const out: Array<{
+    name: string;
+    concentration: string;
+    range: DocumentIndex["ast"]["materials"][number]["nuclides"][number]["range"];
+  }> = [];
+  for (const mat of index.ast.materials) {
+    for (const n of mat.nuclides) {
+      const thr = getParameteThrForMcuNuclide(n.name);
+      if (!thr || thr.hasHalfLife) continue;
+      out.push({
+        name: n.name,
+        concentration: n.density,
+        range: n.range,
+      });
+    }
+  }
+  return out;
+}
+
 export function handleGetIndex(
   args: string | { uri: string; line?: number; character?: number },
   getDoc: (uri: string) => TextDocument | undefined
@@ -467,29 +956,41 @@ export function handleGetIndex(
   let editorContext: { line: number; character: number; scope: string } | undefined;
 
   if (line != null && line >= 0) {
-    const scope = resolveScopeAtLine(index.ast.statements, line);
+    const expandedLine = mapMainLineToExpanded(index.ast.includeLineMap, line);
+    const scope = resolveScopeAtLine(index.ast.statements, expandedLine);
     const char = character ?? Number.MAX_SAFE_INTEGER;
     editorContext = { line, character: char, scope };
-    summaries.constants = listVisibleConstants(index.ast.constants, scope, line, char);
+    summaries.constants = listVisibleConstants(index.ast.constants, scope, expandedLine, char);
   }
 
-  /** Компактный список для decorations — не зависит от slim nuclides. */
-  const sumIsotopeMarks = collectSumIsotopeMarks(index.ast).map((m) => ({
-    name: m.name,
-    concentration: m.concentration,
-    range: m.range,
-    reasons: m.reasons,
-  }));
+  /** Компактный список для decorations — не зависит от slim nuclides.
+   * При #include ranges в expanded-координатах → remap только на строки main, иначе decorations
+   * красят чужие строки и подсветка мерцает. */
+  const lineMap = index.ast.includeLineMap;
+  const sumIsotopeMarks = collectSumIsotopeMarks(index.ast).flatMap((m) => {
+    const range = remapRangeToMainDocument(m.range, lineMap);
+    if (!range) return [];
+    return [{ name: m.name, concentration: m.concentration, range, reasons: m.reasons }];
+  });
+  const stableIsotopeMarks = collectStableIsotopeMarks(index).flatMap((m) => {
+    const range = remapRangeToMainDocument(m.range, lineMap);
+    if (!range) return [];
+    return [{ name: m.name, concentration: m.concentration, range }];
+  });
 
   summaries = slimSummariesForIndex(summaries);
-  const statements = selectNavStatements(index);
+  const statements = projectNavStatements(index);
+  const includes = projectNavIncludes(index);
+  const fragments = index.ast.fragments.map((f) => remapFragmentSpanForEditor(f, lineMap));
   return {
     summaries,
-    fragments: index.ast.fragments,
+    fragments,
     statements,
+    includes,
     hash: index.hash,
     editorContext,
     sumIsotopeMarks,
+    stableIsotopeMarks,
   };
 }
 
@@ -759,6 +1260,8 @@ export async function handleRunMcuStep(
   /** После успешного Run/Final: путь к копии NAME.FIN рядом с исходником. */
   finCopiedPath?: string;
   finOverwritten?: boolean;
+  /** Путь к NAME.LST в temp-run (для открытия в редакторе). */
+  lstPath?: string;
 }> {
   const doc = getDoc(args.uri);
   if (!doc) return { ok: false, message: "Document not open" };
@@ -797,6 +1300,7 @@ export async function handleRunMcuStep(
       sourceFsPath,
       finCopiedPath,
       finOverwritten,
+      lstPath: result.lstPath,
     };
   }
 
@@ -891,6 +1395,7 @@ export async function handleRunMcuStep(
     runDir,
     mcuNrPath,
     sourceFsPath,
+    lstPath: result.lstPath,
   };
 }
 
@@ -904,9 +1409,6 @@ export function applyServerSettings(
     target.enableSolverValidation = cfg.enableSolverValidation;
   }
   if (typeof cfg.variantName === "string") target.variantName = cfg.variantName;
-  if (typeof cfg.enableIaeaNuclideHover === "boolean") {
-    target.enableIaeaNuclideHover = cfg.enableIaeaNuclideHover;
-  }
 }
 
 export function syncSettingsFromInitialize(

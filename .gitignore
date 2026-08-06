@@ -5,6 +5,9 @@ node_modules/
 **/dist/
 extension/server/
 extension/vendor/
+extension/README.md
+extension/media/Promo.gif
+extension/media/Thenx.png
 release/
 
 # Coverage
@@ -27,3 +30,4 @@ RUNTEST/
 *:Zone.Identifier
 *:Zone.Identifier:$DATA
 **/*:Zone.Identifier*
+test/fixtures/default.phy

@@ -2,6 +2,7 @@ import type { DiagnosticMessage, DocumentAst, SourceRange, StatementNode } from 
 import { buildScopedVars } from "./constantScope";
 import { resolveNuclideConcentration } from "./materialDensity";
 import { getCardArgSpec, MODS_VALUES } from "./schemaBridge";
+import { isSiCardListPrefix } from "./siCardVsNuclide";
 
 const NUCLIDE_OPTIONAL_PARAMS = new Set(["ACE", "MODS", "DTEM", "PHT"]);
 const DENSITY_RE = /^[\d.Ee+-]+$/;
@@ -18,8 +19,9 @@ const NUCLIDE_LINE_EXCLUDED_HEADS = new Set([
   "DELN", "NEUT", "EGRC", "KEFF", "RCT", "ZRCT", "ORCT", "MRCT", "ENERG", "ENERGY",
   "ACEPT", "ACERR", "PHOT", "WPHO", "IWPHN", "EGPH", "ELEC", "EGEL", "PSIN", "PSGR",
   "MATFIL", "MATPRN", "SIPRN", "DEFPRN", "MATWGT", "MATREP",
-  // Суммарный изотоп / PIN (UserGuide §8.5) — иначе `SIDEN 1` маскируется под `nuclide dens`.
-  // SI намеренно не здесь: в MATR бывает нуклид кремния `SI dens` (см. isSiCardListPrefix).
+  // ⚠ АГЕНТАМ: SINOT/SIDEN — всегда карты. SI намеренно НЕ здесь:
+  // в MATR бывает нуклид кремния `SI dens` (см. siCardVsNuclide.ts / isSiCardListPrefix).
+  // Не добавляйте SI в этот Set — иначе кремний потеряет dens-hints и signature help.
   "SINOT", "SIDEN", "ICE", "CPM", "CPMEND",
 ]);
 
@@ -47,23 +49,6 @@ function isOptionalParamTokenOrPrefix(token: string, allowBarePrefix: boolean): 
   if (!allowBarePrefix || !/^[A-Za-z]+$/.test(token)) return false;
   const upper = token.toUpperCase();
   return OPTIONAL_PARAM_KEYS.some((k) => k.startsWith(upper));
-}
-
-/** Плотность нуклида: число / sci / выражение; имена вроде FP1 — это list карты SI. */
-function looksLikeNuclideDensToken(token: string): boolean {
-  if (DENSITY_RE.test(token)) return true;
-  return /^[+\-.(0-9]/.test(token);
-}
-
-/**
- * Карта SI list vs нуклид SI dens.
- * `SI FP1` / `SI ` → карта; `SI 1.1E-2` → нуклид.
- * EQU-имя как dens (SI CONC) ошибочно уйдёт в карту — редкий кейс.
- */
-function isSiCardListPrefix(tokens: string[]): boolean {
-  if (tokens[0]?.toUpperCase() !== "SI") return false;
-  if (tokens.length === 1) return true;
-  return !looksLikeNuclideDensToken(tokens[1]);
 }
 
 export function isNuclideCompositionLinePrefix(prefix: string): boolean {

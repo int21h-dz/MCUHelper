@@ -1,5 +1,9 @@
-/** IAEA LiveChart label (U-235) → имя MCU-NR (U235). */
+import { awLibNameFromIaeaLabel } from "./awLib";
+
+/** IAEA LiveChart label (U-235 / Cs-133) → имя MCU-NR (U235 / CS33 при AW.LIB). */
 export function iaeaLabelToMcuNuclide(label: string): string {
+  const fromLib = awLibNameFromIaeaLabel(label);
+  if (fromLib) return fromLib;
   const m = label.trim().match(/^([A-Za-z]{1,2})-(\d+)$/);
   if (!m) return label.replace(/-/g, "").toUpperCase();
   return m[1].toUpperCase() + m[2];

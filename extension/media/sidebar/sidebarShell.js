@@ -29,6 +29,11 @@
     vscode.setState({ expandedGroups: serialized });
   }
 
+  /**
+   * CSV групп диагностики (id → текст). Не кладём в HTML-атрибуты — там ломаются переводы строк.
+   */
+  const groupCopyCsv = {};
+
   function esc(s) {
     if (!s) return "";
     return String(s)
@@ -151,10 +156,23 @@
             esc(node.description) +
             "</div></div>"
           : "";
+    const actionBtn =
+      node.action && node.action.command
+        ? '<button type="button" class="mcu-diag-action-btn" data-action="run-command" data-command="' +
+          esc(node.action.command) +
+          '" data-args="' +
+          esc(JSON.stringify(node.action.args || null)) +
+          '" title="' +
+          esc(node.action.title || node.action.label) +
+          '">' +
+          esc(node.action.label) +
+          "</button>"
+        : "";
     return (
       '<div class="mcu-card mcu-nav-card' +
       (clickable ? " leaf-clickable" : "") +
       (node.muted ? " mcu-muted" : "") +
+      (actionBtn ? " mcu-nav-card-with-action" : "") +
       '" data-uri="' +
       esc(node.uri || "") +
       '" data-range="' +
@@ -172,6 +190,7 @@
       '<span class="mcu-card-title">' +
       esc(line) +
       "</span>" +
+      actionBtn +
       detail +
       "</div>"
     );
@@ -188,6 +207,15 @@
     const iconPart = diagGroup
       ? ""
       : '<span class="mcu-module-icon mcu-module-icon-mat">' + esc(pill) + "</span>";
+    if (node.copyCsv && node.id) {
+      groupCopyCsv[node.id] = node.copyCsv;
+    }
+    const csvBtn =
+      node.copyCsv && node.id
+        ? '<button type="button" class="mcu-diag-csv-btn" data-action="copy-csv" data-group-id="' +
+          esc(node.id) +
+          '" title="Копировать группу в буфер (CSV)">CSV</button>'
+        : "";
     return (
       '<div class="mcu-accordion mcu-nav-group' +
       (diagGroup ? " mcu-diag-group" : "") +
@@ -206,6 +234,7 @@
       esc(node.label) +
       "</span>" +
       marker +
+      csvBtn +
       "</div>" +
       '<div class="mcu-accordion-body"><div class="mcu-card-grid">' +
       renderTreeNodes(node.children) +
@@ -472,8 +501,23 @@
         e.stopPropagation();
         toggleNode(accordion);
       });
+      header.querySelectorAll("[data-action=copy-csv]").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          const gid = btn.getAttribute("data-group-id");
+          const text = gid ? groupCopyCsv[gid] : "";
+          if (!text) return;
+          vscode.postMessage({
+            type: "copyText",
+            text,
+            notify: "Группа «Сверка изотопов» скопирована в CSV",
+          });
+        });
+      });
       header.addEventListener("click", (e) => {
         if (e.target.closest("[data-action=toggle]")) return;
+        if (e.target.closest("[data-action=copy-csv]")) return;
         toggleNode(accordion);
       });
     });
@@ -484,6 +528,7 @@
 
     root.querySelectorAll(".mcu-nav-card.leaf-clickable").forEach((row) => {
       row.addEventListener("click", (e) => {
+        if (e.target.closest("[data-action=run-command]")) return;
         e.stopPropagation();
         const uri = row.getAttribute("data-uri");
         const rangeStr = row.getAttribute("data-range");
@@ -493,6 +538,22 @@
         } catch (_) {
           /* ignore */
         }
+      });
+    });
+
+    root.querySelectorAll("[data-action=run-command]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        const command = btn.getAttribute("data-command");
+        if (!command) return;
+        let args = null;
+        try {
+          args = JSON.parse(btn.getAttribute("data-args") || "null");
+        } catch (_) {
+          args = null;
+        }
+        vscode.postMessage({ type: "runCommand", command, args });
       });
     });
   }
@@ -521,6 +582,7 @@
         '<div class="mcu-empty">Нет данных в текущем файле</div></div>';
       return;
     }
+    for (const key of Object.keys(groupCopyCsv)) delete groupCopyCsv[key];
     const accent = I.panelAccent(state.panel);
     const searchPart = panelHasSearch(state.panel) ? navSearchHtml() : "";
     root.innerHTML =

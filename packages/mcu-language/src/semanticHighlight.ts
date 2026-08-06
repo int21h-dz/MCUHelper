@@ -1,6 +1,7 @@
 import type { DocumentAst } from "./ast";
 import { lexDocument, type Token } from "./lexer";
 import { isKnownMcuLabel } from "./schemaBridge";
+import { isSiSumIsotopeCardLine, isSumIsotopeCardLine } from "./siCardVsNuclide";
 import { looksLikeZoneStatement } from "./zoneStatement";
 
 export type SemanticHighlightKind = "card" | "body" | "zone" | "nuclide" | "number" | "comment";
@@ -18,6 +19,7 @@ const BODY_KEYS = new Set([
   "TRC", "ARB", "SBOX", "SHEX", "HEXG", "QUAD", "TRANSF", "UPOLY",
 ]);
 
+// ⚠ АГЕНТАМ: SI здесь — только карта list (`SI FP1`), не кремний `SI dens` (см. siCardVsNuclide.ts).
 const PIN_ISOTOPE_CARDS = new Set(["SI", "ICE", "CPM", "NEUT", "DELN", "EGRC"]);
 
 function isExcludedNuclideLikeLine(text: string): boolean {
@@ -42,6 +44,8 @@ function isMaterialNuclideLine(text: string): boolean {
   const label = parts[0].toUpperCase();
   const second = parts[1] ?? "";
   if (!/^[+-]?(\d+\.?\d*|\.\d+)([Ee][+-]?\d+)?$/.test(second)) return false;
+  // ⚠ АГЕНТАМ: кремний `SI dens` — нуклид, даже если SI есть в каталоге карт.
+  if (label === "SI" && !isSiSumIsotopeCardLine(text)) return true;
   // PTYPE 1, ORCT 0 — карты регистрации, не нуклиды
   if (isKnownMcuLabel(label) && !/[.Ee]/.test(second)) return false;
   return true;
@@ -51,6 +55,8 @@ function isPinIsotopeListLine(text: string): boolean {
   if (!looksLikeNuclideLine(text)) return false;
   const parts = text.trim().split(/\s+/);
   if (parts.length < 2) return false;
+  // SI dens (кремний) — не PIN-list карта.
+  if (parts[0]!.toUpperCase() === "SI" && !isSiSumIsotopeCardLine(text)) return false;
   return PIN_ISOTOPE_CARDS.has(parts[0].toUpperCase()) && /^[A-Za-z]+\d+$/.test(parts[1]);
 }
 
@@ -65,6 +71,9 @@ function classifyLineStart(text: string, fragment: string | null): SemanticHighl
   if (isMaterialNuclideLine(text)) return "nuclide";
 
   if (isPinIsotopeListLine(text)) return "card";
+
+  // ⚠ АГЕНТАМ: `SI dens` не красить как card через isKnownMcuLabel("SI").
+  if (label === "SI" && !isSumIsotopeCardLine(text)) return "nuclide";
 
   if (isKnownMcuLabel(label) && !(fragment === "geometry" && looksLikeZoneStatement(text))) {
     return "card";

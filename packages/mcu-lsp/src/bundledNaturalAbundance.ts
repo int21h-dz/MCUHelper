@@ -117,6 +117,14 @@ export const BUNDLED_NATURAL_ABUNDANCE: Record<string, BundledIsotopeAbundance[]
     { mass: 94, abundance: 17.38, label: "Zr-94" },
     { mass: 96, abundance: 2.8, label: "Zr-96" },
   ],
+  Hf: [
+    { mass: 174, abundance: 0.16, label: "Hf-174" },
+    { mass: 176, abundance: 5.26, label: "Hf-176" },
+    { mass: 177, abundance: 18.6, label: "Hf-177" },
+    { mass: 178, abundance: 27.28, label: "Hf-178" },
+    { mass: 179, abundance: 13.62, label: "Hf-179" },
+    { mass: 180, abundance: 35.08, label: "Hf-180" },
+  ],
   W: [
     { mass: 180, abundance: 0.12, label: "W-180" },
     { mass: 182, abundance: 26.5, label: "W-182" },
@@ -132,7 +140,7 @@ export const BUNDLED_NATURAL_ABUNDANCE: Record<string, BundledIsotopeAbundance[]
 export function bundledNaturalAbundanceMap(): Map<string, BundledIsotopeAbundance[]> {
   const map = new Map<string, BundledIsotopeAbundance[]>();
   for (const [key, list] of Object.entries(BUNDLED_NATURAL_ABUNDANCE)) {
-    map.set(key, list.map((iso) => ({ ...iso })));
+    map.set(key.toUpperCase(), list.map((iso) => ({ ...iso })));
   }
   return map;
 }

@@ -10,6 +10,7 @@ const RUN_COMMAND_ALLOWLIST = new Set([
   "mcuhelper.continueCalculation",
   "mcuhelper.finalOutput",
   "mcuhelper.configureSolver",
+  "mcuhelper.editDefaultPhy",
 ]);
 
 function pathBasename(doc: vscode.TextDocument): string {
@@ -99,6 +100,17 @@ export class RunPanelViewProvider implements vscode.WebviewViewProvider {
     const editor = vscode.window.activeTextEditor;
     const hasDoc = !!editor && isMcunrDocument(editor.document);
 
+    const short = (p: string, n = 42) => {
+      const t = p.trim();
+      if (!t) return "не задан";
+      return t.length <= n ? t : "…" + t.slice(-(n - 1));
+    };
+    // Рядом с шестерёнкой в заголовке (title bar) — VS Code не даёт динамический tooltip у view/title.
+    this.view.description =
+      mcuNrPath || constantsLibPath
+        ? `exe: ${short(mcuNrPath)} · lib: ${short(constantsLibPath)}`
+        : "пути не заданы";
+
     this.view.webview.postMessage({
       type: "status",
       hasDoc,
@@ -106,6 +118,7 @@ export class RunPanelViewProvider implements vscode.WebviewViewProvider {
       mcuNrPath,
       constantsLibPath,
       pathsReady: Boolean(mcuNrPath && constantsLibPath),
+      hasConstantsLib: Boolean(constantsLibPath),
     });
   }
 }

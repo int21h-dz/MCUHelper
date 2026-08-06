@@ -132,7 +132,19 @@ export interface LatticeNode {
 export interface IncludeNode {
     kind: "include";
     path: string;
+    fsPath?: string;
+    uri?: string;
+    exists?: boolean;
     range: SourceRange;
+}
+export interface IncludeLineMapEntry {
+    source: "main" | "include" | "marker";
+    mainLine: number;
+    mainIncludeLine?: number;
+    includePath?: string;
+    includeFsPath?: string;
+    includeUri?: string;
+    includeLine?: number;
 }
 export interface StatementNode {
     kind: "statement";
@@ -153,6 +165,7 @@ export interface DocumentAst {
     latticeElements: LatticeElementNode[];
     lattices: LatticeNode[];
     includes: IncludeNode[];
+    includeLineMap?: IncludeLineMapEntry[];
     fragments: FragmentSpan[];
     diagnostics: DiagnosticMessage[];
     cameraPresets: CameraPreset[];

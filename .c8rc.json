@@ -15,6 +15,7 @@
     "extension/dist/extension.js",
     "extension/dist/sidebarView.js",
     "extension/dist/geometryPanel.js",
+    "extension/dist/defaultPhyPanel.js",
     "extension/dist/templateInsert.js",
     "extension/dist/expandNaturalIsotope.js",
     "extension/dist/contentDetect.js",

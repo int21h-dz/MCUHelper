@@ -15,7 +15,12 @@ import {
   type FragmentId,
 } from "@mcuhelper/mcu-schema";
 import type { DocumentIndex } from "@mcuhelper/mcu-language";
-import { formatTotalHistoriesEstimate, getTotalHistoriesEstimate, resolveIncludeFileUri } from "@mcuhelper/mcu-language";
+import {
+  formatTotalHistoriesEstimate,
+  getTotalHistoriesEstimate,
+  resolveIncludeFileUri,
+  remapRangeToMainDocument,
+} from "@mcuhelper/mcu-language";
 import { formatBurnupLoadHover, formatVolCardHover, formatSourceSpectrumHover, findSourceSpectrumAtLine, getBurnupLoadAnalysis } from "@mcuhelper/mcu-language";
 import {
   CompletionItem,
@@ -383,17 +388,35 @@ export function getDefinition(
   const word = wordAtPosition(line, pos.character);
   if (!word) return null;
 
+  const lineMap = index.ast.includeLineMap;
+  const asEditorDef = (range: import("@mcuhelper/mcu-language").SourceRange) => {
+    const mapped = remapRangeToMainDocument(range, lineMap);
+    if (mapped) return { uri: index.uri, range: { ...range, start: mapped.start, end: mapped.end } };
+    const entry = lineMap?.[range.start.line];
+    if (entry?.source === "include" && entry.includeUri != null && entry.includeLine != null) {
+      return {
+        uri: entry.includeUri,
+        range: {
+          ...range,
+          start: { line: entry.includeLine, character: range.start.character },
+          end: { line: entry.includeLine, character: range.end.character },
+        },
+      };
+    }
+    return null;
+  };
+
   const c = index.ast.constants.find((x) => x.name.toUpperCase() === word.toUpperCase());
-  if (c) return { uri: index.uri, range: c.range };
+  if (c) return asEditorDef(c.range);
 
   const body = index.ast.bodies.find((b) => b.name.toUpperCase() === word.toUpperCase());
-  if (body) return { uri: index.uri, range: body.range };
+  if (body) return asEditorDef(body.range);
 
   const zone = index.ast.zones.find((z) => z.name.toUpperCase() === word.toUpperCase());
-  if (zone) return { uri: index.uri, range: zone.range };
+  if (zone) return asEditorDef(zone.range);
 
   const mat = index.ast.materials.find((m) => m.number === parseInt(word.replace(/\D/g, ""), 10));
-  if (mat) return { uri: index.uri, range: mat.range };
+  if (mat) return asEditorDef(mat.range);
 
   return null;
 }

@@ -96,16 +96,13 @@ describe("serverHandlers integration", () => {
       mcuConstantsLibPath: "",
       enableSolverValidation: false,
       variantName: "NAME",
-      enableIaeaNuclideHover: true,
     };
     syncSettingsFromInitialize(settings, {
       mcuNrPath: "/bin/mcu",
       variantName: "TEST",
-      enableIaeaNuclideHover: false,
     });
     assert.strictEqual(settings.mcuNrPath, "/bin/mcu");
     assert.strictEqual(settings.variantName, "TEST");
-    assert.strictEqual(settings.enableIaeaNuclideHover, false);
     applyServerSettings(settings, { enableSolverValidation: true });
     assert.strictEqual(settings.enableSolverValidation, true);
   });

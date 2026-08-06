@@ -35,6 +35,19 @@ if errorlevel 1 goto :fail
 if not exist "extension\vendor\mcu-schema" mkdir "extension\vendor\mcu-schema"
 xcopy /E /I /Y "packages\mcu-schema\dist\*" "extension\vendor\mcu-schema\" >nul
 if errorlevel 1 goto :fail
+if not exist "extension\vendor\mcu-language" mkdir "extension\vendor\mcu-language"
+copy /Y "packages\mcu-language\dist\defaultPhy.js" "extension\vendor\mcu-language\defaultPhy.js" >nul
+copy /Y "packages\mcu-language\dist\encodingDetect.js" "extension\vendor\mcu-language\encodingDetect.js" >nul
+copy /Y "packages\mcu-language\dist\detect.js" "extension\vendor\mcu-language\detect.js" >nul
+if errorlevel 1 goto :fail
+rem README + images for VS Code Details (vsce looks next to package.json)
+copy /Y "README.md" "extension\README.md" >nul
+if errorlevel 1 goto :fail
+if not exist "extension\media" mkdir "extension\media"
+copy /Y "media\Promo.gif" "extension\media\Promo.gif" >nul
+if errorlevel 1 goto :fail
+copy /Y "media\Thenx.png" "extension\media\Thenx.png" >nul
+if errorlevel 1 goto :fail
 
 echo.
 echo [5/7] Bump version (release + package.json)...

@@ -9,6 +9,7 @@ import {
   buildMcuIniVariantPath,
   findLstPath,
   copyVariantIntoRunDir,
+  copyIncludesIntoRunDir,
   prepareMcuRunFiles,
   ensureTrailingPathSep,
   mcuModeToStepKey,
@@ -55,6 +56,79 @@ describe("solver", () => {
     assert.strictEqual(e22!.range.start.line, 21); // 22-1
     assert.ok(e51);
     assert.strictEqual(e51!.range.start.line, 50); // 51-1
+  });
+
+  it("parseLstFile maps error :58/:55 material to nuclide/material (not error code as line)", () => {
+    const lst = [
+      " BEGIN OF PIN MODULE.",
+      " error  :58 in card   MATR material           15",
+      " the following nuclides are not found in default.phy:",
+      " HF81",
+      " error  :55 in card MATR   material           25",
+      " material is empty (check SI, SINOT, SIDEN, if any).",
+      " error  :55 in card END    material           34",
+      " material is empty (check SI, SINOT, SIDEN, if any).",
+      " END OF PIN MODULE.",
+      " ERRORS FOUND. PHYSICAL MODULE INPUT IS STOPPED.",
+    ].join("\n");
+    const diags = parseLstFile(lst, "t.lst");
+    assert.strictEqual(diags.length, 3);
+    assert.ok(diags.every((d) => d.severity === "error"));
+    assert.ok(diags.every((d) => d.range.start.line === 0)); // код ≠ строка
+    const e58 = diags.find((d) => d.code === "mcu-error-58");
+    assert.ok(e58);
+    assert.match(e58!.message, /material 15/i);
+    assert.match(e58!.message, /HF81/);
+    const e55 = diags.filter((d) => d.code === "mcu-error-55");
+    assert.strictEqual(e55.length, 2);
+    assert.ok(e55.some((d) => /material 25/i.test(d.message) && /empty/i.test(d.message)));
+    assert.ok(e55.some((d) => /material 34/i.test(d.message) && /empty/i.test(d.message)));
+  });
+
+  it("remapSolverDiagnosticsToSource maps material/nuclide LST errors onto MATR deck", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-lst-mat-"));
+    try {
+      const source = path.join(dir, "deck");
+      fs.writeFileSync(
+        source,
+        [
+          "PIN",
+          "MATR 15 T=1000",
+          "U235 1.0E-2",
+          "HF81  1.05E-4",
+          "O 1.0",
+          "MATR 25 T=300",
+          "O 1E-10",
+          "MATR 34",
+          "O 1.0E-10",
+          "END",
+          "FINISH",
+        ].join("\n"),
+        "utf8"
+      );
+      const raw = parseLstFile(
+        [
+          " error  :58 in card   MATR material           15",
+          " the following nuclides are not found in default.phy:",
+          " HF81",
+          " error  :55 in card MATR   material           25",
+          " material is empty (check SI, SINOT, SIDEN, if any).",
+          " error  :55 in card END    material           34",
+          " material is empty (check SI, SINOT, SIDEN, if any).",
+        ].join("\n"),
+        "x.lst"
+      );
+      const diags = remapSolverDiagnosticsToSource(raw, source);
+      const e58 = diags.find((d) => d.code === "mcu-error-58")!;
+      assert.strictEqual(e58.range.start.line, 3); // HF81 line
+      assert.ok(e58.range.start.character >= 0);
+      const e25 = diags.find((d) => /material 25/i.test(d.message))!;
+      assert.strictEqual(e25.range.start.line, 5); // MATR 25 header
+      const e34 = diags.find((d) => /material 34/i.test(d.message))!;
+      assert.strictEqual(e34.range.start.line, 7); // MATR 34 header
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("parseLstFile keeps range at 0 for errors without line number", () => {
@@ -118,6 +192,93 @@ describe("solver", () => {
     assert.strictEqual(diags.length, 1);
     assert.strictEqual(diags[0].severity, "error");
     assert.ok(diags[0].message.includes("confpd"));
+  });
+
+  it("parseLstFile treats any 'absent' line as error", () => {
+    const diags = parseLstFile("  Some data file is absent on disk\n", "t.lst");
+    assert.strictEqual(diags.length, 1);
+    assert.strictEqual(diags[0].severity, "error");
+    assert.ok(diags[0].message.includes("absent"));
+  });
+
+  it("parseLstFile detects VESTA MODS absent in library", () => {
+    const lst = [
+      "BEGIN of FIMTOEN Submodule",
+      "Attempting to open temporary file:",
+      "y:\\MDB650/TMPDAT/OQQQHYH_100.VSM",
+      "VST_GOVESTM. Element O    with MODS HYH_ is absent in library",
+      "END   of FIMTOEN Submodule",
+    ].join("\n");
+    const diags = parseLstFile(lst, "test.lst");
+    assert.strictEqual(diags.length, 1);
+    assert.strictEqual(diags[0].severity, "error");
+    assert.ok(diags[0].message.includes("absent in library"));
+    assert.ok(diags[0].message.includes("Element O"));
+  });
+
+  it("remapSolverDiagnosticsToSource maps absent-library to DEF line", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-mods-"));
+    try {
+      const source = path.join(tmp, "v.mcu");
+      fs.writeFileSync(
+        source,
+        [
+          "PIN 1 0",
+          "DEF H1 ACE=E70 MODS=HYH DTEM=1.0 PHT=TVC",
+          "DEF O  ACE=E70 MODS=HYH DTEM=1.0 PHT=TVC",
+          "MATR 1",
+          "O 4.3760E-02",
+          "FINISH",
+        ].join("\n"),
+        "utf8"
+      );
+      const diags = remapSolverDiagnosticsToSource(
+        [
+          {
+            severity: "error",
+            message: "VST_GOVESTM. Element O    with MODS HYH_ is absent in library",
+            code: "mcu-solver",
+            range: {
+              start: { line: 0, character: 0 },
+              end: { line: 0, character: 1 },
+              offset: 0,
+              endOffset: 1,
+            },
+          },
+        ],
+        source
+      );
+      assert.strictEqual(diags[0].range.start.line, 2);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("remapSolverDiagnosticsToSource maps absent-library to nuclide line without DEF", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-mods2-"));
+    try {
+      const source = path.join(tmp, "v.mcu");
+      fs.writeFileSync(source, ["PIN 1 0", "MATR 1", "O 4.3760E-02 MODS=HYH", "FINISH"].join("\n"), "utf8");
+      const diags = remapSolverDiagnosticsToSource(
+        [
+          {
+            severity: "error",
+            message: "Element O with MODS HYH_ is absent in library",
+            code: "mcu-solver",
+            range: {
+              start: { line: 0, character: 0 },
+              end: { line: 0, character: 1 },
+              offset: 0,
+              endOffset: 1,
+            },
+          },
+        ],
+        source
+      );
+      assert.strictEqual(diags[0].range.start.line, 2);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 
   it("remapSolverDiagnosticsToSource maps include errors to #include line", () => {
@@ -284,6 +445,59 @@ describe("solver", () => {
       assert.strictEqual(ini[2], "i");
       // исходник на месте — артефакты MCU пойдут в runDir, не рядом с source
       assert.ok(fs.existsSync(source));
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("prepareMcuRunFiles copies #include files into runDir", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-inc-copy-"));
+    try {
+      const runDir = path.join(tmp, ".mcuhelper-runs", "958");
+      fs.mkdirSync(runDir, { recursive: true });
+      fs.writeFileSync(path.join(tmp, "confpd"), "SI N, O\nSIDEN 1.0E-4\n", "utf8");
+      fs.mkdirSync(path.join(tmp, "frag"), { recursive: true });
+      fs.writeFileSync(path.join(tmp, "frag", "geo.mcu"), "RCZ FU 0 0 0 1 10\n", "utf8");
+      const source = path.join(tmp, "958");
+      fs.writeFileSync(
+        source,
+        ["PIN", "#include confpd", "#include frag/geo.mcu", "FINISH"].join("\n"),
+        "utf8"
+      );
+      prepareMcuRunFiles({
+        workingDir: runDir,
+        variantName: "958",
+        constantsLibPath: "Y:\\MDB650",
+        sourceFsPath: source,
+        stepKey: "a",
+      });
+      assert.ok(fs.existsSync(path.join(runDir, "958")));
+      assert.strictEqual(
+        fs.readFileSync(path.join(runDir, "confpd"), "utf8"),
+        "SI N, O\nSIDEN 1.0E-4\n"
+      );
+      assert.strictEqual(
+        fs.readFileSync(path.join(runDir, "frag", "geo.mcu"), "utf8"),
+        "RCZ FU 0 0 0 1 10\n"
+      );
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("copyIncludesIntoRunDir also copies under bare directive name when resolved via .mcu", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-inc-ext-"));
+    try {
+      const runDir = path.join(tmp, "run");
+      fs.mkdirSync(runDir, { recursive: true });
+      fs.writeFileSync(path.join(tmp, "confpd.mcu"), "SI N\n", "utf8");
+      const source = path.join(tmp, "main.mcu");
+      fs.writeFileSync(source, "#include confpd\nFINISH\n", "utf8");
+      const copied = copyIncludesIntoRunDir(runDir, source);
+      assert.ok(copied.some((p) => /confpd/i.test(p)));
+      assert.ok(fs.existsSync(path.join(runDir, "confpd.mcu")));
+      assert.ok(fs.existsSync(path.join(runDir, "confpd")));
+      assert.strictEqual(fs.readFileSync(path.join(runDir, "confpd"), "utf8"), "SI N\n");
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }

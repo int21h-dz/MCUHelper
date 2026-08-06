@@ -98,6 +98,15 @@ export function decodeBuffer(buf: Buffer, encoding: McuEncodingId = "utf8"): str
   return normalizeNewlines(iconv.decode(buf, encoding));
 }
 
+/** Запись текста в буфер той же кодировки, что при открытии файла. */
+export function encodeBuffer(text: string, encoding: McuEncodingId = "utf8"): Buffer {
+  const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  if (encoding === "utf8") {
+    return Buffer.from(normalized, "utf8");
+  }
+  return iconv.encode(normalized, encoding);
+}
+
 export function detectEncodingFromBuffer(buf: Buffer): EncodingDetectionResult {
   const { body, bomEncoding } = stripBom(buf);
 

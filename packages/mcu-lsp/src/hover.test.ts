@@ -2,8 +2,10 @@ import { describe, it } from "node:test";
 import assert from "node:assert";
 import * as fs from "fs";
 import * as path from "path";
+import * as os from "os";
+import { pathToFileURL } from "url";
 import { TextDocument } from "vscode-languageserver-textdocument";
-import { analyzeDocument } from "@mcuhelper/mcu-language";
+import { analyzeDocument, parseAwLib, setAwLibTable, clearAwLibTable, parseParameteThr, setParameteThrTable, clearParameteThrTable } from "@mcuhelper/mcu-language";
 import {
   wordAtPosition,
   isOnStatementKeyword,
@@ -247,6 +249,61 @@ describe("getHover", () => {
 });
 
 describe("getHoverContent", () => {
+  it("shows list-only hover on SI nuclide token", () => {
+    const text = ["PIN", "SI FP1 AM241", "MATR 1", "U235 1e-2", "FP1 1e-8", "FINISH"].join("\n");
+    const { doc, index } = openText(text);
+    const line = text.split("\n")[1]!;
+    const hover = getHoverContent(
+      doc,
+      { line: 1, character: line.indexOf("FP1") + 1 },
+      index,
+      { enableIaeaNuclide: false }
+    );
+    assert.ok(hover?.includes("Нуклид **FP1**"), hover ?? "(null)");
+    assert.ok(hover?.includes("списке карты SI"), hover ?? "(null)");
+    assert.ok(!hover?.includes("Концентрация:"), hover ?? "(null)");
+    assert.ok(!hover?.includes("Активность материала"), hover ?? "(null)");
+    assert.ok(!hover?.includes("Плотность материала"), hover ?? "(null)");
+  });
+
+  it("shows collapsible nuclide list on SI card hover", () => {
+    const text = ["PIN", "SI FP1 AM241 U235 U238", "MATR 1", "U235 1e-2", "FP1 1e-8", "FINISH"].join("\n");
+    const { doc, index } = openText(text);
+    const hover = getHoverContent(doc, { line: 1, character: 1 }, index, { enableIaeaNuclide: false });
+    assert.ok(hover?.includes("<details>"), hover ?? "(null)");
+    assert.ok(hover?.includes("<summary>Нуклиды в карте SI (4)</summary>"), hover ?? "(null)");
+    assert.ok(hover?.includes("- `FP1`"), hover ?? "(null)");
+    assert.ok(hover?.includes("- `AM241`"), hover ?? "(null)");
+  });
+
+  it("shows list-only hover on SINOT nuclide token", () => {
+    const text = ["PIN", "SINOT U235 U238", "MATR 1", "U235 1e-2", "U238 2e-2", "FINISH"].join("\n");
+    const { doc, index } = openText(text);
+    const line = text.split("\n")[1]!;
+    const hover = getHoverContent(
+      doc,
+      { line: 1, character: line.indexOf("U238") + 1 },
+      index,
+      { enableIaeaNuclide: false }
+    );
+    assert.ok(hover?.includes("Нуклид **U238**"), hover ?? "(null)");
+    assert.ok(hover?.includes("списке карты SINOT"), hover ?? "(null)");
+    assert.ok(!hover?.includes("Концентрация:"), hover ?? "(null)");
+    assert.ok(!hover?.includes("Активность материала"), hover ?? "(null)");
+    assert.ok(!hover?.includes("Плотность материала"), hover ?? "(null)");
+  });
+
+  it("SI dens (silicon) is nuclide hover, not SI card", () => {
+    const text = ["PIN", "MATR 1", "SI 1.1E-2", "FINISH"].join("\n");
+    const { doc, index } = openText(text);
+    const hover = getHoverContent(doc, { line: 2, character: 1 }, index, { enableIaeaNuclide: false });
+    assert.ok(hover?.includes("Нуклид **SI**"), hover ?? "(null)");
+    assert.ok(hover?.includes("материале"), hover ?? "(null)");
+    assert.ok(!hover?.includes("Нуклиды суммарного изотопа"), hover ?? "(null)");
+    assert.ok(!hover?.includes("SI list"), hover ?? "(null)");
+    assert.ok(!hover?.includes("<details>"), hover ?? "(null)");
+  });
+
   it("shows sum-isotope reason on SI-listed nuclide", () => {
     const text = ["PIN", "SI FP1", "MATR 1", "U235 1e-2", "FP1 1e-8", "FINISH"].join("\n");
     const { doc, index } = openText(text);
@@ -296,6 +353,47 @@ describe("getHoverContent", () => {
     assert.ok(hover!.includes("концентрация") || hover!.includes("яд/см"));
   });
 
+  it("suggests add-to-sum-isotope when AW.LIB loaded and nuclide missing", () => {
+    setAwLibTable(parseAwLib("H 1001 1.00784\n"));
+    try {
+      const text = ["PIN", "MATR 1", "FP1 1.0E-10", "H 6.0E-2", "FINISH"].join("\n");
+      const { doc, index, uri } = openText(text);
+      const fp = index.ast.materials[0]!.nuclides[0]!;
+      const hover = getHoverContent(
+        doc,
+        { line: fp.range.start.line, character: 1 },
+        index,
+        { enableIaeaNuclide: false },
+        uri
+      );
+      assert.ok(hover);
+      assert.ok(hover!.includes("mcuhelper.addToSumIsotope"), hover);
+      assert.ok(hover!.includes("Добавить в суммарный изотоп"), hover);
+    } finally {
+      clearAwLibTable();
+    }
+  });
+
+  it("does not suggest add-to-sum-isotope when already in SI", () => {
+    setAwLibTable(parseAwLib("H 1001 1.00784\n"));
+    try {
+      const text = ["PIN", "SI FP1", "MATR 1", "FP1 1.0E-10", "FINISH"].join("\n");
+      const { doc, index, uri } = openText(text);
+      const fp = index.ast.materials[0]!.nuclides[0]!;
+      const hover = getHoverContent(
+        doc,
+        { line: fp.range.start.line, character: 1 },
+        index,
+        { enableIaeaNuclide: false },
+        uri
+      );
+      assert.ok(hover);
+      assert.ok(!hover!.includes("mcuhelper.addToSumIsotope"), hover);
+    } finally {
+      clearAwLibTable();
+    }
+  });
+
   it("shows approximate material density note when some nuclides are skipped", () => {
     const text = [
       "PIN 1 0",
@@ -333,6 +431,72 @@ describe("getHoverContent", () => {
     );
     assert.ok(hover?.includes("Плотность материала"));
     assert.ok(hover?.includes("6."));
+  });
+
+  it("shows AW.LIB atomic mass for CS33 (not truncated 33)", () => {
+    setAwLibTable(
+      parseAwLib(`
+CS33  55133 132.905451
+`)
+    );
+    try {
+      const text = ["PIN 1 0", "MATR 1", "CS33 1.183831e-06", "FINISH"].join("\n");
+      const { doc, index, uri } = openText(text);
+      const nucl = index.ast.materials[0]!.nuclides[0]!;
+      const hover = getHoverContent(
+        doc,
+        { line: nucl.range.start.line, character: 1 },
+        index,
+        { enableIaeaNuclide: false },
+        uri
+      );
+      assert.ok(hover?.includes("132.905451"), hover ?? "");
+      assert.ok(hover?.includes("AW.LIB"), hover ?? "");
+      assert.ok(hover?.includes("A=133"), hover ?? "");
+      assert.ok(!hover?.includes("**33** а.е.м."), hover ?? "");
+    } finally {
+      clearAwLibTable();
+    }
+  });
+
+  it("shows volumetric activity from PARAMETE.THR T½", () => {
+    setAwLibTable(
+      parseAwLib(`
+CS37  55137 136.907089
+CS33  55133 132.905452
+`)
+    );
+    setParameteThrTable(
+      parseParameteThr(`
+LONGLIFE ISOTOPES
+LIST
+Cs-137  551370   137.      3.000E+00 y
+Cs-133  551330   133.
+stop
+`)
+    );
+    try {
+      const text = ["PIN 1 0", "MATR 1", "CS37 1.0E-6", "CS33 1.0E-4", "FINISH"].join("\n");
+      const { doc, index, uri } = openText(text);
+      const nucl = index.ast.materials[0]!.nuclides.find((n) => n.name === "CS37")!;
+      const hover = getHoverContent(
+        doc,
+        { line: nucl.range.start.line, character: 1 },
+        index,
+        { enableIaeaNuclide: false },
+        uri
+      );
+      assert.ok(hover?.includes("Объёмная активность"), hover ?? "");
+      assert.ok(hover?.includes("вклад в А мат."), hover ?? "");
+      assert.ok(hover?.includes("100%"), hover ?? "");
+      assert.ok(!hover?.includes("по T½ PARAMETE.THR"), hover ?? "");
+      assert.ok(hover?.includes("Бк/см³"), hover ?? "");
+      assert.ok(hover?.includes("Активность материала"), hover ?? "");
+      assert.ok(!hover?.includes("без объёма VOL"), hover ?? "");
+    } finally {
+      clearParameteThrTable();
+      clearAwLibTable();
+    }
   });
 
   it("getHoverAsync delegates to getHoverContent", async () => {
@@ -420,5 +584,56 @@ describe("getHoverContent", () => {
     assert.ok(hover?.includes("другого модуля") || hover?.includes("недопустима"));
     assert.ok(!hover?.includes("Параметр: `dens`"));
     assert.ok(!hover?.includes("запаздывающ"));
+  });
+
+  it("hover on natural nuclide after #include uses editor line (not expanded)", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-hover-inc-"));
+    try {
+      const pad = Array.from({ length: 40 }, (_, i) => `** pad ${i}`).join("\n");
+      fs.writeFileSync(path.join(dir, "confpd.mcu"), `${pad}\nSI N, O\nSIDEN 1.0E-4\n`, "utf8");
+      const mainText = [
+        "PIN",
+        "#include confpd",
+        "** materials",
+        "MATR 1 T=480",
+        "N     4.994E-5",
+        "O     1.338E-5",
+        "U235  0.00034711",
+        "FINISH",
+      ].join("\n");
+      const mainPath = path.join(dir, "main.mcu");
+      fs.writeFileSync(mainPath, mainText, "utf8");
+      const uri = pathToFileURL(mainPath).href;
+      const doc = TextDocument.create(uri, "mcunr", 1, mainText);
+      const index = analyzeDocument(uri, mainText, 1, { baseDir: dir, expandInclude: true });
+      assert.ok(index.ast.includeLineMap?.length);
+
+      const nLine = mainText.split(/\r?\n/).findIndex((l) => /^\s*N\s+/.test(l));
+      const uLine = mainText.split(/\r?\n/).findIndex((l) => /^\s*U235\s+/.test(l));
+      assert.ok(nLine >= 0 && uLine >= 0);
+
+      const hoverN = getHoverContent(
+        doc,
+        { line: nLine, character: 0 },
+        index,
+        { enableIaeaNuclide: false },
+        uri
+      );
+      assert.ok(hoverN?.includes("Нуклид **N**"), hoverN ?? "(null)");
+      assert.ok(hoverN?.includes("4.994E-5"), hoverN ?? "(null)");
+      assert.ok(hoverN?.includes("Разложить на изотопы"), hoverN ?? "(null)");
+
+      const hoverU = getHoverContent(
+        doc,
+        { line: uLine, character: 0 },
+        index,
+        { enableIaeaNuclide: false },
+        uri
+      );
+      assert.ok(hoverU?.includes("Нуклид **U235**"), hoverU ?? "(null)");
+      assert.ok(hoverU?.includes("0.00034711"), hoverU ?? "(null)");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

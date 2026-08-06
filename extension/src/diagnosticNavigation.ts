@@ -2,13 +2,23 @@ import * as vscode from "vscode";
 import type { LanguageClient } from "vscode-languageclient/node";
 import { isMcunrDocument } from "./contentDetect";
 import type { NavTreeNode } from "./navData";
+import { ADD_TO_SUM_ISOTOPE_DIAG_CODES } from "./addToSumIsotope";
 
 /** Коды диагностик, которые выдаёт `lexDocument` в mcu-language. */
 export const LEXER_DIAGNOSTIC_CODES = new Set(["no-tabs", "line-length"]);
 
+/** Сверка AW.LIB / PARAMETE.THR с IAEA — отдельная группа в sidebar. */
+export const ISOTOPE_MISMATCH_DIAGNOSTIC_CODES = new Set([
+  "aw-mass-mismatch",
+  "aw-mass-missing",
+  "aw-mass-missing-siden",
+  "thr-halflife-mismatch",
+  "phy-missing",
+  "phy-missing-siden",
+]);
+
 export type DiagnosticFilter = "lexer" | "all";
 
-/** Ответ LSP `mcuhelper/getDiagnostics` — только исходный текст файла. */
 export interface McuDiagnosticPayload {
   severity: number;
   message: string;
@@ -18,6 +28,18 @@ export interface McuDiagnosticPayload {
     start: { line: number; character: number };
     end: { line: number; character: number };
   };
+}
+
+export interface McuIncludeDiagnosticPayload {
+  path: string;
+  uri: string;
+  mainIncludeLine: number;
+  diagnostics: McuDiagnosticPayload[];
+}
+
+export interface McuDiagnosticsResponse {
+  diagnostics: McuDiagnosticPayload[];
+  includeGroups: McuIncludeDiagnosticPayload[];
 }
 
 /** Не строить в sidebar десятки тысяч узлов. */
@@ -46,10 +68,33 @@ function payloadToDiagnostic(p: McuDiagnosticPayload): vscode.Diagnostic {
     p.range.end.line,
     p.range.end.character
   );
-  const d = new vscode.Diagnostic(range, p.message, p.severity);
+  const d = new vscode.Diagnostic(range, p.message, mapLspSeverityToVsCode(p.severity));
   if (p.code) d.code = p.code;
   d.source = p.source;
   return d;
+}
+
+/**
+ * LSP DiagnosticSeverity: Error=1 Warning=2 Info=3 Hint=4
+ * VS Code DiagnosticSeverity: Error=0 Warning=1 Info=2 Hint=3
+ * Без маппинга Warning (2) попадает в «Прочее» как Information.
+ */
+export function mapLspSeverityToVsCode(severity: number): vscode.DiagnosticSeverity {
+  switch (severity) {
+    case 1:
+      return vscode.DiagnosticSeverity.Error;
+    case 2:
+      return vscode.DiagnosticSeverity.Warning;
+    case 3:
+      return vscode.DiagnosticSeverity.Information;
+    case 4:
+      return vscode.DiagnosticSeverity.Hint;
+    case 0:
+      // уже VS Code Error (на всякий случай)
+      return vscode.DiagnosticSeverity.Error;
+    default:
+      return vscode.DiagnosticSeverity.Information;
+  }
 }
 
 /** Диагностики напрямую из LSP (без «призраков» из кэша VS Code). */
@@ -59,14 +104,32 @@ export async function fetchMcuDiagnostics(
   filter: DiagnosticFilter,
   lineCount?: number
 ): Promise<vscode.Diagnostic[]> {
-  const payload = await client.sendRequest<McuDiagnosticPayload[]>("mcuhelper/getDiagnostics", {
+  const response = await client.sendRequest<McuDiagnosticsResponse>("mcuhelper/getDiagnostics", {
     uri: uri.toString(),
   });
-  return (payload ?? [])
+  return (response?.diagnostics ?? [])
     .map(payloadToDiagnostic)
     .filter((d) => filter === "all" || LEXER_DIAGNOSTIC_CODES.has(diagnosticCode(d) ?? ""))
     .filter((d) => lineCount == null || d.range.start.line < lineCount)
     .sort(compareDiagnosticsByPosition);
+}
+
+export async function fetchMcuDiagnosticResponse(
+  client: LanguageClient,
+  uri: vscode.Uri
+): Promise<{ diagnostics: vscode.Diagnostic[]; includeGroups: Array<{ path: string; uri: string; mainIncludeLine: number; diagnostics: vscode.Diagnostic[] }> }> {
+  const response = await client.sendRequest<McuDiagnosticsResponse>("mcuhelper/getDiagnostics", {
+    uri: uri.toString(),
+  });
+  return {
+    diagnostics: (response?.diagnostics ?? []).map(payloadToDiagnostic).sort(compareDiagnosticsByPosition),
+    includeGroups: (response?.includeGroups ?? []).map((group) => ({
+      path: group.path,
+      uri: group.uri,
+      mainIncludeLine: group.mainIncludeLine,
+      diagnostics: group.diagnostics.map(payloadToDiagnostic).sort(compareDiagnosticsByPosition),
+    })),
+  };
 }
 
 function severityLabel(severity: vscode.DiagnosticSeverity): string {
@@ -75,7 +138,68 @@ function severityLabel(severity: vscode.DiagnosticSeverity): string {
   return "info";
 }
 
-/** Дерево для sidebar: группы «Ошибки» / «Предупреждения», клик — переход в редактор. */
+function isIsotopeMismatchDiag(d: vscode.Diagnostic): boolean {
+  const code = diagnosticCode(d);
+  return code != null && ISOTOPE_MISMATCH_DIAGNOSTIC_CODES.has(code);
+}
+
+/** Имя нуклида из текста предупреждения сверки. */
+export function extractIsotopeNameFromDiag(d: { message: string }): string | undefined {
+  const m =
+    d.message.match(/^(?:Атомная масса|T1\/2)\s+(\S+?):/) ??
+    d.message.match(/^Нуклид\s+(\S+)\s+отсутствует/);
+  return m?.[1];
+}
+
+function csvEscape(value: string): string {
+  if (/[",\r\n]/.test(value)) return `"${value.replace(/"/g, '""')}"`;
+  return value;
+}
+
+/**
+ * CSV группы сверки изотопов.
+ * Колонки: code,nuclide,line,column,local,iaea,delta,target,message
+ */
+export function buildIsotopeMismatchCsv(diags: readonly vscode.Diagnostic[]): string {
+  const header = "code,nuclide,line,column,local,iaea,delta,target,message";
+  const rows = diags.map((d) => {
+    const code = diagnosticCode(d) ?? "";
+    const nuclide = extractIsotopeNameFromDiag(d) ?? "";
+    const line = String(d.range.start.line + 1);
+    const column = String(d.range.start.character + 1);
+    let local = "";
+    let iaea = "";
+    let delta = "";
+    let target = "";
+    if (code === "aw-mass-mismatch") {
+      const m = d.message.match(
+        /AW\.LIB\s+([\d.]+)\s*≠\s*IAEA\s+([\d.]+).*?Δ\s*=\s*([+\-−]?[\d.eE+-]+).*?,\s*([A-Za-z]+-\d+)/
+      );
+      if (m) {
+        local = m[1]!;
+        iaea = m[2]!;
+        delta = m[3]!.replace("−", "-");
+        target = m[4]!;
+      }
+    } else if (code === "thr-halflife-mismatch") {
+      const m = d.message.match(
+        /PARAMETE\.THR\s+(.+?)\s*≠\s*IAEA\s+(.+?)\s*\(Δrel\s*=\s*([+\-−]?[\d.]+%)\s*,\s*([^)]+)\)/
+      );
+      if (m) {
+        local = m[1]!.trim();
+        iaea = m[2]!.trim();
+        delta = m[3]!.replace("−", "-");
+        target = m[4]!.trim();
+      }
+    }
+    return [code, nuclide, line, column, local, iaea, delta, target, d.message]
+      .map((c) => csvEscape(c))
+      .join(",");
+  });
+  return [header, ...rows].join("\n");
+}
+
+/** Дерево для sidebar: ошибки / сверка изотопов / прочие предупреждения. */
 export function buildDiagnosticTree(
   uri: string,
   diags: readonly vscode.Diagnostic[],
@@ -83,19 +207,33 @@ export function buildDiagnosticTree(
 ): NavTreeNode[] {
   const capped = diags.length > maxItems ? diags.slice(0, maxItems) : diags;
   const truncated = diags.length > maxItems;
-  const errors = capped.filter((d) => d.severity === vscode.DiagnosticSeverity.Error);
-  const warnings = capped.filter((d) => d.severity === vscode.DiagnosticSeverity.Warning);
+  /** По коду, не по severity — LSP/VS Code severity легко перепутать. */
+  const isotope = capped.filter((d) => isIsotopeMismatchDiag(d));
+  const isotopeIds = new Set(isotope);
+  const errors = capped.filter(
+    (d) => !isotopeIds.has(d) && d.severity === vscode.DiagnosticSeverity.Error
+  );
+  const warnings = capped.filter(
+    (d) => !isotopeIds.has(d) && d.severity === vscode.DiagnosticSeverity.Warning
+  );
   const other = capped.filter(
-    (d) => d.severity !== vscode.DiagnosticSeverity.Error && d.severity !== vscode.DiagnosticSeverity.Warning
+    (d) =>
+      !isotopeIds.has(d) &&
+      d.severity !== vscode.DiagnosticSeverity.Error &&
+      d.severity !== vscode.DiagnosticSeverity.Warning
   );
 
-  const toLeaf = (d: vscode.Diagnostic, index: number): NavTreeNode => {
+  const toLeaf = (d: vscode.Diagnostic, index: number, preferNameLabel = false): NavTreeNode => {
     const code = diagnosticCode(d);
     const line = d.range.start.line + 1;
     const col = d.range.start.character + 1;
-    return {
+    const name = preferNameLabel ? extractIsotopeNameFromDiag(d) : undefined;
+    const nuclideName =
+      name ??
+      (code && ADD_TO_SUM_ISOTOPE_DIAG_CODES.has(code) ? extractIsotopeNameFromDiag(d) : undefined);
+    const leaf: NavTreeNode = {
       id: `diag-${index}-${d.range.start.line}-${d.range.start.character}`,
-      label: `L${line}:${col}`,
+      label: name ?? `L${line}:${col}`,
       description: d.message,
       badges: code ? [code, severityLabel(d.severity)] : [severityLabel(d.severity)],
       uri,
@@ -104,6 +242,20 @@ export function buildDiagnosticTree(
         end: { line: d.range.end.line, character: d.range.end.character },
       },
     };
+    if (nuclideName && code && ADD_TO_SUM_ISOTOPE_DIAG_CODES.has(code)) {
+      leaf.action = {
+        id: "add-to-si",
+        label: "В SI",
+        title: "Добавить в суммарный изотоп",
+        command: "mcuhelper.addToSumIsotope",
+        args: {
+          uri,
+          line: d.range.start.line,
+          nuclideName,
+        },
+      };
+    }
+    return leaf;
   };
 
   const groups: NavTreeNode[] = [];
@@ -115,6 +267,15 @@ export function buildDiagnosticTree(
       label: "Ошибки",
       description: String(errors.length),
       children: errors.map((d) => toLeaf(d, leafIndex++)),
+    });
+  }
+  if (isotope.length > 0) {
+    groups.push({
+      id: "diag-isotope-mismatch",
+      label: "Сверка изотопов",
+      description: String(isotope.length),
+      copyCsv: buildIsotopeMismatchCsv(isotope),
+      children: isotope.map((d) => toLeaf(d, leafIndex++, true)),
     });
   }
   if (warnings.length > 0) {
@@ -162,13 +323,62 @@ export function buildDiagnosticTree(
   return groups;
 }
 
+export function buildDiagnosticTreeWithIncludes(
+  uri: string,
+  diags: readonly vscode.Diagnostic[],
+  includeGroups: readonly { path: string; uri: string; diagnostics: readonly vscode.Diagnostic[] }[],
+  maxItems = MAX_SIDEBAR_DIAGNOSTICS
+): NavTreeNode[] {
+  const groups = buildDiagnosticTree(uri, diags, maxItems);
+  const includeCount = includeGroups.reduce((sum, g) => sum + g.diagnostics.length, 0);
+  if (includeCount <= 0) return groups;
+
+  let leafIndex = 10_000;
+  const fileNodes: NavTreeNode[] = includeGroups.map((group, groupIndex) => ({
+    id: `diag-include-file-${groupIndex}`,
+    label: group.path,
+    description: String(group.diagnostics.length),
+    children: group.diagnostics.map((d) => {
+      const code = diagnosticCode(d);
+      const line = d.range.start.line + 1;
+      const col = d.range.start.character + 1;
+      return {
+        id: `diag-include-${leafIndex++}-${line}-${col}`,
+        label: `L${line}:${col}`,
+        description: d.message,
+        badges: code ? [code, severityLabel(d.severity)] : [severityLabel(d.severity)],
+        uri: group.uri,
+        range: {
+          start: { line: d.range.start.line, character: d.range.start.character },
+          end: { line: d.range.end.line, character: d.range.end.character },
+        },
+      };
+    }),
+  }));
+
+  const sourceIdx = groups.findIndex((n) => n.id === "diag-source");
+  const includeNode: NavTreeNode = {
+    id: "diag-includes",
+    label: "#include",
+    description: String(includeCount),
+    children: fileNodes,
+  };
+  if (sourceIdx >= 0) groups.splice(sourceIdx + 1, 0, includeNode);
+  else groups.unshift(includeNode);
+  return groups;
+}
+
+let diagnosticsSidebarGeneration = 0;
+
 export async function applyDiagnosticsToSidebar(
   webview: vscode.Webview,
   panelId: string,
   document: vscode.TextDocument | undefined,
   client: LanguageClient | undefined
 ): Promise<void> {
+  const generation = ++diagnosticsSidebarGeneration;
   if (!document || !isMcunrDocument(document)) {
+    if (generation !== diagnosticsSidebarGeneration) return;
     webview.postMessage({
       type: "empty",
       panel: panelId,
@@ -178,6 +388,7 @@ export async function applyDiagnosticsToSidebar(
   }
 
   if (!client) {
+    if (generation !== diagnosticsSidebarGeneration) return;
     webview.postMessage({
       type: "empty",
       panel: panelId,
@@ -186,10 +397,11 @@ export async function applyDiagnosticsToSidebar(
     return;
   }
 
-  let diags: vscode.Diagnostic[];
+  let response: { diagnostics: vscode.Diagnostic[]; includeGroups: Array<{ path: string; uri: string; mainIncludeLine: number; diagnostics: vscode.Diagnostic[] }> };
   try {
-    diags = await fetchMcuDiagnostics(client, document.uri, "all", document.lineCount);
+    response = await fetchMcuDiagnosticResponse(client, document.uri);
   } catch {
+    if (generation !== diagnosticsSidebarGeneration) return;
     webview.postMessage({
       type: "empty",
       panel: panelId,
@@ -198,7 +410,10 @@ export async function applyDiagnosticsToSidebar(
     return;
   }
 
-  if (diags.length === 0) {
+  if (generation !== diagnosticsSidebarGeneration) return;
+
+  const diags = response.diagnostics.filter((d) => d.range.start.line < document.lineCount);
+  if (diags.length === 0 && response.includeGroups.every((g) => g.diagnostics.length === 0)) {
     webview.postMessage({
       type: "empty",
       panel: panelId,
@@ -208,7 +423,7 @@ export async function applyDiagnosticsToSidebar(
   }
 
   const uri = document.uri.toString();
-  const nodes = buildDiagnosticTree(uri, diags);
+  const nodes = buildDiagnosticTreeWithIncludes(uri, diags, response.includeGroups);
   webview.postMessage({
     type: "tree",
     panel: panelId,

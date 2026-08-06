@@ -17,6 +17,7 @@
     mcuNrPath: "",
     constantsLibPath: "",
     pathsReady: false,
+    hasConstantsLib: false,
   };
 
   function esc(s) {
@@ -38,7 +39,7 @@
 
   function pathsTooltip() {
     const lines = [
-      "Пути MCU-NR (шестерёнка в заголовке · Ctrl+Alt+P)",
+      "Настроить пути MCU-NR (Ctrl+Alt+P)",
       "",
       "exe: " + (status.mcuNrPath || "не задан"),
       "MDBNR: " + (status.constantsLibPath || "не задан"),
@@ -74,6 +75,24 @@
         "continue"
       ) +
       btn("output", "Final — OUTPUT · финальная выдача", "mcuhelper.finalOutput", canRun, disabledReason, "final") +
+      btn(
+        "gear",
+        pathsTooltip(),
+        "mcuhelper.configureSolver",
+        true,
+        "",
+        "paths"
+      ) +
+      btn(
+        "table",
+        status.hasConstantsLib
+          ? "DEFAULT.PHY — банк данных MDBNR"
+          : "DEFAULT.PHY — сначала укажите путь к MDBNR",
+        "mcuhelper.editDefaultPhy",
+        status.hasConstantsLib,
+        status.hasConstantsLib ? "" : "Сначала укажите путь к библиотеке констант (Ctrl+Alt+P)",
+        "phy"
+      ) +
       '<button type="button" class="mcu-run-btn mcu-run-btn-icon-only mcu-run-thanks" data-thanks="1" title="' +
       esc("Поблагодарить — CloudTips") +
       '">' +
@@ -124,6 +143,7 @@
       mcuNrPath: msg.mcuNrPath || "",
       constantsLibPath: msg.constantsLibPath || "",
       pathsReady: !!msg.pathsReady,
+      hasConstantsLib: !!msg.hasConstantsLib || !!(msg.constantsLibPath || ""),
     };
     render();
   });

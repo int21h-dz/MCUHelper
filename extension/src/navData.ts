@@ -19,6 +19,16 @@ export interface NavTreeNode {
   uri?: string;
   range?: SourceRange;
   children?: NavTreeNode[];
+  /** CSV всей группы для кнопки «копировать» (диагностика сверки изотопов). */
+  copyCsv?: string;
+  /** Кнопка действия на листе (например «В SI»). */
+  action?: {
+    id: string;
+    label: string;
+    title?: string;
+    command: string;
+    args?: unknown;
+  };
 }
 
 export interface IndexPayload {
@@ -38,6 +48,22 @@ export interface IndexPayload {
   statements?: Array<{
     label: string;
     text: string;
+    fragment:
+      | "physical"
+      | "geometry"
+      | "source"
+      | "registration"
+      | "burnupRegistration"
+      | "trajectory"
+      | "calculationControl"
+      | "burnup";
+    range: SourceRange;
+  }>;
+  /** Директивы `#include` для панели «Навигация» (клик → строка в main). */
+  includes?: Array<{
+    path: string;
+    uri?: string;
+    exists?: boolean;
     fragment:
       | "physical"
       | "geometry"
@@ -124,6 +150,11 @@ export interface IndexPayload {
     concentration: string;
     range: SourceRange;
     reasons: string[];
+  }>;
+  stableIsotopeMarks?: Array<{
+    name: string;
+    concentration: string;
+    range: SourceRange;
   }>;
   hash?: string;
   editorContext?: {
@@ -274,37 +305,77 @@ function isFragmentChildStatement(
   return true;
 }
 
+function basenameIncludePath(incPath: string): string {
+  const norm = incPath.replace(/\\/g, "/");
+  const slash = norm.lastIndexOf("/");
+  return slash >= 0 ? norm.slice(slash + 1) : norm;
+}
+
 export function buildFragmentsTree(index: IndexPayload, uri: string): NavTreeNode[] {
   return (index.fragments ?? []).map((fragment, i) => {
     const meta = FRAGMENT_META[fragment.id];
     const startLine = fragment.startLine + 1;
     const endLine = fragment.endLine + 1;
     let inMatrBlock = false;
-    const children = (index.statements ?? [])
-      .filter((stmt) => stmt.fragment === fragment.id)
-      .flatMap((stmt, si) => {
-        const label = stmt.label.toUpperCase();
-        const keep = isFragmentChildStatement(stmt, inMatrBlock, index);
-        if (label === "MATR") {
-          inMatrBlock = true;
-        } else if (MATR_BLOCK_STOP_LABELS.has(label)) {
-          inMatrBlock = false;
-        }
-        if (!keep) return [];
-        const text = stmt.text.trim();
-        const rest = text.slice(stmt.label.length).trim();
-        const lineNum = stmt.range.start.line + 1;
-        const description = rest
-          ? `${trimPreview(rest)} · строка ${lineNum}`
-          : `строка ${lineNum}`;
-        return [{
+
+    type FragChild = { sortLine: number; node: NavTreeNode };
+
+    const children: FragChild[] = [];
+
+    for (const [ii, inc] of (index.includes ?? []).entries()) {
+      if (inc.fragment !== fragment.id) continue;
+      const lineNum = inc.range.start.line + 1;
+      const name = basenameIncludePath(inc.path);
+      const missing = inc.exists === false;
+      children.push({
+        sortLine: inc.range.start.line,
+        node: {
+          id: `include-${fragment.id}-${i}-${ii}`,
+          label: `#include ${name}`,
+          description: missing ? `файл не найден · строка ${lineNum}` : `строка ${lineNum}`,
+          badges: missing ? ["missing"] : undefined,
+          muted: missing,
+          tooltip: missing
+            ? `Файл не найден: ${inc.path}`
+            : inc.path !== name
+              ? inc.path
+              : undefined,
+          uri,
+          range: inc.range,
+        },
+      });
+    }
+
+    for (const [si, stmt] of (index.statements ?? []).entries()) {
+      if (stmt.fragment !== fragment.id) continue;
+      const label = stmt.label.toUpperCase();
+      const keep = isFragmentChildStatement(stmt, inMatrBlock, index);
+      if (label === "MATR") {
+        inMatrBlock = true;
+      } else if (MATR_BLOCK_STOP_LABELS.has(label)) {
+        inMatrBlock = false;
+      }
+      if (!keep) continue;
+      const text = stmt.text.trim();
+      const rest = text.slice(stmt.label.length).trim();
+      const lineNum = stmt.range.start.line + 1;
+      const description = rest
+        ? `${trimPreview(rest)} · строка ${lineNum}`
+        : `строка ${lineNum}`;
+      children.push({
+        sortLine: stmt.range.start.line,
+        node: {
           id: `fragstmt-${fragment.id}-${i}-${si}`,
           label: stmt.label,
           description,
           uri,
           range: stmt.range,
-        }];
+        },
       });
+    }
+
+    children.sort((a, b) => a.sortLine - b.sortLine);
+
     return {
       id: `frag-${fragment.id}-${i}`,
       label: meta?.label ?? fragment.id,
@@ -314,12 +385,16 @@ export function buildFragmentsTree(index: IndexPayload, uri: string): NavTreeNod
         start: { line: fragment.startLine, character: 0 },
         end: { line: fragment.endLine, character: 0 },
       },
-      children,
+      children: children.map((c) => c.node),
     };
   });
 }
 
-export function buildMaterialsTree(index: IndexPayload, uri: string): NavTreeNode[] {
+export function buildMaterialsTree(
+  index: IndexPayload,
+  uri: string,
+  suggestSumIsotope?: ReadonlySet<string>
+): NavTreeNode[] {
   return index.summaries.materials.map((m) => {
     const rho = formatMaterialDensity(m.massDensityGcm3);
     const vol = formatBodyVolume(m.volumeCm3);
@@ -340,15 +415,33 @@ export function buildMaterialsTree(index: IndexPayload, uri: string): NavTreeNod
       badges: badges.length ? badges : undefined,
       uri,
       range: m.range,
-      children: m.nuclides.map((n, i) => ({
-        id: `mat-${m.number}-n-${i}`,
-        label: n.name,
-        description: `${n.concentration} яд/см³`,
-        muted: Boolean(n.sumIsotope),
-        tooltip: n.sumIsotope?.reasons?.join("; "),
-        uri,
-        range: n.range,
-      })),
+      children: m.nuclides.map((n, i) => {
+        const suggestKey = `${n.range.start.line}:${n.name.toUpperCase()}`;
+        const suggest = Boolean(suggestSumIsotope?.has(suggestKey)) && !n.sumIsotope;
+        const child: NavTreeNode = {
+          id: `mat-${m.number}-n-${i}`,
+          label: n.name,
+          description: `${n.concentration} яд/см³`,
+          muted: Boolean(n.sumIsotope),
+          tooltip: n.sumIsotope?.reasons?.join("; "),
+          uri,
+          range: n.range,
+        };
+        if (suggest) {
+          child.action = {
+            id: "add-to-si",
+            label: "В SI",
+            title: "Добавить в суммарный изотоп",
+            command: "mcuhelper.addToSumIsotope",
+            args: {
+              uri,
+              line: n.range.start.line,
+              nuclideName: n.name,
+            },
+          };
+        }
+        return child;
+      }),
     };
   });
 }
@@ -563,12 +656,17 @@ export function buildLatticesTree(index: IndexPayload, uri: string): NavTreeNode
   }));
 }
 
-export function buildNavTree(viewId: NavViewId, index: IndexPayload, uri: string): NavTreeNode[] {
+export function buildNavTree(
+  viewId: NavViewId,
+  index: IndexPayload,
+  uri: string,
+  suggestSumIsotope?: ReadonlySet<string>
+): NavTreeNode[] {
   switch (viewId) {
     case "fragments":
       return buildFragmentsTree(index, uri);
     case "materials":
-      return buildMaterialsTree(index, uri);
+      return buildMaterialsTree(index, uri, suggestSumIsotope);
     case "zones":
       return buildZonesTree(index, uri);
     case "objects":

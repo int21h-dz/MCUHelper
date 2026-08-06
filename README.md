@@ -2,9 +2,9 @@
 
 **Расширение для [Visual Studio Code](https://code.visualstudio.com/download) и Language Server** для исходных данных семейства [MCU6](#о-mcu-и-mcu-nr).
 
-[`VS Code ^1.85`](https://code.visualstudio.com/download) · `Node.js` · язык `mcunr` · ~535 тестов
+[`VS Code ^1.85`](https://code.visualstudio.com/download) · `Node.js` · язык `mcunr` · ~660 тестов
 
-> **English:** MCU Helper is a VS Code extension and Language Server for editing MCU6 input decks — text files that describe materials, 3D geometry, sources, tallying, and burnup for Monte Carlo particle transport. It brings syntax highlighting, diagnostics, completions, hover documentation, sum-isotope highlighting (`SI` / `SINOT` / `SIDEN`), a module catalog, run actions for MCU-NR, and convenient navigation inside MCU input files.
+> **English:** MCU Helper is a VS Code extension and Language Server for editing MCU6 input decks — text files that describe materials, 3D geometry, sources, tallying, and burnup for Monte Carlo particle transport. It brings syntax highlighting, diagnostics, completions, hover documentation, sum-isotope highlighting (`SI` / `SINOT` / `SIDEN`), MDBNR library checks (AW.LIB / PARAMETE.THR T½ vs IAEA), a module catalog, run actions for MCU-NR, and convenient navigation inside MCU input files.
 
 ![Демонстрация MCU Helper в VS Code](media/Promo.gif)
 
@@ -17,6 +17,7 @@
 - [Возможности](#возможности)
 - [Установка](#установка)
 - [Быстрый старт](#быстрый-старт)
+- [Сверка библиотек MDBNR](#сверка-библиотек-mdbnr)
 - [Команды](#команды)
 - [Настройки](#настройки)
 - [Разработка](#разработка)
@@ -79,18 +80,21 @@ flowchart LR
   - карта в «чужом» фрагменте (`card-wrong-fragment`);
   - ссылки на несуществующие тела и зоны;
   - состав `MATR`: нуклиды, концентрации, `MODS`, дубликаты и лишние параметры;
+  - наличие нуклидов в `AW.LIB` и `DEFAULT.PHY` (MDBNR); нуклиды в `SI`/`SINOT` не требуют записи в банках;
+  - сверка `AW.LIB` (атомные массы) и `PARAMETE.THR` (**только T½**; разделы DECAY/CAPTURE/YIELD в THR не разбираются) с **IAEA LiveChart** — предупреждения `aw-mass-mismatch`, `thr-halflife-mismatch` (один раз на изотоп);
   - группы `ENERGY` / `ENERG` (монотонность, нижние границы ≥ 0);
   - физические величины ≥ 0 (температура, плотность, мощность, время, объёмы);
   - неинициализированные имена в `EQU`/`SET` и выражениях;
   - отсутствующий `#include` и ошибки солвера из `NAME.LST` после запуска
 - **Автодополнение** — все карты (~229 меток), алиасы, аргументы карт (`SUMZON`→`SUMB`…`ZONG`, `CONTEN`→`DENS`…, `CODE`→`RSTP`…), символы документа
 - **Signature Help** — подсказка активного параметра при вводе тел (`RCC`, `RCZ`, …), карт (`MATR`, `POWER`, `STEP`, `SI`/`SINOT`/`SIDEN`, …), строк нуклидов
-- **Всплывающие подсказки** — описания из UserGuide; для нуклидов — концентрация, плотность и атомная масса; опционально данные **IAEA NDS**; для `POWER`/`STEP`, `EMES`/`EPRO`, `VOL` — дополнительные расчёты и мини-отчёты
+- **Всплывающие подсказки** — описания из UserGuide; для нуклидов — концентрация, плотность, атомная масса, объёмная активность (Бк/см³) по T½ из PARAMETE.THR; данные **IAEA NDS** (природные смеси — bundled fallback без сети для частых элементов + кнопка разложения); для `POWER`/`STEP`, `EMES`/`EPRO`, `VOL` — дополнительные расчёты и мини-отчёты
 - **Суммарный изотоп** (UserGuide §8.5) — карты `SI` / `SINOT` / `SIDEN`: нуклиды входящие в суммарный изотоп подсвечиваются серым в редакторе и приглушённо в панели «Материалы»; в hover — причина пометки (список SI/SINOT или порог `SIDEN`)
 - **Автоопределение языка** `mcunr` по содержимому (`PIN`, `MATR`, `HEAD`, …)
 - **Автоопределение кодировки** — UTF-8 / Windows-1251 / CP866 / KOI8-R для legacy-файлов и `#include`
 - **Сворачивание (folding)** — фрагменты варианта, блоки `MATR`, `LCELL…ENDL` и `LATT`
-- **Кликабельный `#include`** — переход к включаемому файлу (Ctrl+Click / F12); поддерживаются `#include <path>` и `#include path` (расширения `.mcu` / `.mcunr` подставляются автоматически)
+- **`#include` — inline через CodeLens** — над строкой `#include`: **▸ Развернуть** (вставляет редактируемый блок с подсветкой `mcunr` прямо в вариант), **▾ Свернуть** (сохраняет в include-файл в исходной кодировке), **↗ Открыть** (файл с языком `mcunr`); если файла нет — создаётся пустой при развёртке/открытии; при **Save** развёрнутые блоки авто-сворачиваются; Ctrl+Click / F12 по пути; fallback `#include confpd` → `.mcu`/`.mcunr`
+- **Диагностика `#include`** — семантика единого варианта (expanded); ошибки внутри include — группа `#include` / URI файла; вложенный `#include` запрещён
 - **Выделение маркеров разделов** — `PIN`, `HEAD`, `FINISH` и др. визуально крупнее (bold + цвет + фон)
 
 ### Боковая панель MCU-NR
@@ -101,8 +105,8 @@ flowchart LR
 |---------|------------|
 | **Запуск** | Кнопки Debug / Run / Continue / Final; пути — шестерёнка в заголовке (`Ctrl+Alt+P`); «♥» — поддержка автора |
 | **Каталог** | 8 модулей варианта; карточки карт с hover; drag или клик → вставка шаблона |
-| **Диагностика** | Ошибки и предупреждения текущего файла с переходом по клику; открывается после MCU-run при ошибках LST |
-| **Навигация** | Фрагменты варианта и карты/операторы (без тел, зон, EQU/SET, CONT) |
+| **Диагностика** | Ошибки и предупреждения текущего файла; группы **`#include`** (переход в include-файл) и **«Сверка изотопов»** (AW/THR vs IAEA, экспорт CSV); открывается после MCU-run при ошибках LST |
+| **Навигация** | Фрагменты варианта, карты/операторы и `#include` (без тел, зон, EQU/SET, CONT); клик по include — к строке директивы в варианте |
 | **Материалы** | Дерево `MATR` с плотностью и группами; нуклиды суммарного изотопа — приглушённо |
 | **Константы** | Эффективный набор `EQU`/`SET` в позиции курсора (global + локальные LCELL/CELL) |
 | **Тела** | Список геометрических тел по scope |
@@ -119,10 +123,12 @@ flowchart LR
 
 | Кнопка / команда | Хоткей (по умолчанию) | Режим | Что делает |
 |------------------|----------------------|-------|------------|
-| **Debug** | `Ctrl+Alt+D` | INPUT (`i`) | Проверка входных данных; переход к первой ошибке из LST |
-| **Run** | `Ctrl+Alt+R` | CALCULATION (`a`) | Полный расчёт; при успехе копирует `NAME.FIN` рядом с вариантом и открывает |
+| **Debug** | `Ctrl+Alt+D` | INPUT (`i`) | Проверка входных данных; открывает `NAME.LST` из temp-run; переход к первой ошибке |
+| **Run** | `Ctrl+Alt+R` | CALCULATION (`a`) | Полный расчёт; копирует и открывает `NAME.FIN` рядом с вариантом; если FIN нет — открывает LST из temp-run |
 | **Continue** | `Ctrl+Alt+Shift+C` | continue (`c`) | Продолжение расчёта без очистки промежуточных файлов |
-| **Final** | `Ctrl+Alt+F` | OUTPUT (`f`) | Финальная выдача; при успехе тоже копирует и открывает `NAME.FIN` |
+| **Final** | `Ctrl+Alt+F` | OUTPUT (`f`) | Финальная выдача; копирует и открывает `NAME.FIN`; если FIN нет — LST из temp-run |
+
+Кнопка **DEFAULT.PHY** на панели «Запуск» (или команда **MCU-NR: DEFAULT.PHY (банк данных)**) открывает таблицу файла из корня MDBNR. Штатно значения по умолчанию для нуклида в расчёте переопределяют картой `DEF` в исходных данных; правка банка влияет на все варианты.
 
 При ошибках из LST автоматически открывается вкладка **Диагностика**.
 
@@ -152,15 +158,30 @@ flowchart LR
 
 > Debug / Run / Continue / Final срабатывают при активном редакторе с языком `mcunr`. Настройка путей — без этого ограничения.
 
-Рабочий каталог: `.mcuhelper-runs/<имя_варианта>/` рядом с файлом (имя варианта — из имени открытого файла). MCU запускается в интегрированном терминале; после завершения разбирается `NAME.LST` и выставляются диагностики.
+Рабочий каталог: `.mcuhelper-runs/<имя_варианта>/` рядом с файлом (имя варианта — из имени открытого файла). Туда копируются вариант и все файлы `#include`. MCU запускается в интегрированном терминале; после завершения разбирается `NAME.LST` и выставляются диагностики.
 
 ### Прочее
 
 - **MCU-NR: Разложить природный элемент на изотопы** — кнопка в hover нуклида (ICE)
+- **MCU-NR: Добавить в суммарный изотоп** — кнопка в hover и «В SI» в панелях Диагностика/Материалы для нуклидов с `aw-mass-missing` / `phy-missing` (и `-siden`); ищет карту SI/`SINOT` в том числе внутри `#include`; не превышает 200 символов code-части строки (при необходимости — continuation)
 - **MCU-NR: Определить язык по содержимому** — ручное переключение на `mcunr`
 - **MCU-NR: Определить кодировку** — повторная проверка кодировки файла
 - Встроенные настройки **cSpell** для языка `mcunr` (игнорирование имён карт и тел)
   
+---
+
+## Сверка библиотек MDBNR
+
+При заданном `mcuhelper.mcuConstantsLibPath` LSP читает `AW.LIB` и `BURN6/PARAMETE.THR` из корня MDBNR и сверяет с локальным кэшем **IAEA LiveChart** (бандл в VSIX + user-кэш `~/.mcuhelper/`; сеть — только при отсутствии данных).
+
+| Источник | Что сверяется | Диагностика в редакторе | Отчёт |
+|----------|---------------|-------------------------|-------|
+| `AW.LIB` | атомные массы | `aw-mass-mismatch`, `aw-mass-missing` | Output «MCU-NR Helper» |
+| `PARAMETE.THR` | **только T½** (LONGLIFE/SHORTLIFE) | `thr-halflife-mismatch` | Output «MCU-NR Helper» |
+| `DEFAULT.PHY` | наличие записи для нуклида MATR | `phy-missing` | — |
+
+Полный отчёт по AW/THR: **MCU-NR: Отчёт сверки библиотек (Output)** или автоматически после старта LSP. Разделы DECAY/CAPTURE/YIELD/BRANCHING в `PARAMETE.THR` расширением **не разбираются** — только периоды полураспада для hover и сверки.
+
 ---
 
 ## Установка
@@ -176,7 +197,7 @@ flowchart LR
    - или из командной строки:
 
      ```bat
-     code --install-extension release\mcuhelper-vscode-0.8.0.vsix
+     code --install-extension release\mcuhelper-vscode-0.10.0.vsix
      ```
 
 ### Из исходников (разработка)
@@ -188,6 +209,7 @@ npm run build
 
 Запуск: откройте репозиторий в VS Code → **F5** → **Extension Development Host**.
 
+*После установки расширения в панели слева должна появиться пиктограмма языка пламени, если это не так, следует проверить есть ли у расширения разрешения на работу. Для этого в **Extensions** надо найти установленное расширение **MCU-NR Helper**, кликнуть по нему и убедиться, что расширение запущено.*
 ---
 
 ## Быстрый старт
@@ -218,11 +240,12 @@ npm run build
 
 | Команда | Описание |
 |---------|----------|
-| MCU-NR: Debug (INPUT) | Проверка входа, переход к первой ошибке |
-| MCU-NR: Run (CALCULATION) | Полный расчёт; копирует `NAME.FIN` при успехе |
+| MCU-NR: Debug (INPUT) | Проверка входа; открывает LST из temp-run; переход к первой ошибке |
+| MCU-NR: Run (CALCULATION) | Полный расчёт; копирует/открывает FIN, иначе LST из temp-run |
 | MCU-NR: Continue (CALCULATION) | Продолжение расчёта |
-| MCU-NR: Final (OUTPUT) | Финальная выдача; копирует `NAME.FIN` при успехе |
+| MCU-NR: Final (OUTPUT) | Финальная выдача; копирует/открывает FIN, иначе LST из temp-run |
 | MCU-NR: Настроить пути запуска | Выбор exe и папки MDBNR (`Ctrl+Alt+P`) |
+| MCU-NR: DEFAULT.PHY (банк данных) | Таблица DEFAULT.PHY из корня MDBNR; штатно для расчёта — карта `DEF` |
 | MCU-NR: Настроить горячие клавиши запуска | Открыть Shortcuts с фильтром `mcuhelper.` |
 | MCU-NR: Действия запуска | Quick-pick всех действий запуска |
 
@@ -248,10 +271,11 @@ npm run build
 | Команда | Описание |
 |---------|----------|
 | MCU-NR: Экспорт диагностик | Вывод Problems в Output |
-| MCU-NR: Следующая диагностика | Переход к следующей LSP-диагностике |
-| MCU-NR: Предыдущая диагностика | Переход к предыдущей LSP-диагностике |
-| MCU-NR: Следующая ошибка лексера | Переход к следующей ошибке лексера |
-| MCU-NR: Предыдущая ошибка лексера | Переход к предыдущей ошибке лексера |
+| MCU-NR: Отчёт сверки библиотек (Output) | Полный отчёт AW.LIB / PARAMETE.THR (T½) vs IAEA в канал «MCU-NR Helper» |
+| MCU-NR: Следующая диагностика | Переход к следующей LSP-диагностике (`Alt+F8`) |
+| MCU-NR: Предыдущая диагностика | Переход к предыдущей LSP-диагностике (`Alt+Shift+F8`) |
+| MCU-NR: Следующая ошибка лексера | Переход к следующей ошибке лексера (`Alt+F7`) |
+| MCU-NR: Предыдущая ошибка лексера | Переход к предыдущей ошибке лексера (`Alt+Shift+F7`) |
 
 ### Утилиты
 
@@ -260,6 +284,10 @@ npm run build
 | MCU-NR: Определить язык по содержимому | Принудительно `mcunr` |
 | MCU-NR: Определить кодировку | Повторная проверка кодировки файла |
 | MCU-NR: Разложить природный элемент на изотопы | ICE-разложение из hover |
+| MCU-NR: Добавить в суммарный изотоп | Дописать нуклид в карту SI (из hover / sidebar) |
+| MCU-NR: Развернуть #include inline | CodeLens: вставить редактируемый блок include в вариант |
+| MCU-NR: Свернуть #include | CodeLens: сохранить inline-блок обратно в include-файл |
+| MCU-NR: Открыть файл #include | CodeLens: открыть include с языком `mcunr` |
 
 ---
 
@@ -271,7 +299,6 @@ npm run build
 |----------|--------------|----------|
 | `mcuhelper.mcuNrPath` | *(пусто)* | Путь к исполняемому файлу MCU-NR |
 | `mcuhelper.mcuConstantsLibPath` | *(пусто)* | Корень MDBNR (библиотека констант; в `mcu5.ini` — со слэшем в конце) |
-| `mcuhelper.enableIaeaNuclideHover` | `true` | Дополнять hover по нуклидам данными IAEA NDS |
 | `mcuhelper.autoDetectLanguage` | `true` | Определять MCU-NR по содержимому и переключать язык на `mcunr` |
 | `mcuhelper.autoDetectFromLanguages` | `plaintext`, `txt`, `ini`, … | С каких language id переключать (уже размеченные языки не трогает) |
 | `mcuhelper.autoDetectEncoding` | `true` | Определять кодировку legacy-файлов и при необходимости переоткрывать документ |
@@ -308,7 +335,7 @@ package-vsix.bat
 npm test
 ```
 
-Запускает 500+ тестов (~535) в пакетах `mcu-schema`, `mcu-language`, `mcu-geometry`, `mcu-lsp`, `extension`.
+Запускает ~660 тестов в пакетах `mcu-schema`, `mcu-language`, `mcu-geometry`, `mcu-lsp`, `extension`.
 
 ```bash
 npm run test:coverage

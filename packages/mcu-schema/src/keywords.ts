@@ -25,6 +25,9 @@ export const MCU_LABELS_BY_FRAGMENT: Record<FragmentId | "shared", readonly stri
     "EGRC",
     "SINOT",
     "SIDEN",
+    // ⚠ АГЕНТАМ: метка карты SI list (суммарный изотоп). Омоним с нуклидом кремния
+    // `SI dens` в MATR — см. mcu-language/siCardVsNuclide.ts и TextMate dens-lookahead.
+    // Не путать отображение карты и кремния; SI в каталоге карт оставлять.
     "SI",
     "ICE",
     "ICENOT",

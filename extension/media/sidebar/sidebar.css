@@ -454,6 +454,60 @@ body {
   min-width: 0;
 }
 
+.mcu-diag-csv-btn {
+  flex: 0 0 auto;
+  margin: 0 2px 0 0;
+  padding: 1px 7px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 3px;
+  background: var(--vscode-button-secondaryBackground, rgba(127, 127, 127, 0.18));
+  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+  font: inherit;
+  font-size: var(--mcu-size-xs, 11px);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  line-height: 1.5;
+}
+
+.mcu-diag-csv-btn:hover {
+  background: var(--vscode-button-secondaryHoverBackground, rgba(127, 127, 127, 0.3));
+}
+
+.mcu-diag-csv-btn:active {
+  transform: translateY(1px);
+}
+
+.mcu-diag-action-btn {
+  flex: 0 0 auto;
+  align-self: center;
+  margin: 0 4px 0 0;
+  padding: 1px 7px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 3px;
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #fff);
+  font: inherit;
+  font-size: var(--mcu-size-xs, 11px);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.mcu-diag-action-btn:hover {
+  background: var(--vscode-button-hoverBackground, #1177bb);
+}
+
+.mcu-diag-action-btn:active {
+  transform: translateY(1px);
+}
+
+.mcu-nav-card-with-action {
+  flex-wrap: wrap;
+}
+
 .mcu-diag-meta {
   margin: 4px 8px 2px;
   padding: 4px 8px;

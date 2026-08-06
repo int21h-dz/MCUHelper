@@ -4,16 +4,28 @@
   "description": "Подсветка, диагностика, hover и навигация для исходных данных MCU-NR",
   "version": "0.9.0",
   "publisher": "mcuhelper",
-  "engines": { "vscode": "^1.85.0" },
-  "categories": ["Programming Languages"],
-  "activationEvents": ["onStartupFinished"],
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "languages": [
       {
         "id": "mcunr",
-        "aliases": ["MCU-NR", "mcunr"],
-        "extensions": [".mcu", ".mcunr"],
+        "aliases": [
+          "MCU-NR",
+          "mcunr"
+        ],
+        "extensions": [
+          ".mcu",
+          ".mcunr"
+        ],
         "filenames": [],
         "configuration": "./language-configuration.json"
       }
@@ -26,23 +38,59 @@
       }
     ],
     "semanticTokenTypes": [
-      { "id": "card", "superType": "keyword", "description": "Карта MCU-NR" },
-      { "id": "body", "superType": "type", "description": "Тип геометрического тела" },
-      { "id": "zone", "superType": "function", "description": "Имя зоны или объекта" },
-      { "id": "nuclide", "superType": "property", "description": "Нуклид в составе MATR" },
-      { "id": "number", "superType": "number", "description": "Число" },
-      { "id": "comment", "superType": "comment", "description": "Комментарий" }
+      {
+        "id": "card",
+        "superType": "keyword",
+        "description": "Карта MCU-NR"
+      },
+      {
+        "id": "body",
+        "superType": "type",
+        "description": "Тип геометрического тела"
+      },
+      {
+        "id": "zone",
+        "superType": "function",
+        "description": "Имя зоны или объекта"
+      },
+      {
+        "id": "nuclide",
+        "superType": "property",
+        "description": "Нуклид в составе MATR"
+      },
+      {
+        "id": "number",
+        "superType": "number",
+        "description": "Число"
+      },
+      {
+        "id": "comment",
+        "superType": "comment",
+        "description": "Комментарий"
+      }
     ],
     "semanticTokenScopes": [
       {
         "language": "mcunr",
         "scopes": {
-          "card": ["keyword.control.mcunr"],
-          "body": ["entity.name.type.mcunr"],
-          "zone": ["entity.name.function.mcunr"],
-          "nuclide": ["entity.name.tag.mcunr"],
-          "number": ["constant.numeric.mcunr"],
-          "comment": ["comment.line.mcunr"]
+          "card": [
+            "keyword.control.mcunr"
+          ],
+          "body": [
+            "entity.name.type.mcunr"
+          ],
+          "zone": [
+            "entity.name.function.mcunr"
+          ],
+          "nuclide": [
+            "entity.name.tag.mcunr"
+          ],
+          "number": [
+            "constant.numeric.mcunr"
+          ],
+          "comment": [
+            "comment.line.mcunr"
+          ]
         }
       }
     ],
@@ -57,7 +105,7 @@
         "mcuhelper.mcuConstantsLibPath": {
           "type": "string",
           "default": "",
-          "description": "Корень MDBNR: путь к библиотекам констант (в батнике это 2-я строка mcu5.ini)"
+          "description": "Корень MDBNR: путь к библиотекам констант (2-я строка mcu5.ini). Ожидаются AW.LIB и BURN6/PARAMETE.THR (или PARAMETE.THR в корне)."
         },
         "mcuhelper.variantName": {
           "type": "string",
@@ -69,14 +117,13 @@
           "default": false,
           "description": "Автоматически запускать INPUT после правок"
         },
-        "mcuhelper.enableIaeaNuclideHover": {
-          "type": "boolean",
-          "default": true,
-          "description": "Дополнять hover по нуклидам данными IAEA NDS"
-        },
         "mcuhelper.trace.server": {
           "type": "string",
-          "enum": ["off", "messages", "verbose"],
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
           "default": "off"
         },
         "mcuhelper.autoDetectLanguage": {
@@ -86,14 +133,28 @@
         },
         "mcuhelper.autoDetectFromLanguages": {
           "type": "array",
-          "items": { "type": "string" },
-          "default": ["plaintext", "txt", "log", "text", "ansi", "ini"],
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "plaintext",
+            "txt",
+            "log",
+            "text",
+            "ansi",
+            "ini"
+          ],
           "description": "С каких language id переключать на mcunr при совпадении содержимого"
         },
         "mcuhelper.autoDetectEncoding": {
           "type": "boolean",
           "default": true,
           "description": "Определять кодировку legacy-файлов и при необходимости переоткрывать документ"
+        },
+        "mcuhelper.includeInlineMaxLines": {
+          "type": "number",
+          "default": 4000,
+          "description": "Макс. число строк include для inline-развёртки через CodeLens (больше — предложить открыть файл)"
         }
       }
     },
@@ -154,6 +215,11 @@
         "icon": "$(eye)"
       },
       {
+        "command": "mcuhelper.editDefaultPhy",
+        "title": "MCU-NR: DEFAULT.PHY (банк данных)",
+        "icon": "$(table)"
+      },
+      {
         "command": "mcuhelper.validateInput",
         "title": "MCU-NR: Validate (INPUT)",
         "icon": "$(run-all)"
@@ -180,7 +246,7 @@
       },
       {
         "command": "mcuhelper.configureSolver",
-        "title": "MCU-NR: Настроить пути запуска",
+        "title": "MCU-NR: Настроить пути (exe + MDBNR)",
         "icon": "$(gear)"
       },
       {
@@ -201,6 +267,11 @@
       {
         "command": "mcuhelper.exportDiagnostics",
         "title": "MCU-NR: Экспорт диагностик",
+        "icon": "$(output)"
+      },
+      {
+        "command": "mcuhelper.showLibraryVerificationReport",
+        "title": "MCU-NR: Отчёт сверки библиотек (Output)",
         "icon": "$(output)"
       },
       {
@@ -239,35 +310,121 @@
         "icon": "$(replace)"
       },
       {
+        "command": "mcuhelper.addToSumIsotope",
+        "title": "MCU-NR: Добавить в суммарный изотоп",
+        "icon": "$(add)"
+      },
+      {
+        "command": "mcuhelper.expandIncludeInline",
+        "title": "MCU-NR: Развернуть #include inline"
+      },
+      {
+        "command": "mcuhelper.collapseIncludeInline",
+        "title": "MCU-NR: Свернуть #include"
+      },
+      {
+        "command": "mcuhelper.openIncludeFile",
+        "title": "MCU-NR: Открыть файл #include"
+      },
+      {
         "command": "mcuhelper.insertTemplate",
         "title": "MCU-NR: Вставить шаблон"
       }
     ],
     "views": {
       "mcuhelper": [
-        { "type": "webview", "id": "mcuhelper.run", "name": "Запуск", "visibility": "visible", "initialSize": 1 },
-        { "type": "webview", "id": "mcuhelper.catalog", "name": "Каталог", "visibility": "visible" },
-        { "type": "webview", "id": "mcuhelper.lexerErrors", "name": "Диагностика", "visibility": "visible" },
-        { "type": "webview", "id": "mcuhelper.fragments", "name": "Навигация" },
-        { "type": "webview", "id": "mcuhelper.materials", "name": "Материалы" },
-        { "type": "webview", "id": "mcuhelper.constants", "name": "Константы" },
-        { "type": "webview", "id": "mcuhelper.bodies", "name": "Тела" },
-        { "type": "webview", "id": "mcuhelper.nets", "name": "Сети" },
-        { "type": "webview", "id": "mcuhelper.lattices", "name": "Решётки" },
-        { "type": "webview", "id": "mcuhelper.zones", "name": "Зоны" },
-        { "type": "webview", "id": "mcuhelper.objects", "name": "Объекты" }
+        {
+          "type": "webview",
+          "id": "mcuhelper.run",
+          "name": "Запуск",
+          "visibility": "visible",
+          "initialSize": 1
+        },
+        {
+          "type": "webview",
+          "id": "mcuhelper.catalog",
+          "name": "Каталог",
+          "visibility": "visible"
+        },
+        {
+          "type": "webview",
+          "id": "mcuhelper.lexerErrors",
+          "name": "Диагностика",
+          "visibility": "visible"
+        },
+        {
+          "type": "webview",
+          "id": "mcuhelper.fragments",
+          "name": "Навигация"
+        },
+        {
+          "type": "webview",
+          "id": "mcuhelper.materials",
+          "name": "Материалы"
+        },
+        {
+          "type": "webview",
+          "id": "mcuhelper.constants",
+          "name": "Константы"
+        },
+        {
+          "type": "webview",
+          "id": "mcuhelper.bodies",
+          "name": "Тела"
+        },
+        {
+          "type": "webview",
+          "id": "mcuhelper.nets",
+          "name": "Сети"
+        },
+        {
+          "type": "webview",
+          "id": "mcuhelper.lattices",
+          "name": "Решётки"
+        },
+        {
+          "type": "webview",
+          "id": "mcuhelper.zones",
+          "name": "Зоны"
+        },
+        {
+          "type": "webview",
+          "id": "mcuhelper.objects",
+          "name": "Объекты"
+        }
       ]
     },
     "viewsContainers": {
       "activitybar": [
-        { "id": "mcuhelper", "title": "MCU-NR", "icon": "$(flame)" }
+        {
+          "id": "mcuhelper",
+          "title": "MCU-NR",
+          "icon": "$(flame)"
+        }
       ]
     },
     "menus": {
       "view/title": [
-        { "command": "mcuhelper.refreshIndex", "when": "view =~ /^mcuhelper\\./ && view != mcuhelper.run", "group": "navigation" },
-        { "command": "mcuhelper.openRunKeybindings", "when": "view == mcuhelper.run", "group": "navigation@1" },
-        { "command": "mcuhelper.configureSolver", "when": "view == mcuhelper.run", "group": "navigation@2" }
+        {
+          "command": "mcuhelper.refreshIndex",
+          "when": "view =~ /^mcuhelper\\./ && view != mcuhelper.run",
+          "group": "navigation"
+        },
+        {
+          "command": "mcuhelper.openRunKeybindings",
+          "when": "view == mcuhelper.run",
+          "group": "navigation@1"
+        },
+        {
+          "command": "mcuhelper.configureSolver",
+          "when": "view == mcuhelper.run",
+          "group": "navigation@2"
+        },
+        {
+          "command": "mcuhelper.editDefaultPhy",
+          "when": "view == mcuhelper.run",
+          "group": "navigation@3"
+        }
       ],
       "editor/context": [
         {
@@ -389,6 +546,7 @@
     "test": "npm run build && node --test -r ./src/test-setup.js dist/**/*.test.js"
   },
   "dependencies": {
+    "iconv-lite": "^0.6.3",
     "vscode-languageclient": "^9.0.1",
     "vscode-languageserver": "^9.0.1",
     "vscode-languageserver-textdocument": "^1.0.11"

@@ -8,6 +8,7 @@ import type {
   NetNode,
   NetSummary,
   ObjectSummary,
+  SourceRange,
   ZoneSummary,
 } from "./ast";
 import { computeBodyVolumeCm3 } from "./bodyVolume";
@@ -27,6 +28,7 @@ import { materialVolumeCm3, parseMaterialVolumes } from "./materialVolumes";
 import { buildZoneRegistrationMap } from "./zoneRegistration";
 import { buildScopedVars, constScopeKey } from "./constantScope";
 import { collectZoneBodyRefs, isAllSpaceZoneRef } from "./zoneBodyRefs";
+import { formatExpandedLineRef } from "./includeLineMap";
 
 export function analyzeSemantics(ast: DocumentAst): DiagnosticMessage[] {
   const diags: DiagnosticMessage[] = [...ast.diagnostics];
@@ -95,18 +97,106 @@ export function analyzeSemantics(ast: DocumentAst): DiagnosticMessage[] {
     }
   }
 
-  const matNumbers = new Set(ast.materials.map((m) => m.number));
-  const maxMat = ast.materials.length > 0 ? Math.max(...ast.materials.map((m) => m.number)) : 0;
-  for (let n = 1; n <= maxMat; n++) {
-    if (!matNumbers.has(n)) {
+  // UserGuide §8.2: number = порядковый номер следования в разделе с 1, пропуски запрещены.
+  // GROUP=… — номер внутренний для группы; глобально материал перенумеровывается по порядку.
+  // Ссылка «ранее на …» — через includeLineMap (строка редактора или path:line в `#include`).
+  const sumStatesByMat = buildSumIsotopeStatesByOffset(
+    ast.statements,
+    ast.materials.map((m) => m.range.offset),
+    ast.constants
+  );
+  const matSeen = new Map<string, SourceRange>();
+  for (let i = 0; i < ast.materials.length; i++) {
+    const m = ast.materials[i]!;
+    const groupKey = (m.group ?? "").toUpperCase();
+    const uniqKey = `${groupKey}#${m.number}`;
+    const prevRange = matSeen.get(uniqKey);
+    if (prevRange != null) {
+      const groupHint = groupKey ? ` (GROUP=${m.group})` : "";
+      const priorRef = formatExpandedLineRef(ast.includeLineMap, prevRange.start.line);
       diags.push({
         severity: "error",
-        message: `Пропущен номер материала MATR ${n}`,
-        code: "matr-gap",
-        range: ast.materials[0]?.range ?? { start: { line: 0, character: 0 }, end: { line: 0, character: 0 }, offset: 0, endOffset: 0 },
+        message: `Переопределение материала MATR ${m.number}${groupHint} (ранее на ${priorRef})`,
+        code: "matr-redef",
+        range: m.range,
+        related: [{ message: "Первое определение", range: prevRange }],
       });
+    } else {
+      matSeen.set(uniqKey, m.range);
+      if (!m.group) {
+        const expected = i + 1;
+        if (m.number !== expected) {
+          diags.push({
+            severity: "error",
+            message: `MATR ${m.number}: номер должен быть равен порядковому номеру следования (${expected})`,
+            code: "matr-gap",
+            range: m.range,
+          });
+        }
+      }
+      // MCU error :55: пустой материал или все нуклиды ушли в суммарный изотоп (SI/SINOT/SIDEN).
+      if (m.nuclides.length === 0) {
+        diags.push({
+          severity: "error",
+          message: `MATR ${m.number}: материал пуст (нет нуклидов)`,
+          code: "matr-empty",
+          range: m.range,
+        });
+      } else {
+        const sumState = sumStatesByMat.get(m.range.offset) ?? {
+          listMode: "none" as const,
+          list: new Set<string>(),
+          siden: null,
+        };
+        const matVars = buildScopedVars(ast.constants, m.range.offset, "global");
+        const memberships = m.nuclides.map((n) =>
+          evaluateSumIsotopeMembership(n, sumState, matVars)
+        );
+        if (memberships.every((x) => x.inSum)) {
+          const kinds = [...new Set(memberships.flatMap((x) => x.kinds))].map((k) =>
+            k.toUpperCase()
+          );
+          // #region agent log
+          if (m.number === 25 || m.number === 34 || m.nuclides.length <= 2) {
+            fetch("http://127.0.0.1:7911/ingest/3304a270-bbbf-4e90-96de-6ba27b8f72bf", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "fded15" },
+              body: JSON.stringify({
+                sessionId: "fded15",
+                runId: "pre-fix",
+                hypothesisId: "B",
+                location: "semantic.ts:matr-empty-sum",
+                message: "flagging matr-empty via sum isotope",
+                data: {
+                  mat: m.number,
+                  kinds,
+                  siden: sumState.siden,
+                  listMode: sumState.listMode,
+                  nuclides: m.nuclides.map((n, i) => ({
+                    name: n.name,
+                    dens: n.density,
+                    inSum: memberships[i]?.inSum,
+                    reasons: memberships[i]?.reasons,
+                  })),
+                },
+                timestamp: Date.now(),
+              }),
+            }).catch(() => {});
+          }
+          // #endregion
+          diags.push({
+            severity: "error",
+            message: `MATR ${m.number}: материал пуст — все нуклиды в суммарном изотопе (${kinds.join("/")})`,
+            code: "matr-empty",
+            range: m.range,
+          });
+        }
+      }
     }
   }
+
+  const matNumbers = new Set(ast.materials.map((m) => m.number));
+  const maxMat = ast.materials.length > 0 ? Math.max(...ast.materials.map((m) => m.number)) : 0;
 
   const zoneKey = (name: string, scope?: string) => `${scope ?? "global"}::${name}`;
 

@@ -1082,6 +1082,18 @@ describe("semantic highlight", () => {
     assert.ok(nuclideSpan, spans.map((s) => `${s.line}:${s.char} ${s.kind}`).join("; "));
   });
 
+  it("SI dens without sci notation is nuclide not card", () => {
+    const text = "PIN\nMATR 1\nSI    0.00054999\nFINISH";
+    const siIdx = text.indexOf("SI    0.00054999");
+    const ast = parseDocument(text, { uri: "hl-si0.mcu" });
+    const spans = buildSemanticTokenSpans(ast, text);
+    const line = text.slice(0, siIdx).split("\n").length - 1;
+    const char = siIdx - text.lastIndexOf("\n", siIdx - 1) - 1;
+    const span = spans.find((s) => s.line === line && s.char === char && s.length === 2);
+    assert.ok(span, spans.map((s) => `${s.line}:${s.char}:${s.length} ${s.kind}`).join("; "));
+    assert.strictEqual(span!.kind, "nuclide");
+  });
+
   it("geometry CROD is zone not card", () => {
     const text = "HEAD\nCONT B B B\nEND\nCROD  5   /-3:2/1\nFINISH";
     assert.strictEqual(spanAt(text, "CROD")?.kind, "zone");

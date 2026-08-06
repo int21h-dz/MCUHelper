@@ -15,11 +15,18 @@ export interface SourceRange {
   endOffset: number;
 }
 
+export interface DiagnosticRelated {
+  message: string;
+  range: SourceRange;
+}
+
 export interface DiagnosticMessage {
   severity: "error" | "warning" | "info";
   message: string;
   range: SourceRange;
   code?: string;
+  /** Доп. места (первое определение и т.п.) — в expanded-координатах, как `range`. */
+  related?: DiagnosticRelated[];
 }
 
 export interface NuclideEntry {
@@ -150,7 +157,20 @@ export interface LatticeNode {
 export interface IncludeNode {
   kind: "include";
   path: string;
+  fsPath?: string;
+  uri?: string;
+  exists?: boolean;
   range: SourceRange;
+}
+
+export interface IncludeLineMapEntry {
+  source: "main" | "include" | "marker";
+  mainLine: number;
+  mainIncludeLine?: number;
+  includePath?: string;
+  includeFsPath?: string;
+  includeUri?: string;
+  includeLine?: number;
 }
 
 export interface StatementNode {
@@ -173,6 +193,7 @@ export interface DocumentAst {
   latticeElements: LatticeElementNode[];
   lattices: LatticeNode[];
   includes: IncludeNode[];
+  includeLineMap?: IncludeLineMapEntry[];
   fragments: FragmentSpan[];
   diagnostics: DiagnosticMessage[];
   cameraPresets: CameraPreset[];

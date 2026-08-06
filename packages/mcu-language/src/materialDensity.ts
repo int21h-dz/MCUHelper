@@ -1,5 +1,6 @@
 import type { MaterialNode } from "./ast";
 import { evaluateExpression } from "./expression";
+import { getAwLibAtomicWeight } from "./awLib";
 import { mcuNuclideToIaeaElement, mcuNuclideToIaeaTarget } from "./nuclideIaea";
 
 /** MCU-NR: значение dens — ядер/см³ без явного множителя 10²⁴ (UserGuide §8.2). */
@@ -8,7 +9,7 @@ export const MCU_NUCLEAR_DENSITY_SCALE = 1e24;
 /** Атомная единица массы, г. */
 const ATOMIC_MASS_G = 1.660_539_066_60e-24;
 
-/** Природные средние атомные массы (г/моль), NIST — для элементов без массового числа. */
+/** Природные средние атомные массы (г/моль), NIST — fallback без AW.LIB. */
 const NATURAL_ATOMIC_WEIGHT: Record<string, number> = {
   H: 1.008, D: 2.014, T: 3.016, HE: 4.003, LI: 6.94, BE: 9.012, B: 10.81, C: 12.011, N: 14.007, O: 15.999,
   F: 18.998, NE: 20.18, NA: 22.99, MG: 24.305, AL: 26.982, SI: 28.085, P: 30.974, S: 32.06, CL: 35.45, AR: 39.95,
@@ -27,8 +28,14 @@ function isNumericLiteral(token: string): boolean {
   return /^[+-]?(\d+\.?\d*|\.\d+)([Ee][+-]?\d+)?$/.test(token);
 }
 
-/** Атомная масса нуклида MCU (г/моль) для расчёта ρ. */
+/**
+ * Атомная масса нуклида MCU (г/моль) для расчёта ρ и hover.
+ * Приоритет: AW.LIB (MDBNR) → эвристика A из имени / NIST для природных.
+ */
 export function mcuNuclideAtomicWeight(name: string): number | null {
+  const fromLib = getAwLibAtomicWeight(name);
+  if (fromLib != null) return fromLib;
+
   const target = mcuNuclideToIaeaTarget(name);
   if (target) {
     const mass = target.match(/-(\d+)$/);
