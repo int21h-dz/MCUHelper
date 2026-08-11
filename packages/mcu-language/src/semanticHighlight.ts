@@ -25,7 +25,8 @@ const PIN_ISOTOPE_CARDS = new Set(["SI", "ICE", "CPM", "NEUT", "DELN", "EGRC"]);
 function isExcludedNuclideLikeLine(text: string): boolean {
   const t = text.trim();
   if (/\/|#|\(|\)/.test(t)) return true;
-  if (/\bU\b/.test(t)) return true;
+  // Союз «U» в зоне, но не природный уран `U dens`.
+  if (/\bU\b/.test(t) && !/^[Uu]\s+\S+/.test(t)) return true;
   if (/\s:\d+(\s|$)/.test(t)) return true;
   if (/\s\/\d/.test(t)) return true;
   return false;

@@ -34,3 +34,19 @@ export { parseGltlPlacements } from "./gltl";
 export { resolveNetCell, netPrototypeAt, cellPitchFromContainer } from "./netQuery";
 export type { GeometryContext } from "./query";
 export { resolveBodyRef, isBodyRefInHits } from "./bodyRefs";
+export {
+  MESH_PREVIEW_SUPPORTED,
+  MESH_PREVIEW_UNSUPPORTED,
+  MESH_PREVIEW_BODY_CAP,
+  isMeshPreviewSupported,
+  isMeshPreviewUnsupported,
+  bodyToMeshDescriptor,
+  buildMeshPreview,
+} from "./meshPreview";
+export type {
+  MeshKind,
+  MeshDescriptor,
+  UnsupportedMeshBody,
+  MeshPreviewOptions,
+  MeshPreviewResult,
+} from "./meshPreview";

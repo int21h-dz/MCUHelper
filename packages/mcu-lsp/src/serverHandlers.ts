@@ -18,10 +18,15 @@ import {
   remapRangeToMainDocument,
   resolveExpandedLineLocation,
   normalizeIncludeFsKey,
+  buildIncludeGraph,
+  detectEncodingFromBuffer,
+  textHasIncludeDirective,
+  sameIncludeFileUri,
   type DocumentIndex,
   type DiagnosticMessage,
   type IncludeLineMapEntry,
   type IncludeTextOverrides,
+  type IncludeGraphNode,
 } from "@mcuhelper/mcu-language";
 import { fileURLToPath } from "url";
 import { isGeoBodyLabel } from "@mcuhelper/mcu-schema";
@@ -283,6 +288,69 @@ export function projectNavIncludes(index: DocumentIndex): NavIncludePayload[] {
   });
 }
 
+/** Счёт диагностик AST по URI/пути include (без повторного полного collectDiagnostics). */
+function countDiagnosticsPerInclude(index: DocumentIndex): Map<string, number> {
+  const counts = new Map<string, number>();
+  const bump = (key: string) => counts.set(key, (counts.get(key) ?? 0) + 1);
+  const lineMap = index.ast.includeLineMap;
+  for (const d of index.ast.diagnostics) {
+    if (d.code === "include") {
+      const inc = index.ast.includes.find((i) => i.range.start.line === d.range.start.line);
+      if (inc?.uri) bump(inc.uri);
+      else if (inc) bump(inc.path);
+      continue;
+    }
+    const loc = resolveExpandedLineLocation(lineMap, d.range.start.line);
+    if (loc.kind === "include") {
+      if (loc.uri) bump(loc.uri);
+      else bump(loc.path);
+    }
+  }
+  return counts;
+}
+
+function detectIncludeFileEncoding(fsPath: string | undefined, exists: boolean | undefined): string | undefined {
+  if (!exists || !fsPath) return undefined;
+  try {
+    const buf = fs.readFileSync(fsPath);
+    return detectEncodingFromBuffer(buf).encoding;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Граф main → `#include` для getIndex / mcuhelper/getIncludeGraph.
+ * encoding и diagCount — обогащение; вложенность — из диагностик expand.
+ */
+export function projectIncludeGraph(index: DocumentIndex): IncludeGraphNode[] {
+  const diagCounts = countDiagnosticsPerInclude(index);
+  return buildIncludeGraph(
+    index.ast.includes.map((inc) => {
+      const nestedInclude = index.ast.diagnostics.some(
+        (d) =>
+          d.code === "include" &&
+          d.range.start.line === inc.range.start.line &&
+          /вложенн/i.test(d.message)
+      );
+      const keyUri = inc.uri;
+      const diagCount = keyUri
+        ? diagCounts.get(keyUri) ?? diagCounts.get(inc.path) ?? 0
+        : diagCounts.get(inc.path) ?? 0;
+      return {
+        path: inc.path,
+        uri: inc.uri,
+        fsPath: inc.fsPath,
+        exists: inc.exists,
+        mainLine: inc.range.start.line,
+        encoding: detectIncludeFileEncoding(inc.fsPath, inc.exists),
+        diagCount,
+        nestedInclude: nestedInclude || undefined,
+      };
+    })
+  );
+}
+
 export { mapExpandedLineToMain, remapRangeToMainDocument };
 
 function clampFoldingRangesToDocument(ranges: FoldingRange[], lineCount: number): FoldingRange[] {
@@ -300,9 +368,23 @@ function clampFoldingRangesToDocument(ranges: FoldingRange[], lineCount: number)
 /** Единая точка получения индекса: version-cache в analyzeDocument + отпечаток include-файлов. */
 export function ensureDocumentIndex(doc: TextDocument): DocumentIndex {
   const uri = doc.uri;
+  // Быстрый путь до getText()/hash: тот же version уже в кэше (типичный hover на 16MB).
+  const cachedExpanded = getDocumentIndex(uri, true);
+  const cachedSource = getDocumentIndex(uri, false);
+  const versionHit =
+    (cachedExpanded && cachedExpanded.version === doc.version && cachedExpanded.includeFp === ""
+      ? cachedExpanded
+      : undefined) ??
+    (cachedSource && cachedSource.version === doc.version ? cachedSource : undefined);
+  if (versionHit && versionHit.includeFp === "") {
+    // Нет #include-отпечатка → текст не зависит от внешних файлов; можно не трогать 16MB.
+    return versionHit;
+  }
+
   const text = doc.getText();
   // Без #include expanded≡source — один parse. С include — expand + fingerprint файлов.
-  const expandInclude = /#\s*include\b/i.test(text);
+  // Только parseIncludeLine: CodeLens-маркеры `** [mcuhelper] ▼ #include` не считаются директивой.
+  const expandInclude = textHasIncludeDirective(text);
   const t0 = performance.now();
   const textLen = text.length;
   const baseDir = uriToBaseDir(uri);
@@ -313,10 +395,81 @@ export function ensureDocumentIndex(doc: TextDocument): DocumentIndex {
     includeTextOverrides,
   });
   const ms = performance.now() - t0;
+
   if (PROFILE_PARSE) {
     console.error(`[mcuhelper] analyzeDocument ${ms.toFixed(1)}ms uri=${uri} v=${doc.version} len=${textLen}`);
   }
   return index;
+}
+
+/**
+ * Индекс для hover: если редактор — файл `#include`, берём expanded AST родителя
+ * (MATR в main + состав в include), hit-test — через includeUri в lineMap.
+ */
+export function resolveHoverDocumentIndex(
+  doc: TextDocument,
+  parentUrisByInclude: ReadonlyMap<string, ReadonlySet<string>>,
+  getDoc: (uri: string) => TextDocument | undefined,
+  openDocs?: Iterable<TextDocument>
+): DocumentIndex {
+  const self = ensureDocumentIndex(doc);
+  const parentUris = lookupParentUrisForInclude(doc.uri, parentUrisByInclude, openDocs);
+
+  for (const parentUri of parentUris) {
+    const parentDoc = getDoc(parentUri);
+    if (!parentDoc) continue;
+    const parentIndex = ensureDocumentIndex(parentDoc);
+    const lineMap = parentIndex.ast.includeLineMap;
+    if (!lineMap?.length) continue;
+    const covers = lineMap.some(
+      (e) =>
+        e.source === "include" &&
+        (sameIncludeFileUri(e.includeUri, doc.uri) ||
+          (e.includeFsPath != null &&
+            (() => {
+              try {
+                return normalizeIncludeFsKey(e.includeFsPath) === normalizeIncludeFsKey(fileURLToPath(doc.uri));
+              } catch {
+                return false;
+              }
+            })()))
+    );
+    if (covers) {
+      return parentIndex;
+    }
+  }
+
+  return self;
+}
+
+function lookupParentUrisForInclude(
+  includeUri: string,
+  parentUrisByInclude: ReadonlyMap<string, ReadonlySet<string>>,
+  openDocs: Iterable<TextDocument> | undefined
+): string[] {
+  const out = new Set<string>();
+  const direct = parentUrisByInclude.get(includeUri);
+  if (direct) {
+    for (const u of direct) out.add(u);
+  } else {
+    for (const [key, set] of parentUrisByInclude) {
+      if (sameIncludeFileUri(key, includeUri)) {
+        for (const u of set) out.add(u);
+        break;
+      }
+    }
+  }
+  if (out.size > 0 || !openDocs) return [...out];
+
+  // Parent ещё не валидировали — ищем среди открытых документов с #include.
+  for (const candidate of openDocs) {
+    if (sameIncludeFileUri(candidate.uri, includeUri)) continue;
+    if (!textHasIncludeDirective(candidate.getText())) continue;
+    const idx = ensureDocumentIndex(candidate);
+    const hit = idx.ast.includes.some((inc) => inc.uri && sameIncludeFileUri(inc.uri, includeUri));
+    if (hit) out.add(candidate.uri);
+  }
+  return [...out];
 }
 
 /** Индекс в координатах редактора (без expand) — folding/symbols, чтобы не мигала подсветка. */
@@ -981,17 +1134,31 @@ export function handleGetIndex(
   summaries = slimSummariesForIndex(summaries);
   const statements = projectNavStatements(index);
   const includes = projectNavIncludes(index);
+  const includeGraph = projectIncludeGraph(index);
   const fragments = index.ast.fragments.map((f) => remapFragmentSpanForEditor(f, lineMap));
+
   return {
     summaries,
     fragments,
     statements,
     includes,
+    includeGraph,
     hash: index.hash,
     editorContext,
     sumIsotopeMarks,
     stableIsotopeMarks,
   };
+}
+
+/** Только граф `#include` (без полного payload getIndex). */
+export function handleGetIncludeGraph(
+  args: string | { uri: string },
+  getDoc: (uri: string) => TextDocument | undefined
+): IncludeGraphNode[] | null {
+  const uri = typeof args === "string" ? args : args.uri;
+  const index = resolveDocumentIndex(uri, getDoc);
+  if (!index) return null;
+  return projectIncludeGraph(index);
 }
 
 export function handleGetGeometry(uri: string, getDoc: (uri: string) => TextDocument | undefined) {

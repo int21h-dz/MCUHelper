@@ -438,13 +438,6 @@ export function planAddToSumIsotopeExpanded(
     return { kind: "already", message: `${name} уже указан в карте SI` };
   }
 
-  if (state.listMode === "sinot" && !listHasName(state.list, name)) {
-    return {
-      kind: "already",
-      message: `${name} уже в суммарном изотопе (не указан в SINOT)`,
-    };
-  }
-
   if (state.listMode === "si" && state.headerExpandedIndex != null && state.endExpandedIndex != null) {
     const header = expanded[state.headerExpandedIndex]!;
     const { comment } = collectCardTokens(expanded, state.headerExpandedIndex);
@@ -460,34 +453,36 @@ export function planAddToSumIsotopeExpanded(
     };
   }
 
-  if (
-    state.listMode === "sinot" &&
-    state.headerExpandedIndex != null &&
-    state.endExpandedIndex != null &&
-    listHasName(state.list, name)
-  ) {
+  // Активен SINOT: список только исключает из суммы. Чтобы добавить в сумму — SI
+  // (последняя карта списка побеждает). Имя из SINOT убираем, если оно там было.
+  if (state.listMode === "sinot" && state.headerExpandedIndex != null && state.endExpandedIndex != null) {
     const header = expanded[state.headerExpandedIndex]!;
     const { comment } = collectCardTokens(expanded, state.headerExpandedIndex);
-    const next = state.list.filter((t) => t.toUpperCase() !== name.toUpperCase());
     const endLine = expanded[state.endExpandedIndex]!.editLine;
-    if (next.length === 0) {
+    if (listHasName(state.list, name)) {
+      const next = state.list.filter((t) => t.toUpperCase() !== name.toUpperCase());
+      if (next.length === 0) {
+        return {
+          kind: "replace-range",
+          uri: header.editUri,
+          startLine: header.editLine,
+          endLine,
+          newText: rebuildSumCardText("SI", [name], comment, maxCodeLen),
+          message: `SINOT заменён на SI ${name}`,
+        };
+      }
+      // Оставляем SINOT без имени и вставляем SI name сразу после блока SINOT.
+      const sinotText = rebuildSumCardText("SINOT", next, comment, maxCodeLen);
+      const siText = rebuildSumCardText("SI", [name], "", maxCodeLen);
       return {
         kind: "replace-range",
         uri: header.editUri,
         startLine: header.editLine,
         endLine,
-        newText: rebuildSumCardText("SI", [name], comment, maxCodeLen),
-        message: `SINOT заменён на SI ${name}`,
+        newText: `${sinotText}\n${siText}`,
+        message: `Убрано из SINOT и добавлено в SI: ${name}`,
       };
     }
-    return {
-      kind: "replace-range",
-      uri: header.editUri,
-      startLine: header.editLine,
-      endLine,
-      newText: rebuildSumCardText("SINOT", next, comment, maxCodeLen),
-      message: `Убрано из SINOT: ${name}`,
-    };
   }
 
   return findInsertPlan(

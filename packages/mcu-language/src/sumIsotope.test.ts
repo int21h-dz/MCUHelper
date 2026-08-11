@@ -23,15 +23,34 @@ describe("sumIsotope", () => {
     assert.ok(marks.every((m) => m.kinds.includes("si")));
   });
 
-  it("SINOT marks all except listed", () => {
+  it("SINOT alone does not put anyone into the sum", () => {
     const text = ["PIN", "SINOT U235 U238", "MATR 1", "U235 1e-2", "U238 1e-2", "FP99 1e-8", "FINISH"].join("\n");
     const ast = parseDocument(text, { uri: "sinot.mcu" });
     const mat = ast.materials[0]!;
     const fp = sumIsotopeForNuclide(ast, mat, { name: "FP99", density: "1e-8" });
     const u235 = sumIsotopeForNuclide(ast, mat, { name: "U235", density: "1e-2" });
-    assert.strictEqual(fp.inSum, true);
-    assert.ok(fp.kinds.includes("sinot"));
+    assert.strictEqual(fp.inSum, false);
     assert.strictEqual(u235.inSum, false);
+  });
+
+  it("SINOT blocks SIDEN for listed nuclides; others still enter via SIDEN", () => {
+    const text = [
+      "PIN",
+      "SINOT U235 U238",
+      "SIDEN 1.0E-5",
+      "MATR 1",
+      "U235 1e-8",
+      "FP99 1e-8",
+      "O16 1e-2",
+      "FINISH",
+    ].join("\n");
+    const ast = parseDocument(text, { uri: "sinot-siden.mcu" });
+    const mat = ast.materials[0]!;
+    assert.strictEqual(sumIsotopeForNuclide(ast, mat, { name: "U235", density: "1e-8" }).inSum, false);
+    const fp = sumIsotopeForNuclide(ast, mat, { name: "FP99", density: "1e-8" });
+    assert.strictEqual(fp.inSum, true);
+    assert.ok(fp.kinds.includes("siden"));
+    assert.strictEqual(sumIsotopeForNuclide(ast, mat, { name: "O16", density: "1e-2" }).inSum, false);
   });
 
   it("SIDEN marks low density independently of SI", () => {
@@ -60,8 +79,11 @@ describe("sumIsotope", () => {
     const ast = parseDocument(text, { uri: "last.mcu" });
     const m1 = ast.materials.find((m) => m.number === 1)!;
     const m2 = ast.materials.find((m) => m.number === 2)!;
-    assert.strictEqual(sumIsotopeForNuclide(ast, m1, { name: "O16", density: "1" }).inSum, true);
+    // Активен SINOT: никто не в сумме без SIDEN.
+    assert.strictEqual(sumIsotopeForNuclide(ast, m1, { name: "O16", density: "1" }).inSum, false);
     assert.strictEqual(sumIsotopeForNuclide(ast, m1, { name: "U235", density: "1" }).inSum, false);
+    assert.strictEqual(sumIsotopeForNuclide(ast, m1, { name: "FP1", density: "1" }).inSum, false);
+    // Пустой SI сбрасывает режим списка.
     assert.strictEqual(sumIsotopeForNuclide(ast, m2, { name: "FP1", density: "1" }).inSum, false);
   });
 
@@ -74,7 +96,7 @@ describe("sumIsotope", () => {
   });
 
   it("resolveSumIsotopeStateAt reads SIDEN with EQU", () => {
-    const text = ["PIN", "EQU THR = 1.0E-6", "SIDEN THR", "MATR 1", "XE 1e-8", "FINISH"].join("\n");
+    const text = ["EQU THR = 1.0E-6", "PIN", "SIDEN THR", "MATR 1", "XE 1e-8", "FINISH"].join("\n");
     const ast = parseDocument(text, { uri: "equ.mcu" });
     const state = resolveSumIsotopeStateAt(ast.statements, ast.materials[0]!.range.offset, ast.constants);
     assert.strictEqual(state.siden, 1e-6);

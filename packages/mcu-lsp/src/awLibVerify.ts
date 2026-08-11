@@ -13,7 +13,9 @@ import {
   getAwLibTable,
   parseAwLib,
   setAwLibTable,
-  sumIsotopeForNuclide,
+  buildSumIsotopeStatesByOffset,
+  buildScopedVars,
+  evaluateSumIsotopeMembership,
   type AwLibEntry,
   type AwLibTable,
   type DocumentAst,
@@ -416,9 +418,10 @@ function locateNuclideTokenRange(
 
 /**
  * Нуклид отсутствует в AW.LIB:
- * - уже в суммарном изотопе через SI/SINOT → игнор;
+ * - уже в суммарном изотопе через SI → игнор;
  * - только через SIDEN → warning (лучше явно в SI);
  * - не в сумме → error (добавить в SI).
+ * SINOT только исключает из суммы и сам по себе покрытие AW.LIB не даёт.
  */
 export function collectAwLibMissingDiagnostics(
   doc: {
@@ -430,15 +433,34 @@ export function collectAwLibMissingDiagnostics(
   const table = getAwLibTable();
   if (!table?.entryCount) return [];
   const out: Diagnostic[] = [];
+  /** Один diag на имя нуклида — иначе full-core (100k+) убивает Problems и event loop. */
+  const seen = new Set<string>();
+  // Один проход SI/SIDEN по материалам: N×resolveSumIsotopeStateAt на full-core = минуты.
+  const sumStates = buildSumIsotopeStatesByOffset(
+    ast.statements,
+    ast.materials.map((m) => m.range.offset),
+    ast.constants
+  );
+
   for (const mat of ast.materials) {
+    const sumState = sumStates.get(mat.range.offset) ?? {
+      listMode: "none" as const,
+      list: new Set<string>(),
+      siden: null,
+    };
+    const vars = buildScopedVars(ast.constants, mat.range.offset, "global");
+
     for (const n of mat.nuclides) {
+      const key = n.name.trim().toUpperCase();
+      if (seen.has(key)) continue;
       if (getAwLibEntry(n.name)) continue;
-      const sum = sumIsotopeForNuclide(ast, mat, n);
-      // Явно в SI / покрыт SINOT — для AW.LIB не критично.
-      if (sum.kinds.includes("si") || sum.kinds.includes("sinot")) continue;
+
+      const sum = evaluateSumIsotopeMembership(n, sumState, vars);
+      if (sum.kinds.includes("si")) continue;
 
       const range = locateNuclideTokenRange(doc, n);
       if (!range) continue;
+      seen.add(key);
 
       if (sum.kinds.includes("siden")) {
         out.push({

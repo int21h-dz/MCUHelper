@@ -49,6 +49,14 @@ describe("runPanelHelpers", () => {
     assert.equal(resolvePostRunOpenTarget({ mode: "i" }), undefined);
   });
 
+  it("resolvePostRunOpenTarget opens LST after BURNUP", () => {
+    assert.deepEqual(
+      resolvePostRunOpenTarget({ mode: "b", lstPath: "C:/tmp/NAME.LST" }),
+      { kind: "lst", path: "C:/tmp/NAME.LST", reason: "debug" }
+    );
+    assert.equal(resolvePostRunOpenTarget({ mode: "b" }), undefined);
+  });
+
   it("resolvePostRunOpenTarget prefers FIN for Run/Final, else LST", () => {
     assert.deepEqual(
       resolvePostRunOpenTarget({

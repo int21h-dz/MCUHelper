@@ -218,10 +218,14 @@ export interface MaterialSummary {
   group?: string;
   temperature?: number;
   nuclideCount: number;
+  /** Сколько нуклидов входят в суммарный изотоп (SI/SINOT/SIDEN). */
+  sumIsotopeCount: number;
   nuclidesPreview: string;
   massDensityGcm3: number | null;
   volumeCm3: number | null;
   massG: number | null;
+  /** Σ удельной активности a_V/ρ (Бк/г); null если нет ρ или активности. */
+  activityBqPerG: number | null;
   nuclides: Array<{
     name: string;
     concentration: string;

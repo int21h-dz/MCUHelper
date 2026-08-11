@@ -6,7 +6,9 @@ import {
   analyzeMaterialActivity,
   computeNuclideActivityBqPerCm3,
   formatActivityBqPerCm3,
+  formatActivityBqPerG,
   resolveAbsoluteNuclearDensityMcu,
+  specificActivityBqPerG,
 } from "./materialActivity";
 import { MCU_NUCLEAR_DENSITY_SCALE } from "./materialDensity";
 import { parseParameteThr, setParameteThrTable, clearParameteThrTable, halfLifeToSeconds } from "./parameteThr";
@@ -45,6 +47,22 @@ describe("formatActivityBqPerCm3", () => {
     assert.ok(formatActivityBqPerCm3(5e3).includes("кБк"));
     assert.ok(formatActivityBqPerCm3(5e6).includes("МБк"));
     assert.strictEqual(formatActivityBqPerCm3(-1), "—");
+  });
+});
+
+describe("specificActivityBqPerG", () => {
+  it("divides volumetric by mass density", () => {
+    assert.strictEqual(specificActivityBqPerG(20, 2), 10);
+    assert.strictEqual(specificActivityBqPerG(1, 0), null);
+    assert.strictEqual(specificActivityBqPerG(-1, 1), null);
+  });
+});
+
+describe("formatActivityBqPerG", () => {
+  it("uses per-gram units", () => {
+    assert.ok(formatActivityBqPerG(500).includes("Бк/г"));
+    assert.ok(formatActivityBqPerG(5e3).includes("кБк/г"));
+    assert.strictEqual(formatActivityBqPerG(-1), "—");
   });
 });
 

@@ -163,6 +163,13 @@
           "type": "number",
           "default": 4000,
           "description": "Макс. число строк include для inline-развёртки через CodeLens (больше — предложить открыть файл)"
+        },
+        "mcuhelper.batchConcurrency": {
+          "type": "number",
+          "default": 1,
+          "minimum": 1,
+          "maximum": 2,
+          "description": "Параллельность batch INPUT (1–2). По умолчанию 1 — последовательно."
         }
       }
     },
@@ -223,6 +230,11 @@
         "icon": "$(eye)"
       },
       {
+        "command": "mcuhelper.showGeometry3d",
+        "title": "MCU-NR: 3D геометрия",
+        "icon": "$(box)"
+      },
+      {
         "command": "mcuhelper.editDefaultPhy",
         "title": "MCU-NR: DEFAULT.PHY (банк данных)",
         "icon": "$(table)"
@@ -238,6 +250,11 @@
         "icon": "$(bug)"
       },
       {
+        "command": "mcuhelper.batchValidateInput",
+        "title": "MCU-NR: Проверить варианты (INPUT)",
+        "icon": "$(checklist)"
+      },
+      {
         "command": "mcuhelper.runCalculation",
         "title": "MCU-NR: Run (CALCULATION)",
         "icon": "$(play)"
@@ -251,6 +268,26 @@
         "command": "mcuhelper.finalOutput",
         "title": "MCU-NR: Final (OUTPUT)",
         "icon": "$(output)"
+      },
+      {
+        "command": "mcuhelper.burnup",
+        "title": "MCU-NR: Burnup (BURNUP)",
+        "icon": "$(flame)"
+      },
+      {
+        "command": "mcuhelper.registrationBuilder",
+        "title": "MCU-NR: Конструктор регистрации",
+        "icon": "$(symbol-ruler)"
+      },
+      {
+        "command": "mcuhelper.showIncludeGraph",
+        "title": "MCU-NR: Граф #include",
+        "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "mcuhelper.compareResults",
+        "title": "MCU-NR: Сравнить FIN/LST",
+        "icon": "$(diff)"
       },
       {
         "command": "mcuhelper.configureSolver",
@@ -500,6 +537,11 @@
       {
         "command": "mcuhelper.finalOutput",
         "key": "ctrl+alt+f",
+        "when": "editorLangId == mcunr"
+      },
+      {
+        "command": "mcuhelper.burnup",
+        "key": "ctrl+alt+b",
         "when": "editorLangId == mcunr"
       }
     ]

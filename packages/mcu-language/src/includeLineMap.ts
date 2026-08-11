@@ -1,4 +1,6 @@
+import { fileURLToPath } from "url";
 import type { IncludeLineMapEntry } from "./ast";
+import { normalizeIncludeFsKey } from "./includeResolve";
 
 /** Expanded-строка → номер строки в main-редакторе; include-only → null. */
 export function mapExpandedLineToMain(
@@ -12,6 +14,49 @@ export function mapExpandedLineToMain(
   // Маркер include — визуально на строке #include в main.
   if (entry.source === "marker") return entry.mainIncludeLine ?? entry.mainLine;
   return null;
+}
+
+/** Сопоставление file: URI / путей include (Windows: регистр и слэши). */
+export function sameIncludeFileUri(a?: string | null, b?: string | null): boolean {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  try {
+    return normalizeIncludeFsKey(fileURLToPath(a)) === normalizeIncludeFsKey(fileURLToPath(b));
+  } catch {
+    try {
+      return normalizeIncludeFsKey(a) === normalizeIncludeFsKey(b);
+    } catch {
+      return false;
+    }
+  }
+}
+
+function entryMatchesEditorUri(entry: IncludeLineMapEntry, editorUri: string): boolean {
+  if (entry.includeUri && sameIncludeFileUri(entry.includeUri, editorUri)) return true;
+  if (entry.includeFsPath) {
+    try {
+      return normalizeIncludeFsKey(entry.includeFsPath) === normalizeIncludeFsKey(fileURLToPath(editorUri));
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+/**
+ * Expanded-строка → номер строки в открытом include-файле; иначе null.
+ * Нужен для hover/definition, когда редактор — тело `#include`, а AST — expanded parent.
+ */
+export function mapExpandedLineToIncludeEditor(
+  lineMap: IncludeLineMapEntry[] | undefined,
+  expandedLine: number,
+  editorUri: string
+): number | null {
+  if (!lineMap?.length) return null;
+  const entry = lineMap[expandedLine];
+  if (!entry || entry.source !== "include" || entry.includeLine == null) return null;
+  if (!entryMatchesEditorUri(entry, editorUri)) return null;
+  return entry.includeLine;
 }
 
 /**
@@ -49,11 +94,16 @@ export function remapRangeToMainDocument<
   };
 }
 
-/** Range покрывает строку редактора (с учётом includeLineMap). */
+/**
+ * Range покрывает строку редактора (с учётом includeLineMap).
+ * @param editorUri — URI открытого документа: для main — remap в main-строки;
+ *   для include-файла — match include-only ranges по `includeLine` (как diagnostics).
+ */
 export function rangeCoversEditorLine(
   range: { start: { line: number; character?: number }; end: { line: number; character?: number } },
   editorLine: number,
-  lineMap: IncludeLineMapEntry[] | undefined
+  lineMap: IncludeLineMapEntry[] | undefined,
+  editorUri?: string
 ): boolean {
   const mapped = remapRangeToMainDocument(
     {
@@ -62,7 +112,14 @@ export function rangeCoversEditorLine(
     },
     lineMap
   );
-  return mapped != null && mapped.start.line <= editorLine && mapped.end.line >= editorLine;
+  if (mapped != null) {
+    return mapped.start.line <= editorLine && mapped.end.line >= editorLine;
+  }
+  if (!editorUri || !lineMap?.length) return false;
+  const startInc = mapExpandedLineToIncludeEditor(lineMap, range.start.line, editorUri);
+  const endInc = mapExpandedLineToIncludeEditor(lineMap, range.end.line, editorUri);
+  if (startInc == null || endInc == null) return false;
+  return startInc <= editorLine && endInc >= editorLine;
 }
 
 /** Где лежит expanded-строка с точки зрения редактора / файла include. */

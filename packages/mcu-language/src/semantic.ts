@@ -15,11 +15,13 @@ import { computeBodyVolumeCm3 } from "./bodyVolume";
 import { evaluateExpression } from "./expression";
 import { analyzeBodyParameterCounts } from "./bodyParamValidation";
 import { analyzeEnergyGroupStatements } from "./energyGroups";
+import { analyzeBurnupSemantics } from "./burnupSemantics";
 import { analyzeMatrCardParams } from "./matrCardValidation";
 import { analyzeNuclideParameterCounts } from "./nuclideParamValidation";
 import { analyzePositiveQuantities } from "./positiveQuantities";
 import { analyzeUndefinedVariables } from "./variableRefs";
 import { computeMaterialMassDensityGcm3 } from "./materialDensity";
+import { analyzeMaterialActivity } from "./materialActivity";
 import {
   buildSumIsotopeStatesByOffset,
   evaluateSumIsotopeMembership,
@@ -29,6 +31,7 @@ import { buildZoneRegistrationMap } from "./zoneRegistration";
 import { buildScopedVars, constScopeKey } from "./constantScope";
 import { collectZoneBodyRefs, isAllSpaceZoneRef } from "./zoneBodyRefs";
 import { formatExpandedLineRef } from "./includeLineMap";
+import { analyzeCrossModuleLinks } from "./crossModuleAudit";
 
 export function analyzeSemantics(ast: DocumentAst): DiagnosticMessage[] {
   const diags: DiagnosticMessage[] = [...ast.diagnostics];
@@ -156,34 +159,6 @@ export function analyzeSemantics(ast: DocumentAst): DiagnosticMessage[] {
           const kinds = [...new Set(memberships.flatMap((x) => x.kinds))].map((k) =>
             k.toUpperCase()
           );
-          // #region agent log
-          if (m.number === 25 || m.number === 34 || m.nuclides.length <= 2) {
-            fetch("http://127.0.0.1:7911/ingest/3304a270-bbbf-4e90-96de-6ba27b8f72bf", {
-              method: "POST",
-              headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "fded15" },
-              body: JSON.stringify({
-                sessionId: "fded15",
-                runId: "pre-fix",
-                hypothesisId: "B",
-                location: "semantic.ts:matr-empty-sum",
-                message: "flagging matr-empty via sum isotope",
-                data: {
-                  mat: m.number,
-                  kinds,
-                  siden: sumState.siden,
-                  listMode: sumState.listMode,
-                  nuclides: m.nuclides.map((n, i) => ({
-                    name: n.name,
-                    dens: n.density,
-                    inSum: memberships[i]?.inSum,
-                    reasons: memberships[i]?.reasons,
-                  })),
-                },
-                timestamp: Date.now(),
-              }),
-            }).catch(() => {});
-          }
-          // #endregion
           diags.push({
             severity: "error",
             message: `MATR ${m.number}: материал пуст — все нуклиды в суммарном изотопе (${kinds.join("/")})`,
@@ -298,6 +273,8 @@ export function analyzeSemantics(ast: DocumentAst): DiagnosticMessage[] {
   diags.push(...analyzeBodyParameterCounts(ast));
   diags.push(...analyzeNuclideParameterCounts(ast));
   diags.push(...analyzeMatrCardParams(ast));
+  diags.push(...analyzeBurnupSemantics(ast));
+  diags.push(...analyzeCrossModuleLinks(ast));
 
   return diags;
 }
@@ -407,24 +384,33 @@ export function buildSummaries(ast: DocumentAst): {
       list: new Set<string>(),
       siden: null,
     };
+    const nuclides = m.nuclides.map((n) => {
+      const sum = evaluateSumIsotopeMembership(n, sumState, vars);
+      return {
+        name: n.name,
+        concentration: n.density,
+        range: n.range,
+        ...(sum.inSum ? { sumIsotope: { reasons: sum.reasons } } : {}),
+      };
+    });
+    const sumIsotopeCount = nuclides.filter((n) => n.sumIsotope).length;
+    const activity = analyzeMaterialActivity(m, vars);
+    const activityBqPerG =
+      activity.totalBqPerCm3 != null && massDensityGcm3 != null && massDensityGcm3 > 0
+        ? activity.totalBqPerCm3 / massDensityGcm3
+        : null;
     return {
       number: m.number,
       group: m.group,
       temperature: m.temperature,
       nuclideCount: m.nuclides.length,
+      sumIsotopeCount,
       nuclidesPreview: m.nuclides.map((n) => n.name).slice(0, 5).join(", ") + (m.nuclides.length > 5 ? "…" : ""),
       massDensityGcm3,
       volumeCm3,
       massG,
-      nuclides: m.nuclides.map((n) => {
-        const sum = evaluateSumIsotopeMembership(n, sumState, vars);
-        return {
-          name: n.name,
-          concentration: n.density,
-          range: n.range,
-          ...(sum.inSum ? { sumIsotope: { reasons: sum.reasons } } : {}),
-        };
-      }),
+      activityBqPerG,
+      nuclides,
       range: m.range,
     };
   });

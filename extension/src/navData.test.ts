@@ -6,6 +6,7 @@ import { analyzeDocument } from "@mcuhelper/mcu-language";
 import {
   buildNavTree,
   buildFragmentsTree,
+  buildIncludeGraphSection,
   buildMaterialsTree,
   buildZonesTree,
   buildObjectsTree,
@@ -247,6 +248,73 @@ describe("navData", () => {
     const incIdx = kids.findIndex((c) => c.id.startsWith("include-"));
     const matrIdx = kids.findIndex((c) => c.label === "MATR");
     assert.ok(pinIdx < incIdx && incIdx < matrIdx);
+  });
+
+  it("fragments tree prepends include graph section that opens include file", () => {
+    const payload: IndexPayload = {
+      fragments: [{ id: "physical", startLine: 0, endLine: 4 }],
+      includes: [
+        {
+          path: "si.inc",
+          exists: true,
+          fragment: "physical",
+          range: { start: { line: 1, character: 9 }, end: { line: 1, character: 15 } },
+        },
+      ],
+      includeGraph: [
+        {
+          path: "si.inc",
+          uri: "file:///si.inc",
+          exists: true,
+          encoding: "utf8",
+          diagCount: 2,
+          mainLine: 1,
+        },
+        {
+          path: "gone.inc",
+          exists: false,
+          mainLine: 3,
+        },
+      ],
+      statements: [
+        {
+          label: "PIN",
+          text: "PIN 0 0",
+          fragment: "physical",
+          range: { start: { line: 0, character: 0 }, end: { line: 0, character: 7 } },
+        },
+      ],
+      summaries: {
+        materials: [],
+        zones: [],
+        objects: [],
+        constants: [],
+        bodies: [],
+        nets: [],
+        lattices: [],
+      },
+    };
+    const tree = buildFragmentsTree(payload, "file:///t.mcu");
+    assert.strictEqual(tree[0]!.id, "include-graph");
+    assert.strictEqual(tree[0]!.label, "#include");
+    assert.strictEqual(tree[1]!.label, "PIN");
+
+    const section = buildIncludeGraphSection(payload, "file:///t.mcu");
+    assert.ok(section);
+    assert.strictEqual(section!.children!.length, 2);
+    const ok = section!.children![0]!;
+    assert.strictEqual(ok.label, "si.inc");
+    assert.strictEqual(ok.uri, "file:///si.inc");
+    assert.strictEqual(ok.range?.start.line, 0);
+    assert.ok(ok.description?.includes("utf8"));
+    assert.ok(ok.description?.includes("2 диаг."));
+    assert.ok(ok.badges?.includes("2"));
+
+    const missing = section!.children![1]!;
+    assert.strictEqual(missing.uri, "file:///t.mcu");
+    assert.strictEqual(missing.range?.start.line, 3);
+    assert.ok(missing.muted);
+    assert.ok(missing.badges?.includes("missing"));
   });
 
   it("fragments tree marks missing include", () => {

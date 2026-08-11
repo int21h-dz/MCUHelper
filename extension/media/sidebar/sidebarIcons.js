@@ -63,6 +63,8 @@
       '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 01-8.5 3.5M3 8a5 5 0 018.5-3.5" stroke="currentColor" fill="none" stroke-width="1.4" stroke-linecap="round"/><path d="M12.5 2.5v3h-3M3.5 13.5v-3h3" stroke="currentColor" fill="none" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     output:
       '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="2.5" width="11" height="11" rx="1.5" stroke="currentColor" fill="none" stroke-width="1.3"/><path d="M5 6h6M5 8.5h6M5 11h4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
+    flame:
+      '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8c1.8 2.2 3.2 3.6 3.2 5.7A3.2 3.2 0 018 10.7a3.2 3.2 0 01-3.2-3.2C4.8 5.4 6.2 4 8 1.8z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 14.2c-2.4 0-4.2-1.5-4.2-3.6 0-1.4.8-2.5 2-3.5.3 1.2 1.1 2 2.2 2 1.1 0 1.9-.8 2.2-2 1.2 1 2 2.1 2 3.5 0 2.1-1.8 3.6-4.2 3.6z" fill="currentColor" opacity=".9"/></svg>',
     gear:
       '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.2" stroke="currentColor" fill="none" stroke-width="1.3"/><path d="M8 2.2v1.6M8 12.2v1.6M2.2 8h1.6M12.2 8h1.6M3.9 3.9l1.1 1.1M11 11l1.1 1.1M12.1 3.9L11 5M5 11l-1.1 1.1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
     heart:
@@ -76,7 +78,7 @@
       title: "Запуск",
       icon: "run",
       accent: "#e8913a",
-      hint: "Debug (Ctrl+Alt+D) · Run (Ctrl+Alt+R) · Continue (Ctrl+Alt+Shift+C) · Final (Ctrl+Alt+F). Пути — шестерёнка в заголовке или Ctrl+Alt+P",
+      hint: "Debug (Ctrl+Alt+D) · Run (Ctrl+Alt+R) · Continue (Ctrl+Alt+Shift+C) · Final (Ctrl+Alt+F) · Burnup (Ctrl+Alt+B). Пути — шестерёнка в заголовке или Ctrl+Alt+P",
     },
     "mcuhelper.catalog": {
       title: "Каталог",

@@ -45,12 +45,12 @@ describe("planAddToSumIsotope", () => {
     assert.equal(plan.kind, "already");
   });
 
-  it("removes name from SINOT", () => {
+  it("removes name from SINOT and inserts SI", () => {
     const lines = ["SINOT FP1 AM241", "MATR 1", "FP1 1e-10"];
     const plan = planAddToSumIsotope(lines, "FP1", 2);
     assert.equal(plan.kind, "replace-line");
     if (plan.kind === "replace-line") {
-      assert.equal(plan.newText, "SINOT AM241");
+      assert.equal(plan.newText, "SINOT AM241\nSI FP1");
     }
   });
 
@@ -60,6 +60,15 @@ describe("planAddToSumIsotope", () => {
     assert.equal(plan.kind, "replace-line");
     if (plan.kind === "replace-line") {
       assert.equal(plan.newText, "SI FP1");
+    }
+  });
+
+  it("inserts SI when SINOT is active but name is not listed", () => {
+    const lines = ["PIN", "SINOT U235", "MATR 1", "FP1 1e-10"];
+    const plan = planAddToSumIsotope(lines, "FP1", 3);
+    assert.equal(plan.kind, "insert-line");
+    if (plan.kind === "insert-line") {
+      assert.equal(plan.text, "SI FP1");
     }
   });
 

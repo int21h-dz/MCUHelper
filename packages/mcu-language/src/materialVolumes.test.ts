@@ -57,8 +57,8 @@ FINISH`,
 
   it("buildMaterialMassRows resolves EQU nuclide concentration", () => {
     const equAst = parseDocument(
-      `PIN 1 0
-EQU CZR = 0.04273
+      `EQU CZR = 0.04273
+PIN 1 0
 MATR 1
 ZR CZR
 VOL 10
@@ -89,6 +89,21 @@ FINISH`,
     }
   });
 
+  it("formatVolCardHover uses VOL card values not unit volume 1", () => {
+    const burnupPathLocal = path.join(__dirname, "../../../RUNTEST/BURNUPR/burnup");
+    if (!fs.existsSync(burnupPathLocal)) return;
+    const burnAst = parseDocument(fs.readFileSync(burnupPathLocal, "utf8"), { uri: "burnup-vol" });
+    const hover = formatVolCardHover(burnAst);
+    assert.ok(hover.includes("0.45"), hover);
+    assert.ok(hover.includes("0.17"), hover);
+    assert.ok(hover.includes("0.76"), hover);
+    assert.ok(hover.includes("Значения с карты"), hover);
+    const clad = buildMaterialMassRows(burnAst).find((r) => r.number === 2);
+    assert.ok(clad?.volumeCm3 != null && Math.abs(clad.volumeCm3 - 0.17) < 1e-9);
+    assert.ok(clad?.massG != null && clad.massG > 1 && clad.massG < 1.3, `mass=${clad?.massG}`);
+    assert.ok(!/\| 2 \| 1(\.0+)? \|/.test(hover), "MATR 2 must not show V=1");
+  });
+
   it("specificBurnupMwdPerKg", () => {
     assert.strictEqual(specificBurnupMwdPerKg(100, 0), null);
     const v = specificBurnupMwdPerKg(1000, 50);
@@ -100,5 +115,20 @@ FINISH`,
   it("formatVolCardHover when VOL missing", () => {
     const noVol = parseDocument("PIN 1 0\nFINISH", { uri: "novol" });
     assert.ok(formatVolCardHover(noVol).includes("не найдена"));
+  });
+
+  it("parses natural U dens inside MATR (not zone union U)", () => {
+    const uAst = parseDocument(
+      `PIN 1 0
+MATR 1
+U235 0.0008255
+U238 0.022105
+U     0.1
+O     0.045861
+FINISH`,
+      { uri: "nat-u" }
+    );
+    const names = uAst.materials[0]!.nuclides.map((n) => n.name.toUpperCase());
+    assert.deepStrictEqual(names, ["U235", "U238", "U", "O"]);
   });
 });

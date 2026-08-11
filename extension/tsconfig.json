@@ -6,7 +6,7 @@
     "lib": ["ES2020"],
     "baseUrl": ".",
     "paths": {
-      "@mcuhelper/mcu-language": ["../packages/mcu-language/dist/index.d.ts"]
+      "@mcuhelper/mcu-language": ["../packages/mcu-language/dist/index"]
     }
   },
   "include": ["src/**/*"]

@@ -9,6 +9,7 @@ const RUN_COMMAND_ALLOWLIST = new Set([
   "mcuhelper.runCalculation",
   "mcuhelper.continueCalculation",
   "mcuhelper.finalOutput",
+  "mcuhelper.burnup",
   "mcuhelper.configureSolver",
   "mcuhelper.editDefaultPhy",
 ]);

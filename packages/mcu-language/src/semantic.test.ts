@@ -2,6 +2,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert";
 import { parseDocument } from "./parser";
 import { analyzeSemantics, buildSummaries } from "./semantic";
+import { clearAwLibTable, parseAwLib, setAwLibTable } from "./awLib";
+import { clearParameteThrTable, parseParameteThr, setParameteThrTable } from "./parameteThr";
 
 function diags(text: string, uri = "semantic.mcu") {
   return analyzeSemantics(parseDocument(text, { uri }));
@@ -11,6 +13,24 @@ describe("semantic diagnostics", () => {
   it("errors on duplicate global EQU", () => {
     const d = diags("EQU A = 1\nEQU A = 2\nFINISH");
     assert.ok(d.some((x) => x.code === "const-redef" && x.message.includes("A")));
+  });
+
+  it("errors on EQU/SET inside physical (PIN) module", () => {
+    const d = diags("PIN 1 0\nEQU DENS = 1e-3\nMATR 1\nU235 1e-3\nFINISH");
+    assert.ok(
+      d.some((x) => x.code === "card-wrong-fragment" && /EQU/i.test(x.message)),
+      d.map((x) => `${x.code}:${x.message}`).join(" | ")
+    );
+    const dSet = diags("PIN 1 0\nSET DENS = 1e-3\nMATR 1\nU235 1e-3\nFINISH");
+    assert.ok(
+      dSet.some((x) => x.code === "card-wrong-fragment" && /SET/i.test(x.message)),
+      dSet.map((x) => `${x.code}:${x.message}`).join(" | ")
+    );
+  });
+
+  it("allows EQU in geometry (HEAD)", () => {
+    const d = diags("HEAD 3 0\nEQU R = 10\nRPP BOX 0 R 0 R 0 R\nFINISH");
+    assert.ok(!d.some((x) => x.code === "card-wrong-fragment" && /EQU/i.test(x.message)));
   });
 
   it("errors on TRANSF with unknown prototype", () => {
@@ -514,5 +534,30 @@ FINISH`;
     const m = buildSummaries(ast).materials[0];
     assert.ok(m.volumeCm3 != null && Math.abs(m.volumeCm3 - 0.5) < 1e-9);
     assert.ok(m.massG != null && m.massG > 0);
+  });
+
+  it("material summary activityBqPerG from PARAMETE.THR and ρ", () => {
+    setAwLibTable(
+      parseAwLib(`
+CS37  55137 136.907089
+`)
+    );
+    setParameteThrTable(
+      parseParameteThr(`
+LONGLIFE ISOTOPES
+LIST
+Cs-137  551370   137.      3.000E+00 y
+stop
+`)
+    );
+    try {
+      const ast = parseDocument("PIN 1 0\nMATR 1\nCS37 1.0E-6\nFINISH", { uri: "act.mcu" });
+      const m = buildSummaries(ast).materials[0]!;
+      assert.ok(m.massDensityGcm3 != null && m.massDensityGcm3 > 0);
+      assert.ok(m.activityBqPerG != null && m.activityBqPerG > 0);
+    } finally {
+      clearParameteThrTable();
+      clearAwLibTable();
+    }
   });
 });

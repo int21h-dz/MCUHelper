@@ -165,6 +165,43 @@ export function analyzeMaterialMassDensity(
   return { rho: null, usedCount: 0, skipped };
 }
 
+/**
+ * Массовая доля нуклида в материале (0…1).
+ * Без DENSxx / DENSAA|DENSWA: ∝ n·A; DENSAW|DENSWW: dens уже весовые доли.
+ */
+export function computeNuclideMassFractionInMaterial(
+  material: Pick<MaterialNode, "nuclides" | "densParam" | "densValue">,
+  nuclideName: string,
+  vars: Map<string, number> = new Map()
+): number | null {
+  const want = nuclideName.trim().toUpperCase();
+  if (!want || !material.nuclides.length) return null;
+
+  const used: Array<{ name: string; conc: number; weight: number }> = [];
+  for (const n of material.nuclides) {
+    const conc = resolveNuclideConcentration(n.density, vars);
+    if (conc == null) continue;
+    const weight = mcuNuclideAtomicWeight(n.name);
+    if (weight == null) continue;
+    used.push({ name: n.name.trim().toUpperCase(), conc, weight });
+  }
+  if (!used.length) return null;
+
+  const param = material.densParam?.toUpperCase();
+  const isWeightDens = param === "DENSAW" || param === "DENSWW";
+
+  let thisMass = 0;
+  let totalMass = 0;
+  for (const u of used) {
+    const m = isWeightDens ? u.conc : u.conc * u.weight;
+    if (!(m >= 0) || !Number.isFinite(m)) continue;
+    totalMass += m;
+    if (u.name === want) thisMass += m;
+  }
+  if (totalMass <= 0 || thisMass < 0) return null;
+  return thisMass / totalMass;
+}
+
 export function computeMaterialMassDensityGcm3(
   material: Pick<MaterialNode, "nuclides" | "densParam" | "densValue">,
   vars: Map<string, number> = new Map()

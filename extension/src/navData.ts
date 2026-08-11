@@ -75,16 +75,29 @@ export interface IndexPayload {
       | "burnup";
     range: SourceRange;
   }>;
+  /** Граф main → `#include` (клик открывает файл include). */
+  includeGraph?: Array<{
+    path: string;
+    uri?: string;
+    fsPath?: string;
+    exists: boolean;
+    encoding?: string;
+    diagCount?: number;
+    mainLine: number;
+    nestedInclude?: boolean;
+  }>;
   summaries: {
     materials: Array<{
       number: number;
       group?: string;
       temperature?: number;
       nuclideCount: number;
+      sumIsotopeCount?: number;
       nuclidesPreview: string;
       massDensityGcm3: number | null;
       volumeCm3: number | null;
       massG: number | null;
+      activityBqPerG?: number | null;
       nuclides: Array<{
         name: string;
         concentration: string;
@@ -212,6 +225,13 @@ function formatMaterialMass(massG: number | null | undefined): string {
   return `m≈${massG.toPrecision(3)} г`;
 }
 
+function formatActivitySidebar(bqPerG: number): string {
+  const abs = Math.abs(bqPerG);
+  if (abs >= 1e6) return `${(bqPerG / 1e6).toPrecision(3)} МБк/г`;
+  if (abs >= 1e3) return `${(bqPerG / 1e3).toPrecision(3)} кБк/г`;
+  return `${bqPerG.toPrecision(3)} Бк/г`;
+}
+
 function formatBodyDescription(b: IndexPayload["summaries"]["bodies"][number]): string {
   const vol = formatBodyVolume(b.volumeCm3);
   let s = b.bodyType;
@@ -311,8 +331,51 @@ function basenameIncludePath(incPath: string): string {
   return slash >= 0 ? norm.slice(slash + 1) : norm;
 }
 
+/** Секция графа `#include` вверху «Навигации» — клик открывает файл include. */
+export function buildIncludeGraphSection(index: IndexPayload, mainUri: string): NavTreeNode | null {
+  const graph = index.includeGraph ?? [];
+  if (graph.length === 0) return null;
+
+  return {
+    id: "include-graph",
+    label: "#include",
+    description: `${graph.length} файл(ов)`,
+    children: graph.map((n, i) => {
+      const name = basenameIncludePath(n.path);
+      const parts: string[] = [];
+      if (!n.exists) parts.push("не найден");
+      if (n.nestedInclude) parts.push("вложенный #include");
+      if (n.encoding) parts.push(n.encoding);
+      if (n.diagCount != null && n.diagCount > 0) parts.push(`${n.diagCount} диаг.`);
+      parts.push(`← стр. ${n.mainLine + 1}`);
+
+      const badges: string[] = [];
+      if (!n.exists) badges.push("missing");
+      if (n.nestedInclude) badges.push("nested");
+      if (n.diagCount != null && n.diagCount > 0) badges.push(String(n.diagCount));
+
+      const openInclude = Boolean(n.exists && n.uri);
+      return {
+        id: `incgraph-${i}`,
+        label: name,
+        description: parts.join(" · "),
+        badges: badges.length ? badges : undefined,
+        muted: !n.exists || Boolean(n.nestedInclude),
+        tooltip: n.fsPath || n.path,
+        uri: openInclude ? n.uri : mainUri,
+        range: openInclude
+          ? { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }
+          : {
+              start: { line: n.mainLine, character: 0 },
+              end: { line: n.mainLine, character: 0 },
+            },
+      };
+    }),
+  };
+}
+
 export function buildFragmentsTree(index: IndexPayload, uri: string): NavTreeNode[] {
-  return (index.fragments ?? []).map((fragment, i) => {
+  const fragments = (index.fragments ?? []).map((fragment, i) => {
     const meta = FRAGMENT_META[fragment.id];
     const startLine = fragment.startLine + 1;
     const endLine = fragment.endLine + 1;
@@ -388,6 +451,9 @@ export function buildFragmentsTree(index: IndexPayload, uri: string): NavTreeNod
       children: children.map((c) => c.node),
     };
   });
+
+  const includeSection = buildIncludeGraphSection(index, uri);
+  return includeSection ? [includeSection, ...fragments] : fragments;
 }
 
 export function buildMaterialsTree(
@@ -400,9 +466,13 @@ export function buildMaterialsTree(
     const vol = formatBodyVolume(m.volumeCm3);
     const mass = formatMaterialMass(m.massG);
     const parts = [`${m.nuclideCount} нукл.`];
+    if ((m.sumIsotopeCount ?? 0) > 0) parts.push(`${m.sumIsotopeCount} в SI`);
     if (rho) parts.push(rho);
     if (m.volumeCm3 != null && vol) parts.push(vol);
     if (mass) parts.push(mass);
+    if (m.activityBqPerG != null && m.activityBqPerG > 0) {
+      parts.push(`A≈${formatActivitySidebar(m.activityBqPerG)}`);
+    }
     const badges: string[] = [];
     if (rho) badges.push(rho.replace("ρ≈", "ρ "));
     const titleParts: string[] = [];

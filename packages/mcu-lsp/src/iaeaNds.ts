@@ -628,6 +628,7 @@ async function fetchNaturalCompositionMarkdown(
 }
 
 function getCachedNaturalIsotopes(element: string): IsotopeAbundance[] | null {
+  ensureBundledNaturalAbundanceIndex();
   if (!naturalAbundanceIndex) return null;
   const list = naturalAbundanceIndex.get(element.toUpperCase());
   return list?.length ? list : null;
@@ -636,7 +637,7 @@ function getCachedNaturalIsotopes(element: string): IsotopeAbundance[] | null {
 export function prefetchNaturalAbundance(element: string): void {
   ensureBundledNaturalAbundanceIndex();
   scheduleNaturalAbundanceUpgrade();
-  const key = `natural:${element.toUpperCase()}`;
+  const key = `${CACHE_FORMAT}:natural:${element.toUpperCase()}`;
   if (readCacheEntry(key) || inFlight.has(key)) return;
   const job = (async () => {
     const md = await fetchNaturalCompositionMarkdown(element);

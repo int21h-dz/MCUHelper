@@ -12,7 +12,9 @@ import {
   parseDefaultPhy,
   buildDefaultPhyTable,
   setDefaultPhyTable,
-  sumIsotopeForNuclide,
+  buildSumIsotopeStatesByOffset,
+  buildScopedVars,
+  evaluateSumIsotopeMembership,
   type DocumentAst,
 } from "@mcuhelper/mcu-language";
 import { DiagnosticSeverity, type Diagnostic } from "vscode-languageserver";
@@ -126,9 +128,10 @@ function locateNuclideTokenRange(
 
 /**
  * Нуклид отсутствует в DEFAULT.PHY:
- * - уже в суммарном изотопе через SI/SINOT → игнор;
+ * - уже в суммарном изотопе через SI → игнор;
  * - только через SIDEN → warning (лучше явно в SI);
  * - не в сумме → error.
+ * SINOT только исключает из суммы и сам по себе покрытие банка не даёт.
  */
 export function collectDefaultPhyMissingDiagnostics(
   doc: {
@@ -140,14 +143,33 @@ export function collectDefaultPhyMissingDiagnostics(
   const table = getDefaultPhyTable();
   if (!table?.entryCount) return [];
   const out: Diagnostic[] = [];
+  /** Один diag на имя — иначе full-core забивает Problems. */
+  const seen = new Set<string>();
+  const sumStates = buildSumIsotopeStatesByOffset(
+    ast.statements,
+    ast.materials.map((m) => m.range.offset),
+    ast.constants
+  );
+
   for (const mat of ast.materials) {
+    const sumState = sumStates.get(mat.range.offset) ?? {
+      listMode: "none" as const,
+      list: new Set<string>(),
+      siden: null,
+    };
+    const vars = buildScopedVars(ast.constants, mat.range.offset, "global");
+
     for (const n of mat.nuclides) {
+      const key = n.name.trim().toUpperCase();
+      if (seen.has(key)) continue;
       if (getDefaultPhyEntry(n.name)) continue;
-      const sum = sumIsotopeForNuclide(ast, mat, n);
-      if (sum.kinds.includes("si") || sum.kinds.includes("sinot")) continue;
+
+      const sum = evaluateSumIsotopeMembership(n, sumState, vars);
+      if (sum.kinds.includes("si")) continue;
 
       const range = locateNuclideTokenRange(doc, n);
       if (!range) continue;
+      seen.add(key);
 
       if (sum.kinds.includes("siden")) {
         out.push({

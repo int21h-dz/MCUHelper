@@ -3,7 +3,13 @@ import assert from "node:assert";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { analyzeDocument, getDocumentIndex, clearDocument, resetDocumentParseCount, getDocumentParseCount } from "./document";
+import { analyzeDocument, getDocumentIndex, clearDocument, rebuildCachedSummaries, resetDocumentParseCount, getDocumentParseCount } from "./document";
+import {
+  clearParameteThrTable,
+  parseParameteThr,
+  setParameteThrTable,
+} from "./parameteThr";
+import { clearAwLibTable, parseAwLib, setAwLibTable } from "./awLib";
 
 describe("document", () => {
   const uri = "file:///test/doc.mcu";
@@ -47,6 +53,99 @@ describe("document", () => {
     const second = analyzeDocument(uri, text, 10);
     assert.strictEqual(first, second);
     assert.strictEqual(getDocumentParseCount(), 1);
+  });
+
+  it("returns cached index when only LSP version changes", () => {
+    clearDocument(uri);
+    resetDocumentParseCount();
+    const text = "PIN 1 0\nFINISH";
+    const first = analyzeDocument(uri, text, 10);
+    const second = analyzeDocument(uri, text, 11);
+    assert.strictEqual(first, second);
+    assert.strictEqual(second.version, 11);
+    assert.strictEqual(getDocumentParseCount(), 1);
+  });
+
+  it("same text and version reuses cache after hash check", () => {
+    clearDocument(uri);
+    resetDocumentParseCount();
+    const text = "PIN 1 0\nFINISH";
+    const first = analyzeDocument(uri, text, 1, { expandInclude: false });
+    const second = analyzeDocument(uri, text, 1, { expandInclude: false });
+    assert.strictEqual(first, second);
+    assert.strictEqual(getDocumentParseCount(), 1);
+  });
+
+  it("rebuildCachedSummaries refreshes activity after THR without reparse", () => {
+    clearDocument(uri);
+    clearParameteThrTable();
+    clearAwLibTable();
+    resetDocumentParseCount();
+    setAwLibTable(
+      parseAwLib(`
+CS37  55137 136.907089
+`)
+    );
+    const text = "PIN 1 0\nMATR 1\nCS37 1.0E-6\nFINISH";
+    const before = analyzeDocument(uri, text, 1);
+    assert.strictEqual(before.summaries.materials[0]!.activityBqPerG, null);
+    assert.strictEqual(getDocumentParseCount(), 1);
+
+    setParameteThrTable(
+      parseParameteThr(`
+LONGLIFE ISOTOPES
+LIST
+Cs-137  551370   137.      3.000E+00 y
+stop
+`)
+    );
+    const n = rebuildCachedSummaries();
+    assert.ok(n >= 1);
+    assert.strictEqual(getDocumentParseCount(), 1);
+    const after = getDocumentIndex(uri)!;
+    assert.ok(after.summaries.materials[0]!.activityBqPerG != null);
+    assert.ok(after.summaries.materials[0]!.activityBqPerG! > 0);
+    clearParameteThrTable();
+    clearAwLibTable();
+    clearDocument(uri);
+  });
+
+  it("rebuildCachedSummaries(uris) only touches listed documents", () => {
+    const uriA = "file:///test/doc-a.mcu";
+    const uriB = "file:///test/doc-b.mcu";
+    clearDocument(uriA);
+    clearDocument(uriB);
+    clearParameteThrTable();
+    clearAwLibTable();
+    setAwLibTable(parseAwLib(`CS37  55137 136.907089\n`));
+    const text = "PIN 1 0\nMATR 1\nCS37 1.0E-6\nFINISH";
+    analyzeDocument(uriA, text, 1);
+    analyzeDocument(uriB, text, 1);
+    setParameteThrTable(
+      parseParameteThr(`
+LONGLIFE ISOTOPES
+LIST
+Cs-137  551370   137.      3.000E+00 y
+stop
+`)
+    );
+    const n = rebuildCachedSummaries([uriA]);
+    assert.strictEqual(n, 1);
+    assert.ok(getDocumentIndex(uriA)!.summaries.materials[0]!.activityBqPerG! > 0);
+    assert.strictEqual(getDocumentIndex(uriB)!.summaries.materials[0]!.activityBqPerG, null);
+    clearParameteThrTable();
+    clearAwLibTable();
+    clearDocument(uriA);
+    clearDocument(uriB);
+  });
+
+  it("re-parses when text changes even if version stays the same", () => {
+    clearDocument(uri);
+    resetDocumentParseCount();
+    analyzeDocument(uri, "PIN 1 0\nFINISH", 1);
+    const second = analyzeDocument(uri, "PIN 1 0\nMATR 1\nU235 1\nFINISH", 1);
+    assert.strictEqual(getDocumentParseCount(), 2);
+    assert.strictEqual(second.ast.materials.length, 1);
   });
 
   it("caches expanded and source parses separately", () => {

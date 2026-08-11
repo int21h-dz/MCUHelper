@@ -4,6 +4,7 @@ import type { MaterialNode } from "./ast";
 import {
   analyzeMaterialMassDensity,
   computeMaterialMassDensityGcm3,
+  computeNuclideMassFractionInMaterial,
   formatMassDensityGcm3,
   mcuNuclideAtomicWeight,
   resolveNuclideConcentration,
@@ -168,5 +169,39 @@ describe("computeMaterialMassDensityGcm3", () => {
       } as MatPick),
       null
     );
+  });
+});
+
+describe("computeNuclideMassFractionInMaterial", () => {
+  it("uses n·A share without DENSxx", () => {
+    // U235:U238 = 1:3 by atoms → mass ≈ 235/(235+3*238)
+    const frac = computeNuclideMassFractionInMaterial(
+      {
+        nuclides: [
+          { name: "U235", density: "1.0E-2" },
+          { name: "U238", density: "3.0E-2" },
+        ],
+      } as MatPick,
+      "U235"
+    );
+    assert.ok(frac != null);
+    const expect = 235 / (235 + 3 * 238);
+    assert.ok(Math.abs(frac! - expect) < 1e-6, String(frac));
+  });
+
+  it("uses weight dens as-is for DENSAW", () => {
+    const frac = computeNuclideMassFractionInMaterial(
+      {
+        nuclides: [
+          { name: "U235", density: "0.25" },
+          { name: "U238", density: "0.75" },
+        ],
+        densParam: "DENSAW",
+        densValue: 10.5,
+      } as MatPick,
+      "U235"
+    );
+    assert.ok(frac != null);
+    assert.ok(Math.abs(frac! - 0.25) < 1e-9, String(frac));
   });
 });

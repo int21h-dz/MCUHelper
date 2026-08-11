@@ -15,6 +15,17 @@ export function parseIncludeLine(line: string): { path: string; pathStart: numbe
   return { path: incPath, pathStart, pathEnd: pathStart + incPath.length };
 }
 
+/**
+ * Есть ли реальная директива `#include` (не CodeLens-маркер `** [mcuhelper] ▼ #include …`).
+ * Regex `/#\s*include\b/` ложно срабатывает на маркерах inline-развёртки.
+ */
+export function textHasIncludeDirective(text: string): boolean {
+  for (const line of text.split(/\r?\n/)) {
+    if (parseIncludeLine(line)) return true;
+  }
+  return false;
+}
+
 /** Кандидаты путей к включаемому файлу относительно каталога варианта. */
 export function includePathCandidates(includePath: string): string[] {
   const trimmed = includePath.trim();

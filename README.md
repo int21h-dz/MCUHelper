@@ -91,7 +91,7 @@ flowchart LR
   - отсутствующий `#include` и ошибки солвера из `NAME.LST` после запуска
 - **Автодополнение** — все карты (~229 меток), алиасы, аргументы карт (`SUMZON`→`SUMB`…`ZONG`, `CONTEN`→`DENS`…, `CODE`→`RSTP`…), символы документа
 - **Signature Help** — подсказка активного параметра при вводе тел (`RCC`, `RCZ`, …), карт (`MATR`, `POWER`, `STEP`, `SI`/`SINOT`/`SIDEN`, …), строк нуклидов
-- **Всплывающие подсказки** — описания из UserGuide; для нуклидов — концентрация, плотность, атомная масса, объёмная активность (Бк/см³) по T½ из PARAMETE.THR; данные **IAEA NDS** (природные смеси — bundled fallback без сети для частых элементов + кнопка разложения); для `POWER`/`STEP`, `EMES`/`EPRO`, `VOL` — дополнительные расчёты и мини-отчёты
+- **Всплывающие подсказки** — описания из UserGuide; для нуклидов — концентрация, плотность, атомная масса, удельная активность (Бк/г = a_V/ρ) по T½ из PARAMETE.THR; данные **IAEA NDS** (природные смеси — bundled fallback без сети для частых элементов + кнопка разложения); для `POWER`/`STEP`, `EMES`/`EPRO`, `VOL` — дополнительные расчёты и мини-отчёты
 - **Суммарный изотоп** (UserGuide §8.5) — карты `SI` / `SINOT` / `SIDEN`: нуклиды входящие в суммарный изотоп подсвечиваются серым в редакторе и приглушённо в панели «Материалы»; в hover — причина пометки (список SI/SINOT или порог `SIDEN`)
 - **Автоопределение языка** `mcunr` по содержимому (`PIN`, `MATR`, `HEAD`, …)
 - **Автоопределение кодировки** — UTF-8 / Windows-1251 / CP866 / KOI8-R для legacy-файлов и `#include`
@@ -106,7 +106,7 @@ flowchart LR
 
 | Вкладка | Назначение |
 |---------|------------|
-| **Запуск** | Кнопки Debug / Run / Continue / Final; пути — шестерёнка в заголовке (`Ctrl+Alt+P`); «♥» — поддержка автора |
+| **Запуск** | Кнопки Debug / Run / Continue / Final / Burnup; пути — шестерёнка в заголовке (`Ctrl+Alt+P`); «♥» — поддержка автора |
 | **Каталог** | 8 модулей варианта; карточки карт с hover; drag или клик → вставка шаблона |
 | **Диагностика** | Ошибки и предупреждения текущего файла; группы **`#include`** (переход в include-файл) и **«Сверка изотопов»** (AW/THR vs IAEA, экспорт CSV); открывается после MCU-run при ошибках LST |
 | **Навигация** | Фрагменты варианта, карты/операторы и `#include` (без тел, зон, EQU/SET, CONT); клик по include — к строке директивы в варианте |
@@ -130,6 +130,7 @@ flowchart LR
 | **Run** | `Ctrl+Alt+R` | CALCULATION (`a`) | Полный расчёт; копирует и открывает `NAME.FIN` рядом с вариантом; если FIN нет — открывает LST из temp-run |
 | **Continue** | `Ctrl+Alt+Shift+C` | continue (`c`) | Продолжение расчёта без очистки промежуточных файлов |
 | **Final** | `Ctrl+Alt+F` | OUTPUT (`f`) | Финальная выдача; копирует и открывает `NAME.FIN`; если FIN нет — LST из temp-run |
+| **Burnup** | `Ctrl+Alt+B` | BURNUP (`b`) | Шаг выгорания; открывает `NAME.LST` из temp-run; переход к первой ошибке |
 
 Кнопка **DEFAULT.PHY** на панели «Запуск» (или команда **MCU-NR: DEFAULT.PHY (банк данных)**) открывает таблицу файла из корня MDBNR. Штатно значения по умолчанию для нуклида в расчёте переопределяют картой `DEF` в исходных данных; правка банка влияет на все варианты.
 
@@ -141,7 +142,7 @@ flowchart LR
 
 1. `Ctrl+Shift+P` → **MCU-NR: Настроить горячие клавиши запуска**  
    (или иконка клавиатуры в заголовке вкладки **Запуск**).
-2. Откроется редактор Shortcuts уже с фильтром `mcuhelper.` — видны Debug / Run / Continue / Final / пути.
+2. Откроется редактор Shortcuts уже с фильтром `mcuhelper.` — видны Debug / Run / Continue / Final / Burnup / пути.
 3. Карандаш у строки → новое сочетание → `Enter`.
 
 Если открывали Shortcuts вручную и **ничего не находится**:
@@ -157,9 +158,10 @@ flowchart LR
 | `mcuhelper.runCalculation` | MCU-NR: Run (CALCULATION) | `Ctrl+Alt+R` |
 | `mcuhelper.continueCalculation` | MCU-NR: Continue (CALCULATION) | `Ctrl+Alt+Shift+C` |
 | `mcuhelper.finalOutput` | MCU-NR: Final (OUTPUT) | `Ctrl+Alt+F` |
+| `mcuhelper.burnup` | MCU-NR: Burnup (BURNUP) | `Ctrl+Alt+B` |
 | `mcuhelper.configureSolver` | MCU-NR: Настроить пути запуска | `Ctrl+Alt+P` |
 
-> Debug / Run / Continue / Final срабатывают при активном редакторе с языком `mcunr`. Настройка путей — без этого ограничения.
+> Debug / Run / Continue / Final / Burnup срабатывают при активном редакторе с языком `mcunr`. Настройка путей — без этого ограничения.
 
 Рабочий каталог: `.mcuhelper-runs/<имя_варианта>/` рядом с файлом (имя варианта — из имени открытого файла). Туда копируются вариант и все файлы `#include`. MCU запускается в интегрированном терминале; после завершения разбирается `NAME.LST` и выставляются диагностики.
 
@@ -244,9 +246,11 @@ npm run build
 | Команда | Описание |
 |---------|----------|
 | MCU-NR: Debug (INPUT) | Проверка входа; открывает LST из temp-run; переход к первой ошибке |
+| MCU-NR: Проверить варианты (INPUT) | Batch INPUT для нескольких `.mcu`/`.mcunr`; сводка в Output (ok/fail/warnings/LST) |
 | MCU-NR: Run (CALCULATION) | Полный расчёт; копирует/открывает FIN, иначе LST из temp-run |
 | MCU-NR: Continue (CALCULATION) | Продолжение расчёта |
 | MCU-NR: Final (OUTPUT) | Финальная выдача; копирует/открывает FIN, иначе LST из temp-run |
+| MCU-NR: Burnup (BURNUP) | Шаг выгорания; открывает LST из temp-run; переход к первой ошибке |
 | MCU-NR: Настроить пути запуска | Выбор exe и папки MDBNR (`Ctrl+Alt+P`) |
 | MCU-NR: DEFAULT.PHY (банк данных) | Таблица DEFAULT.PHY из корня MDBNR; штатно для расчёта — карта `DEF` |
 | MCU-NR: Настроить горячие клавиши запуска | Открыть Shortcuts с фильтром `mcuhelper.` |
@@ -273,6 +277,10 @@ npm run build
 
 | Команда | Описание |
 |---------|----------|
+| MCU-NR: Конструктор регистрации | Webview: собрать PTYPE…END и вставить в RGS |
+| MCU-NR: Граф #include | QuickPick зависимостей include |
+| MCU-NR: Сравнить FIN/LST | Сводка Δ метрик + CSV в буфер |
+| MCU-NR: 3D геометрия | Панель геометрии сразу в режиме 3D |
 | MCU-NR: Экспорт диагностик | Вывод Problems в Output |
 | MCU-NR: Отчёт сверки библиотек (Output) | Полный отчёт AW.LIB / PARAMETE.THR (T½) vs IAEA в канал «MCU-NR Helper» |
 | MCU-NR: Следующая диагностика | Переход к следующей LSP-диагностике (`Alt+F8`) |
@@ -305,6 +313,7 @@ npm run build
 | `mcuhelper.autoDetectLanguage` | `true` | Определять MCU-NR по содержимому и переключать язык на `mcunr` |
 | `mcuhelper.autoDetectFromLanguages` | `plaintext`, `txt`, `ini`, … | С каких language id переключать (уже размеченные языки не трогает) |
 | `mcuhelper.autoDetectEncoding` | `true` | Определять кодировку legacy-файлов и при необходимости переоткрывать документ |
+| `mcuhelper.batchConcurrency` | `1` | Параллельность batch INPUT (1–2) |
 | `mcuhelper.trace.server` | `off` | Лог LSP: `off` / `messages` / `verbose` |
 
 Имя варианта для запуска берётся из **имени открытого файла** (без расширения), а не из отдельной настройки.

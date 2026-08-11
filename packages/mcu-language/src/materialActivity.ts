@@ -1,7 +1,7 @@
 /**
- * Объёмная активность по составу MATR: a = λ·n, λ = ln2 / T½.
- * T½ — из PARAMETE.THR (MDBNR); dens — ядерная концентрация MCU (§8.2).
- * Не зависит от карты VOL (инвентарная активность состава, не выгорание).
+ * Активность по составу MATR: объёмная a_V = λ·n, удельная a_m = a_V / ρ.
+ * λ = ln2 / T½ из PARAMETE.THR; dens — ядерная концентрация MCU (§8.2).
+ * UI везде показывает удельную активность (Бк/г).
  */
 
 import type { MaterialNode } from "./ast";
@@ -21,7 +21,7 @@ export interface NuclideActivity {
   /** Ядерная концентрация в единицах MCU (без ×10²⁴). */
   densityMcu: number;
   halfLifeSec: number;
-  /** Бк/см³. */
+  /** Объёмная активность, Бк/см³ (промежуточная величина). */
   activityBqPerCm3: number;
 }
 
@@ -100,16 +100,31 @@ export function activityBqPerCm3(densityMcu: number, halfLifeSec: number): numbe
 }
 
 export function formatActivityBqPerCm3(bq: number): string {
+  return formatActivityWithUnit(bq, "см³");
+}
+
+/** Удельная активность a_m = a_V / ρ [Бк/г]. */
+export function specificActivityBqPerG(activityBqPerCm3: number, rhoGcm3: number): number | null {
+  if (!Number.isFinite(activityBqPerCm3) || activityBqPerCm3 < 0) return null;
+  if (!Number.isFinite(rhoGcm3) || rhoGcm3 <= 0) return null;
+  return activityBqPerCm3 / rhoGcm3;
+}
+
+export function formatActivityBqPerG(bqPerG: number): string {
+  return formatActivityWithUnit(bqPerG, "г");
+}
+
+function formatActivityWithUnit(bq: number, per: "см³" | "г"): string {
   if (!Number.isFinite(bq) || bq < 0) return "—";
-  if (bq === 0) return "0 Бк/см³";
+  if (bq === 0) return `0 Бк/${per}`;
   const abs = Math.abs(bq);
   const units: Array<{ div: number; suffix: string }> = [
-    { div: 1e15, suffix: "ПБк/см³" },
-    { div: 1e12, suffix: "ТБк/см³" },
-    { div: 1e9, suffix: "ГБк/см³" },
-    { div: 1e6, suffix: "МБк/см³" },
-    { div: 1e3, suffix: "кБк/см³" },
-    { div: 1, suffix: "Бк/см³" },
+    { div: 1e15, suffix: `ПБк/${per}` },
+    { div: 1e12, suffix: `ТБк/${per}` },
+    { div: 1e9, suffix: `ГБк/${per}` },
+    { div: 1e6, suffix: `МБк/${per}` },
+    { div: 1e3, suffix: `кБк/${per}` },
+    { div: 1, suffix: `Бк/${per}` },
   ];
   for (const u of units) {
     if (abs >= u.div || u.div === 1) {
@@ -121,7 +136,7 @@ export function formatActivityBqPerCm3(bq: number): string {
       return `${s.endsWith(".") ? s.slice(0, -1) : s} ${u.suffix}`;
     }
   }
-  return `${bq} Бк/см³`;
+  return `${bq} Бк/${per}`;
 }
 
 /**

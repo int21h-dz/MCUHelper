@@ -19,10 +19,17 @@ import { registerTemplateInsert } from "./templateInsert";
 import { buildCatalogPayload } from "./catalogBridge";
 import { registerDiagnosticNavigation, fetchMcuDiagnostics } from "./diagnosticNavigation";
 import { registerIncludePreview } from "./includePreview";
+import { registerMatrCodeLens, updateMatrCodeLensIndex } from "./matrCodeLens";
 import { clearLanguageDetectState, scheduleLanguageDetectOnEdit } from "./languageDetectScheduler";
 import { registerRunPanel, type RunPanelViewProvider } from "./runPanelView";
 import { runMcuInTerminal } from "./mcuTerminalRun";
-import { lstPathCandidates, resolvePostRunOpenTarget, shouldFocusDiagnosticsAfterRun } from "./runPanelHelpers";
+import { runMcuStepFlow } from "./mcuStepRunner";
+import { batchValidateInput } from "./batchValidateCommand";
+import { resolvePostRunOpenTarget, shouldFocusDiagnosticsAfterRun } from "./runPanelHelpers";
+import { runRegistrationBuilder } from "./registrationBuilderCommand";
+import { showIncludeGraph } from "./includeGraphCommand";
+import { compareResults } from "./compareResultsCommand";
+import { registerMcuCodeActions } from "./codeActions";
 import { checkForExtensionUpdates } from "./updateCheck";
 import {
   applySumIsotopeDecorations,
@@ -56,7 +63,7 @@ function pickNewerServerModule(bundled: string, monorepo: string): string {
 }
 
 let client: LanguageClient | undefined;
-let sidebarProviders: Map<SidebarViewId, SidebarViewProvider>;
+let sidebarProviders: Map<SidebarViewId, SidebarViewProvider> | undefined;
 let geometryPanel: GeometryPanel;
 let defaultPhyPanel: DefaultPhyPanel;
 let refreshTimer: ReturnType<typeof setTimeout> | undefined;
@@ -95,35 +102,6 @@ export function activate(context: vscode.ExtensionContext): void {
     return;
   }
   output.appendLine(`LSP server: ${serverModule}`);
-  // #region agent log
-  {
-    let serverHasSumEmpty = false;
-    try {
-      serverHasSumEmpty = fs.readFileSync(serverModule, "utf8").includes("sumStatesByMat");
-    } catch {
-      /* ignore */
-    }
-    fetch("http://127.0.0.1:7911/ingest/3304a270-bbbf-4e90-96de-6ba27b8f72bf", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "fded15" },
-      body: JSON.stringify({
-        sessionId: "fded15",
-        runId: "pre-fix",
-        hypothesisId: "A",
-        location: "extension.ts:serverModule",
-        message: "LSP server module selected",
-        data: {
-          serverModule,
-          bundledExists: fs.existsSync(bundledServer),
-          monorepoExists: fs.existsSync(monorepoServer),
-          serverHasSumEmpty,
-          serverMtime: fs.existsSync(serverModule) ? fs.statSync(serverModule).mtimeMs : null,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-  }
-  // #endregion
 
   const serverOptions: ServerOptions = {
     run: { module: serverModule, transport: TransportKind.ipc, options: { cwd: serverDir } },
@@ -179,9 +157,13 @@ export function activate(context: vscode.ExtensionContext): void {
   registerTemplateInsert(context);
   registerDiagnosticNavigation(context, () => client);
   registerIncludePreview(context);
+  registerMatrCodeLens(context);
   sidebarProviders = createSidebarProviders(context, client);
   setSidebarReadyHandler(() => scheduleRefresh());
+  // Догоняющий refresh: ранний librariesSynced / State.Running могли прийти до providers.
+  scheduleRefresh("all");
   setSumIsotopeDecorationHandler((editor, index) => {
+    updateMatrCodeLensIndex(editor.document.uri.toString(), index);
     if (!sumIsotopeDecorationType || !stableIsotopeDecorationType) return;
     if (!index) {
       clearSumIsotopeDecorations(editor, sumIsotopeDecorationType);
@@ -261,12 +243,19 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("mcuhelper.showNets", () => vscode.commands.executeCommand("mcuhelper.nets.focus")),
     vscode.commands.registerCommand("mcuhelper.showLattices", () => vscode.commands.executeCommand("mcuhelper.lattices.focus")),
     vscode.commands.registerCommand("mcuhelper.showGeometry", () => geometryPanel.show()),
+    vscode.commands.registerCommand("mcuhelper.showGeometry3d", () => geometryPanel.show3d()),
     vscode.commands.registerCommand("mcuhelper.editDefaultPhy", () => defaultPhyPanel.show()),
     vscode.commands.registerCommand("mcuhelper.validateInput", () => validateInput()),
+    vscode.commands.registerCommand("mcuhelper.batchValidateInput", () => runBatchValidateInputCommand()),
     vscode.commands.registerCommand("mcuhelper.debugInput", () => runMcuStepCommand("i")),
     vscode.commands.registerCommand("mcuhelper.runCalculation", () => runMcuStepCommand("c")),
     vscode.commands.registerCommand("mcuhelper.continueCalculation", () => runMcuStepCommand("continue")),
     vscode.commands.registerCommand("mcuhelper.finalOutput", () => runMcuStepCommand("f")),
+    vscode.commands.registerCommand("mcuhelper.burnup", () => runMcuStepCommand("b")),
+    vscode.commands.registerCommand("mcuhelper.registrationBuilder", () => runRegistrationBuilder(context, client)),
+    vscode.commands.registerCommand("mcuhelper.showIncludeGraph", () => showIncludeGraph(client)),
+    vscode.commands.registerCommand("mcuhelper.compareResults", () => compareResults()),
+    registerMcuCodeActions(),
     vscode.commands.registerCommand("mcuhelper.exportDiagnostics", () => exportDiagnostics(output)),
     vscode.commands.registerCommand("mcuhelper.showLibraryVerificationReport", async () => {
       output.show(true);
@@ -294,28 +283,6 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.onDidOpenTextDocument(async (doc) => {
       await maybeFixDocumentEncoding(doc, output);
       const langChanged = await maybeSetMcunrLanguage(doc, output);
-      // #region agent log
-      if (/958/i.test(doc.uri.fsPath) || /#\s*include\s+confpd/i.test(doc.getText().slice(0, 5000))) {
-        fetch("http://127.0.0.1:7911/ingest/3304a270-bbbf-4e90-96de-6ba27b8f72bf", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "fded15" },
-          body: JSON.stringify({
-            sessionId: "fded15",
-            runId: "pre-fix",
-            hypothesisId: "D",
-            location: "extension.ts:onDidOpenTextDocument",
-            message: "opened candidate deck",
-            data: {
-              fsPath: doc.uri.fsPath,
-              languageId: doc.languageId,
-              langChanged,
-              lineCount: doc.lineCount,
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-      }
-      // #endregion
       // Только явный mcunr: isMcunrDocument(content) при language=ini раздувает refresh при автодетекте.
       if (langChanged || doc.languageId === "mcunr") scheduleRefresh();
     }),
@@ -337,49 +304,26 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.languages.onDidChangeDiagnostics((e) => {
       const editor = vscode.window.activeTextEditor;
-      // #region agent log
-      for (const u of e.uris) {
-        if (!/958/i.test(u.fsPath)) continue;
-        const diags = vscode.languages.getDiagnostics(u);
-        fetch("http://127.0.0.1:7911/ingest/3304a270-bbbf-4e90-96de-6ba27b8f72bf", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "fded15" },
-          body: JSON.stringify({
-            sessionId: "fded15",
-            runId: "pre-fix",
-            hypothesisId: "E",
-            location: "extension.ts:onDidChangeDiagnostics",
-            message: "client diagnostics changed for 958",
-            data: {
-              fsPath: u.fsPath,
-              total: diags.length,
-              matrEmpty: diags
-                .filter((d) => String(d.code) === "matr-empty" || /пуст/i.test(d.message))
-                .map((d) => ({ code: d.code, msg: d.message, line: d.range.start.line, source: d.source })),
-              sources: [...new Set(diags.map((d) => d.source ?? ""))],
-              activeLang: editor?.document.languageId ?? null,
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-      }
-      // #endregion
       if (!editor || editor.document.languageId !== "mcunr") return;
       const activeUri = editor.document.uri.toString();
       if (e.uris.some((u) => u.toString() === activeUri)) {
-        sidebarProviders.get("mcuhelper.lexerErrors")?.applyLexerErrors();
+        sidebarProviders?.get("mcuhelper.lexerErrors")?.applyLexerErrors();
       }
     })
   );
 }
 
 function scheduleRefresh(scope: "all" | "constants" = "all"): void {
+  // providers ещё не созданы (ранний librariesSynced / State.Running) — пропуск.
+  if (!sidebarProviders) return;
+
   if (scope === "constants") {
     if (refreshTimer) return;
     if (Date.now() - lastDocChangeAt < SELECTION_AFTER_EDIT_QUIET_MS) return;
     if (selectionRefreshTimer) clearTimeout(selectionRefreshTimer);
     selectionRefreshTimer = setTimeout(() => {
       selectionRefreshTimer = undefined;
+      if (!sidebarProviders) return;
       void refreshSidebarsCoalesced(sidebarProviders, "constants");
     }, SELECTION_REFRESH_DEBOUNCE_MS);
     return;
@@ -388,6 +332,7 @@ function scheduleRefresh(scope: "all" | "constants" = "all"): void {
   if (refreshTimer) clearTimeout(refreshTimer);
   refreshTimer = setTimeout(() => {
     refreshTimer = undefined;
+    if (!sidebarProviders) return;
     void refreshSidebarsCoalesced(sidebarProviders, "all");
   }, REFRESH_DEBOUNCE_MS);
 }
@@ -527,9 +472,16 @@ async function showRunActions(): Promise<void> {
   const action = await vscode.window.showQuickPick(
     [
       { label: "Debug (INPUT)", description: "Проверка входа и переход к первой ошибке", command: "mcuhelper.debugInput" },
+      {
+        label: "Проверить варианты (INPUT)",
+        description: "Batch INPUT для нескольких .mcu/.mcunr",
+        command: "mcuhelper.batchValidateInput",
+      },
       { label: "Run (CALCULATION)", description: "Запустить расчёт", command: "mcuhelper.runCalculation" },
       { label: "Continue (CALCULATION)", description: "Продолжить расчёт", command: "mcuhelper.continueCalculation" },
       { label: "Final (OUTPUT)", description: "Получить финальную выдачу", command: "mcuhelper.finalOutput" },
+      { label: "Burnup (BURNUP)", description: "Шаг выгорания после OUTPUT", command: "mcuhelper.burnup" },
+      { label: "Проверить варианты (INPUT)", description: "Пакетный INPUT", command: "mcuhelper.batchValidateInput" },
       {
         label: "Настроить пути запуска",
         description: `exe: ${exe}`,
@@ -558,7 +510,46 @@ function updateRunUiVisibility(): void {
 
 async function focusDiagnosticsPanel(): Promise<void> {
   await vscode.commands.executeCommand("mcuhelper.lexerErrors.focus");
-  await sidebarProviders.get("mcuhelper.lexerErrors")?.applyLexerErrors();
+  await sidebarProviders?.get("mcuhelper.lexerErrors")?.applyLexerErrors();
+}
+
+async function ensureSolverPathsConfigured(): Promise<
+  { mcuNrPath: string; constantsLibPath: string } | undefined
+> {
+  const cfg = vscode.workspace.getConfiguration("mcuhelper");
+  const mcuNrPath = cfg.get<string>("mcuNrPath") ?? "";
+  const constantsLibPath = cfg.get<string>("mcuConstantsLibPath") ?? "";
+  if (!mcuNrPath) {
+    const pick = await vscode.window.showErrorMessage(
+      "Не задан путь к exe MCU-NR.",
+      "Настроить сейчас"
+    );
+    if (pick) await configureSolverPaths();
+    return undefined;
+  }
+  if (!constantsLibPath) {
+    const pick = await vscode.window.showErrorMessage(
+      "Не задан путь к библиотеке констант MDBNR.",
+      "Настроить сейчас"
+    );
+    if (pick) await configureSolverPaths();
+    return undefined;
+  }
+  return { mcuNrPath, constantsLibPath };
+}
+
+async function runBatchValidateInputCommand(): Promise<void> {
+  if (!client) {
+    vscode.window.showWarningMessage("LSP ещё не готов");
+    return;
+  }
+  const output = helperOutput ?? vscode.window.createOutputChannel("MCU-NR Helper");
+  helperOutput = output;
+  await batchValidateInput({
+    client,
+    output,
+    ensureSolverPaths: ensureSolverPathsConfigured,
+  });
 }
 
 async function runMcuStepCommand(mode: "i" | "c" | "f" | "b" | "continue"): Promise<void> {
@@ -572,28 +563,11 @@ async function runMcuStepCommand(mode: "i" | "c" | "f" | "b" | "continue"): Prom
     return;
   }
 
-  const cfg = vscode.workspace.getConfiguration("mcuhelper");
-  const mcuNrPath = cfg.get<string>("mcuNrPath") ?? "";
-  const constantsLibPath = cfg.get<string>("mcuConstantsLibPath") ?? "";
+  const paths = await ensureSolverPathsConfigured();
+  if (!paths) return;
+
   // Имя варианта берём из текущего открытого файла (без расширения).
   const variantName = pathBasename(editor.document);
-
-  if (!mcuNrPath) {
-    const pick = await vscode.window.showErrorMessage(
-      "Не задан путь к exe MCU-NR.",
-      "Настроить сейчас"
-    );
-    if (pick) await configureSolverPaths();
-    return;
-  }
-  if (!constantsLibPath) {
-    const pick = await vscode.window.showErrorMessage(
-      "Не задан путь к библиотеке констант MDBNR.",
-      "Настроить сейчас"
-    );
-    if (pick) await configureSolverPaths();
-    return;
-  }
 
   // MCU читает файл с диска по относительному пути из mcu5.ini — сохраняем перед запуском.
   if (editor.document.isUntitled) {
@@ -619,84 +593,47 @@ async function runMcuStepCommand(mode: "i" | "c" | "f" | "b" | "continue"): Prom
             ? "MCU-NR OUTPUT"
             : "MCU-NR BURNUP";
 
-  type RunStepResponse = {
-    ok: boolean;
-    message?: string;
-    exitCode?: number | null;
-    diagnosticCount?: number;
-    runDir?: string;
-    mcuNrPath?: string;
-    sourceFsPath?: string;
-    prepared?: boolean;
-    finCopiedPath?: string;
-    finOverwritten?: boolean;
-    lstPath?: string;
-    firstError?: {
-      message: string;
-      range: { start: { line: number; character: number }; end: { line: number; character: number } };
-    };
-  };
-
-  const prepared = await client.sendRequest<RunStepResponse>("mcuhelper/runMcuStep", {
-    uri: editor.document.uri.toString(),
-    variantName,
-    mode,
-    mcuNrPath,
-    constantsLibPath,
-    prepareOnly: true,
-  });
-
-  if (prepared.message || !prepared.ok || !prepared.runDir || !prepared.mcuNrPath) {
-    vscode.window.showErrorMessage(prepared.message ?? "Не удалось подготовить запуск MCU-NR");
-    return;
-  }
-
   vscode.window.showInformationMessage(`${stepTitle}: запуск в терминале…`);
 
-  const exitCode = await runMcuInTerminal({
-    mcuNrPath: prepared.mcuNrPath,
-    runDir: prepared.runDir,
-    title: `${stepTitle} (${variantName})`,
-  });
-
-  const result = await client.sendRequest<RunStepResponse>("mcuhelper/runMcuStep", {
+  const flow = await runMcuStepFlow({
+    sendRequest: (method, params) => client!.sendRequest(method, params),
     uri: editor.document.uri.toString(),
     variantName,
     mode,
-    collectOnly: true,
-    runDir: prepared.runDir,
-    sourceFsPath: prepared.sourceFsPath,
-    exitCode: exitCode ?? null,
+    mcuNrPath: paths.mcuNrPath,
+    constantsLibPath: paths.constantsLibPath,
+    stepTitle,
+    runInTerminal: runMcuInTerminal,
   });
 
-
-  if (result.message) {
-    vscode.window.showErrorMessage(result.message);
+  if (flow.message && !flow.collect) {
+    vscode.window.showErrorMessage(flow.message);
+    return;
+  }
+  if (flow.message) {
+    vscode.window.showErrorMessage(flow.message);
     return;
   }
 
-  const cnt = result.diagnosticCount ?? 0;
+  const result = flow.collect!;
+  const exitCode = flow.exitCode;
+  const cnt = flow.diagnosticCount;
 
   // Сначала подсветить ошибку в исходнике — затем открыть LST/FIN (не ждать sidebar).
-  if (result.firstError?.range?.start) {
-    const start = result.firstError.range.start;
+  if (flow.firstError?.range?.start) {
+    const start = flow.firstError.range.start;
     const pos = new vscode.Position(start.line, start.character);
     editor.selection = new vscode.Selection(pos, pos);
     editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
   }
 
-  // LST: путь из LSP + локальный fallback по runDir (на случай старого сервера / рассинхрона путей).
-  const lstPath = resolveExistingLstOnDisk({
-    lstPath: result.lstPath,
-    runDir: result.runDir ?? prepared.runDir,
-    variantName,
-  });
+  const lstPath = flow.lstPath;
 
   // Артефакт до refresh Диагностики — await applyLexerErrors раньше блокировал open (hang на LSP).
   const openTarget = resolvePostRunOpenTarget({
     mode,
-    finCopiedPath: result.finCopiedPath && fs.existsSync(result.finCopiedPath) ? result.finCopiedPath : undefined,
-    finOverwritten: result.finOverwritten,
+    finCopiedPath: flow.finCopiedPath && fs.existsSync(flow.finCopiedPath) ? flow.finCopiedPath : undefined,
+    finOverwritten: flow.finOverwritten,
     lstPath,
   });
   if (openTarget) {
@@ -727,12 +664,12 @@ async function runMcuStepCommand(mode: "i" | "c" | "f" | "b" | "continue"): Prom
       helperOutput?.appendLine(msg);
       vscode.window.showWarningMessage(msg);
     }
-  } else if (mode === "i") {
-    const runDir = result.runDir ?? prepared.runDir ?? "?";
+  } else if (mode === "i" || mode === "b") {
+    const runDir = flow.runDir ?? "?";
     const msg = `${stepTitle}: файл ${variantName}.LST не найден в каталоге запуска (${runDir}).`;
     helperOutput?.appendLine(msg);
     vscode.window.showWarningMessage(msg);
-  } else if ((mode === "c" || mode === "f") && (exitCode ?? 0) === 0 && !result.firstError) {
+  } else if ((mode === "c" || mode === "f") && (exitCode ?? 0) === 0 && !flow.firstError) {
     // Как isSuccessfulMcuCollect: exit 0 и нет error (warnings допускаются).
     vscode.window.showWarningMessage(
       `${stepTitle}: расчёт успешен, но файлы ${variantName}.FIN и ${variantName}.LST не найдены.`
@@ -740,15 +677,17 @@ async function runMcuStepCommand(mode: "i" | "c" | "f" | "b" | "continue"): Prom
   }
 
   // Sidebar после open, без await — иначе applyLexerErrors/getDiagnostics может зависнуть и не дать открыть LST.
-  void refreshSidebarsCoalesced(sidebarProviders, "all");
-  void sidebarProviders.get("mcuhelper.lexerErrors")?.applyLexerErrors();
+  if (sidebarProviders) {
+    void refreshSidebarsCoalesced(sidebarProviders, "all");
+    void sidebarProviders.get("mcuhelper.lexerErrors")?.applyLexerErrors();
+  }
 
   // Диагностику фокусируем только если артефакт не открыли — иначе панель перебивает LST/FIN.
   if (
     !openTarget &&
     shouldFocusDiagnosticsAfterRun({
       diagnosticCount: cnt,
-      hasFirstError: !!result.firstError,
+      hasFirstError: !!flow.firstError,
     })
   ) {
     try {
@@ -764,9 +703,9 @@ async function runMcuStepCommand(mode: "i" | "c" | "f" | "b" | "continue"): Prom
     vscode.window.showWarningMessage(
       `${stepTitle}: MCU завершился в терминале (код неизвестен). Диагностик из LST: ${cnt}`
     );
-  } else if (result.ok === false || !!result.firstError) {
-    const errHint = result.firstError?.message
-      ? ` Первая: ${result.firstError.message}`
+  } else if (result.ok === false || !!flow.firstError) {
+    const errHint = flow.firstError?.message
+      ? ` Первая: ${flow.firstError.message}`
       : "";
     vscode.window.showWarningMessage(
       `${stepTitle}: ошибки в LST (${cnt}), код MCU ${exitCode}.${errHint}`
@@ -782,32 +721,6 @@ async function runMcuStepCommand(mode: "i" | "c" | "f" | "b" | "continue"): Prom
       `${stepTitle} завершён с кодом ${exitCode}, но явных ошибок в LST не найдено.`
     );
   }
-}
-
-/** Ищет NAME.LST на диске: ответ LSP, затем runDir (без учёта регистра). */
-function resolveExistingLstOnDisk(opts: {
-  lstPath?: string;
-  runDir?: string;
-  variantName: string;
-}): string | undefined {
-  for (const p of lstPathCandidates(opts)) {
-    try {
-      if (fs.existsSync(p)) return p;
-    } catch {
-      // ignore
-    }
-  }
-  const runDir = opts.runDir;
-  if (!runDir || !opts.variantName) return undefined;
-  try {
-    const want = `${opts.variantName}.lst`.toLowerCase();
-    for (const entry of fs.readdirSync(runDir)) {
-      if (entry.toLowerCase() === want) return path.join(runDir, entry);
-    }
-  } catch {
-    // ignore
-  }
-  return undefined;
 }
 
 function pathBasename(doc: vscode.TextDocument): string {
@@ -942,6 +855,13 @@ function registerLspOutputNotifications(
     appendOutputOnce(output, `[PARAMETE.THR] ${msg.message}`);
   });
   lsp.onNotification(
+    "mcuhelper/librariesSynced",
+    (_msg: { rebuiltSummaries?: number; awOk?: boolean; thrOk?: boolean }) => {
+      // После rebuild summaries на сервере — обновить CodeLens MATR / sidebar.
+      scheduleRefresh("all");
+    }
+  );
+  lsp.onNotification(
     "mcuhelper/parameteThrVerification",
     (msg: {
       ok: boolean;
@@ -1046,5 +966,5 @@ async function warmupExtensionAfterLspReady(output?: vscode.OutputChannel): Prom
   } catch {
     // ignore warmup errors
   }
-  sidebarProviders.get("mcuhelper.lexerErrors")?.applyLexerErrors();
+  sidebarProviders?.get("mcuhelper.lexerErrors")?.applyLexerErrors();
 }

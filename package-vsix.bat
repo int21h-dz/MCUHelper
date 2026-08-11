@@ -39,6 +39,12 @@ if not exist "extension\vendor\mcu-language" mkdir "extension\vendor\mcu-languag
 copy /Y "packages\mcu-language\dist\defaultPhy.js" "extension\vendor\mcu-language\defaultPhy.js" >nul
 copy /Y "packages\mcu-language\dist\encodingDetect.js" "extension\vendor\mcu-language\encodingDetect.js" >nul
 copy /Y "packages\mcu-language\dist\detect.js" "extension\vendor\mcu-language\detect.js" >nul
+copy /Y "packages\mcu-language\dist\includeResolve.js" "extension\vendor\mcu-language\includeResolve.js" >nul
+copy /Y "packages\mcu-language\dist\registrationBuilder.js" "extension\vendor\mcu-language\registrationBuilder.js" >nul
+copy /Y "packages\mcu-language\dist\resultSummary.js" "extension\vendor\mcu-language\resultSummary.js" >nul
+if errorlevel 1 goto :fail
+if not exist "extension\vendor\mcu-geometry" mkdir "extension\vendor\mcu-geometry"
+copy /Y "packages\mcu-geometry\dist\meshPreview.js" "extension\vendor\mcu-geometry\meshPreview.js" >nul
 if errorlevel 1 goto :fail
 rem README + images for VS Code Details (vsce looks next to package.json)
 copy /Y "README.md" "extension\README.md" >nul

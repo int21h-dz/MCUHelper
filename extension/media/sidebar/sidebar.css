@@ -580,6 +580,7 @@ body {
 .mcu-run-btn-run { --btn-accent: #22c55e; }
 .mcu-run-btn-continue { --btn-accent: #2dd4bf; }
 .mcu-run-btn-final { --btn-accent: #a78bfa; }
+.mcu-run-btn-burnup { --btn-accent: #ef4444; }
 
 .mcu-run-thanks {
   margin-left: auto;

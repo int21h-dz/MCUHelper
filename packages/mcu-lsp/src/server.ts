@@ -13,8 +13,9 @@ import {
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { fileURLToPath } from "url";
-import { getDocumentIndex, clearDocument } from "@mcuhelper/mcu-language";
+import { getDocumentIndex, clearDocument, rebuildCachedSummaries } from "@mcuhelper/mcu-language";
 import { getCompletions, getDefinition, getHoverContent } from "./completion";
+import { findReferences, prepareRename, renameSymbol } from "./symbolRefs";
 import { getSignatureHelp } from "./signatureHelp";
 import { getNaturalIsotopeLines, warmupNaturalAbundanceIndex } from "./iaeaNds";
 import {
@@ -43,7 +44,9 @@ import {
   buildDocumentLinks,
   ensureDocumentIndex,
   ensureSourceDocumentIndex,
+  resolveHoverDocumentIndex,
   handleGetIndex,
+  handleGetIncludeGraph,
   handleGetGeometry,
   handleQueryPoint,
   handleGetSlice,
@@ -124,22 +127,42 @@ async function syncAwLibFromSettings(): Promise<void> {
 
   const awResult = await loadAwLibFromConstantsPath(libPath);
   connection.console.info(`[AW.LIB] ${awResult.message}`);
-  connection.sendNotification("mcuhelper/awLibStatus", awResult);
 
   const phyResult = await loadDefaultPhyFromConstantsPath(libPath);
   connection.console.info(`[DEFAULT.PHY] ${phyResult.message}`);
-  connection.sendNotification("mcuhelper/defaultPhyStatus", phyResult);
 
   const thrResult = await loadParameteThrFromConstantsPath(libPath);
   connection.console.info(`[PARAMETE.THR] ${thrResult.message}`);
+
+  // ρ / a_m в summaries зависят от AW/THR: пересчёт без reparse, иначе CodeLens/sidebar
+  // держат activityBqPerG=null после первого analyze до загрузки библиотек.
+  // Только открытые документы — full-core кэш вне documents не трогаем.
+  const openUris = documents.all().map((d) => d.uri);
+  const rebuilt = rebuildCachedSummaries(openUris.length > 0 ? openUris : undefined);
+  if (rebuilt > 0) {
+    connection.console.info(`[summaries] rebuilt ${rebuilt} cached index(es) after library sync`);
+  }
+
+  connection.sendNotification("mcuhelper/awLibStatus", awResult);
+  connection.sendNotification("mcuhelper/defaultPhyStatus", phyResult);
   connection.sendNotification("mcuhelper/parameteThrStatus", thrResult);
+  connection.sendNotification("mcuhelper/librariesSynced", {
+    rebuiltSummaries: rebuilt,
+    awOk: awResult.ok,
+    thrOk: thrResult.ok,
+  });
 
   lastLibraryReports = {
     awStatus: awResult.message,
     thrStatus: thrResult.message,
   };
 
-  if (!awResult.ok && !thrResult.ok) return;
+  if (!awResult.ok && !thrResult.ok) {
+    for (const doc of documents.all()) {
+      void validateTextDocument(doc);
+    }
+    return;
+  }
 
   // AW + T1/2 (офлайн кэш LiveChart).
   libraryCoreGate = (async () => {
@@ -214,6 +237,8 @@ connection.onInitialize((params: InitializeParams) => {
       completionProvider: { resolveProvider: false, triggerCharacters: [" ", "#", "/", "=", "."] },
       hoverProvider: true,
       definitionProvider: true,
+      referencesProvider: true,
+      renameProvider: { prepareProvider: true },
       documentSymbolProvider: true,
       foldingRangeProvider: true,
       documentLinkProvider: { resolveProvider: false },
@@ -278,33 +303,10 @@ function scheduleValidateTextDocument(doc: TextDocument): void {
 
 async function validateTextDocument(doc: TextDocument): Promise<void> {
   const uri = doc.uri;
+  // Уступаем очередь hover/completion — иначе тяжёлые diagnostics блокируют LSP на минуты.
+  await new Promise<void>((resolve) => setImmediate(resolve));
   const extra = solverDiagnostics.get(uri) ?? [];
   const bundle = collectDiagnosticsBundle(doc, extra);
-  // #region agent log
-  {
-    const matrEmpty = bundle.diagnostics.filter((d) => d.code === "matr-empty");
-    const codes = [...new Set(bundle.diagnostics.map((d) => String(d.code ?? "")))].slice(0, 40);
-    fetch("http://127.0.0.1:7911/ingest/3304a270-bbbf-4e90-96de-6ba27b8f72bf", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "fded15" },
-      body: JSON.stringify({
-        sessionId: "fded15",
-        runId: "pre-fix",
-        hypothesisId: "E",
-        location: "server.ts:validateTextDocument",
-        message: "publishing diagnostics",
-        data: {
-          uri,
-          total: bundle.diagnostics.length,
-          matrEmpty: matrEmpty.map((d) => ({ msg: d.message, line: d.range.start.line })),
-          codes,
-          hasInclude: /#\s*include\b/i.test(doc.getText()),
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-  }
-  // #endregion
   connection.sendDiagnostics({ uri, diagnostics: bundle.diagnostics });
 
   // Всегда регистрируем parent↔include из AST (даже без diagnostics в include),
@@ -432,11 +434,11 @@ connection.onSignatureHelp((params: SignatureHelpParams) => {
   return getSignatureHelp(doc, params.position);
 });
 
-connection.onHover(async (params: HoverParams) => {
-  await readWorkspaceSettings();
+connection.onHover((params: HoverParams) => {
+  // Не await settings/library: блокировка даёт «мигание» hover (сверка есть, нуклид — нет).
   const doc = documents.get(params.textDocument.uri);
   if (!doc) return null;
-  const index = ensureDocumentIndex(doc);
+  const index = resolveHoverDocumentIndex(doc, parentUrisByInclude, getDoc, documents.all());
   const content = getHoverContent(
     doc,
     params.position,
@@ -458,6 +460,27 @@ connection.onDefinition((params) => {
     uri: def.uri,
     range: { start: def.range.start, end: def.range.end },
   };
+});
+
+connection.onReferences((params) => {
+  const doc = documents.get(params.textDocument.uri);
+  if (!doc) return [];
+  const index = ensureDocumentIndex(doc);
+  return findReferences(doc, params.position, index);
+});
+
+connection.onPrepareRename((params) => {
+  const doc = documents.get(params.textDocument.uri);
+  if (!doc) return null;
+  const index = ensureDocumentIndex(doc);
+  return prepareRename(doc, params.position, index);
+});
+
+connection.onRenameRequest((params) => {
+  const doc = documents.get(params.textDocument.uri);
+  if (!doc) return null;
+  const index = ensureDocumentIndex(doc);
+  return renameSymbol(doc, params.position, index, params.newName);
 });
 
 connection.onDocumentSymbol((params: DocumentSymbolParams) => {
@@ -485,6 +508,10 @@ connection.onDocumentLinks((params: DocumentLinkParams) => {
 
 connection.onRequest("mcuhelper/getIndex", (args) => handleGetIndex(args, getDoc));
 
+connection.onRequest("mcuhelper/getIncludeGraph", (args: string | { uri: string }) =>
+  handleGetIncludeGraph(args, getDoc)
+);
+
 connection.onRequest("mcuhelper/getNaturalIsotopeLines", async (args: { element: string; concentration: string }) => {
   return getNaturalIsotopeLines(args.element, args.concentration);
 });
@@ -504,7 +531,8 @@ connection.onRequest("mcuhelper/revalidateAllOpen", async () => {
   let count = 0;
   const open = [...documents.all()];
   for (const doc of open) {
-    clearDocument(doc.uri);
+    // Не clearDocument: повторный parse 16MB+ блокирует hover/completion на секунды.
+    // Диагностика пересчитывается из кэшированного AST; hash учитывает #include на диске.
     clearDiagnosticTimer(doc.uri);
   }
   for (const doc of open) {

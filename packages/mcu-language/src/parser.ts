@@ -293,7 +293,8 @@ const NUCLIDE_INLINE_KEYWORDS = new Set(["MODS", "ACE", "DTEM", "PHT"]);
 function isExcludedNuclideLikeLine(text: string): boolean {
   const t = text.trim();
   if (/[#()]/.test(t)) return true;
-  if (/\bU\b/.test(t)) return true;
+  // Союз «U» в выражении зоны (`A 1 U 2`), но НЕ природный уран `U dens`.
+  if (/\bU\b/.test(t) && !/^[Uu]\s+\S+/.test(t)) return true;
   if (/\s:\d+(\s|$)/.test(t)) return true;
   if (/\s\/\d/.test(t)) return true;
   if (/\/-\d+/.test(t)) return true;

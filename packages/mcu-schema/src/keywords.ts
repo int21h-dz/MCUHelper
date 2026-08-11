@@ -11,10 +11,12 @@ type FragmentId =
 /**
  * Канонические имена карт MCU-NR по фрагментам (UserGuide 220519 + RUNTEST).
  * `shared` — только универсальные маркеры (FINISH/END/STOP/SHOW).
+ * EQU/SET — только геометрия и источники (UserGuide §A: «В геометрическом модуле и
+ * модуле источников…»); в физическом модуле (PIN) недопустимы.
  * Метки в нескольких модулях (VOL, BUCL, WWEN, …) перечисляются в каждом списке явно.
  */
 export const MCU_LABELS_BY_FRAGMENT: Record<FragmentId | "shared", readonly string[]> = {
-  shared: ["FINISH", "END", "STOP", "SHOW", "EQU", "SET"],
+  shared: ["FINISH", "END", "STOP", "SHOW"],
   physical: [
     "PIN",
     "MATR",
@@ -68,6 +70,8 @@ export const MCU_LABELS_BY_FRAGMENT: Record<FragmentId | "shared", readonly stri
     "ENDL",
     "ENDXCL",
     "TRANSF",
+    "EQU",
+    "SET",
   ],
   source: [
     "SRCD",
@@ -102,6 +106,8 @@ export const MCU_LABELS_BY_FRAGMENT: Record<FragmentId | "shared", readonly stri
     "ROOT",
     "NORM",
     "FUNC",
+    "EQU",
+    "SET",
   ],
   registration: [
     "REGD",
@@ -412,6 +418,12 @@ export function detectFragmentFromLabel(label: string, current: FragmentId | nul
   if (FRAGMENT_STARTERS[u]) return FRAGMENT_STARTERS[u];
   if (u.startsWith("BUR") || u === "FINAL" || u === "DELAY") return "burnup";
 
+  // EQU/SET не стартуют модуль и не переключают фрагмент (UserGuide: геометрия/источники).
+  // После PIN остаются в physical → card-wrong-fragment; до HEAD считаем geometry.
+  if (u === "EQU" || u === "SET") {
+    return current ?? "geometry";
+  }
+
   const frags = fragmentsForLabel(u);
   if (!frags.length) return current;
   // Multi-home / родная карта текущего модуля — не переключаем.
@@ -420,7 +432,7 @@ export function detectFragmentFromLabel(label: string, current: FragmentId | nul
   const primary = _primaryFragmentByLabel.get(normalizeMcuLabel(u)) ?? frags[0];
   if (current == null) return primary;
   // Чужая карта: переключение только «вперёд» (NPS после geometry → source; DELN в RGS → stay).
-  if (FRAGMENT_ORDER.indexOf(primary) > FRAGMENT_ORDER.indexOf(current)) return primary;
+  if (FRAGMENT_ORDER.indexOf(primary!) > FRAGMENT_ORDER.indexOf(current)) return primary!;
   return current;
 }
 

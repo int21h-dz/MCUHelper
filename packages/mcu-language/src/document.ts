@@ -3,7 +3,12 @@ import * as fs from "fs";
 import type { DocumentAst } from "./ast";
 import { parseDocument, type ParseOptions } from "./parser";
 import { analyzeSemantics, buildSummaries } from "./semantic";
-import { normalizeIncludeFsKey, parseIncludeLine, resolveIncludeFilePath } from "./includeResolve";
+import {
+  normalizeIncludeFsKey,
+  parseIncludeLine,
+  resolveIncludeFilePath,
+  textHasIncludeDirective,
+} from "./includeResolve";
 import type { IncludeTextOverrides } from "./preprocessor";
 
 export interface DocumentIndex {
@@ -11,6 +16,8 @@ export interface DocumentIndex {
   version: number;
   ast: DocumentAst;
   hash: string;
+  /** Отпечаток #include (mtime/size/буфер); пусто если expandInclude=false. */
+  includeFp: string;
   summaries: ReturnType<typeof buildSummaries>;
 }
 
@@ -41,7 +48,7 @@ export function includeFilesFingerprint(
   baseDir: string | undefined,
   includeTextOverrides?: IncludeTextOverrides
 ): string {
-  if (!baseDir || !/#\s*include\b/i.test(text)) return "";
+  if (!baseDir || !textHasIncludeDirective(text)) return "";
   const parts: string[] = [];
   for (const line of text.split(/\r?\n/)) {
     const parsed = parseIncludeLine(line);
@@ -72,6 +79,7 @@ function buildIndex(
   text: string,
   version: number,
   hash: string,
+  includeFp: string,
   options?: Partial<ParseOptions>
 ): DocumentIndex {
   parseCount++;
@@ -83,7 +91,7 @@ function buildIndex(
   });
   ast.diagnostics = analyzeSemantics(ast);
   const summaries = buildSummaries(ast);
-  return { uri, version, ast, hash, summaries };
+  return { uri, version, ast, hash, includeFp, summaries };
 }
 
 export function analyzeDocument(
@@ -93,17 +101,24 @@ export function analyzeDocument(
   options?: Partial<ParseOptions>
 ): DocumentIndex {
   const expanded = options?.expandInclude !== false;
+  const key = cacheKey(uri, expanded);
+  const cached = cache.get(key);
+
+  // Всегда сверяем hash текста: version сам по себе не гарантирует тождество
+  // (тесты/повторный analyze с тем же version и другим текстом).
+  // Быстрый путь без SHA-256 — в ensureDocumentIndex по Document.version.
   const includeFp = expanded
     ? includeFilesFingerprint(text, options?.baseDir, options?.includeTextOverrides)
     : "";
   const hash = crypto.createHash("sha256").update(text).update("\0").update(includeFp).digest("hex");
-  const key = cacheKey(uri, expanded);
-  const cached = cache.get(key);
-  if (cached && cached.version === version && cached.hash === hash) {
+  if (cached && cached.hash === hash) {
+    // Текст не менялся, только version — без reparse.
+    if (cached.version !== version) cached.version = version;
+    cached.includeFp = includeFp;
     return cached;
   }
 
-  const index = buildIndex(uri, text, version, hash, options);
+  const index = buildIndex(uri, text, version, hash, includeFp, options);
   cache.set(key, index);
   return index;
 }
@@ -124,4 +139,35 @@ export function getDocumentIndexForVersion(uri: string, version: number): Docume
 export function clearDocument(uri: string): void {
   cache.delete(cacheKey(uri, true));
   cache.delete(cacheKey(uri, false));
+}
+
+/**
+ * Пересчёт summaries по уже разобранному AST (без reparse).
+ * Нужен после загрузки AW.LIB / PARAMETE.THR: ρ и a_m зависят от глобальных таблиц,
+ * а кэш индекса keyed по тексту и иначе оставляет activityBqPerG=null.
+ *
+ * @param uris если задан — только эти документы (оба ключа expanded/source);
+ *             иначе весь кэш (тесты / полный сброс).
+ */
+export function rebuildCachedSummaries(uris?: ReadonlyArray<string>): number {
+  let n = 0;
+  if (uris == null) {
+    for (const index of cache.values()) {
+      index.summaries = buildSummaries(index.ast);
+      n++;
+    }
+    return n;
+  }
+  const seen = new Set<string>();
+  for (const uri of uris) {
+    if (!uri || seen.has(uri)) continue;
+    seen.add(uri);
+    for (const expanded of [true, false] as const) {
+      const index = cache.get(cacheKey(uri, expanded));
+      if (!index) continue;
+      index.summaries = buildSummaries(index.ast);
+      n++;
+    }
+  }
+  return n;
 }

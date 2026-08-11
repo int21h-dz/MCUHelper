@@ -3,7 +3,7 @@ import assert from "node:assert";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { parseIncludeLine, resolveIncludeFilePath, collectIncludesFromSource } from "./includeResolve";
+import { parseIncludeLine, resolveIncludeFilePath, collectIncludesFromSource, textHasIncludeDirective } from "./includeResolve";
 
 describe("includeResolve", () => {
   it("parseIncludeLine supports angle brackets and bare name", () => {
@@ -16,6 +16,14 @@ describe("includeResolve", () => {
     assert.ok(b);
     assert.strictEqual(b!.path, "confpd");
     assert.ok(b!.pathStart > 0);
+  });
+
+  it("textHasIncludeDirective ignores CodeLens markers", () => {
+    assert.ok(textHasIncludeDirective("#include confpd\nFINISH"));
+    assert.ok(
+      !textHasIncludeDirective("** [mcuhelper] ▼ #include confpd\nSI N\n** [mcuhelper] ▲ #include confpd\n")
+    );
+    assert.ok(!textHasIncludeDirective("PIN 1 0\nFINISH"));
   });
 
   it("resolveIncludeFilePath tries .mcu extension", () => {

@@ -5,7 +5,7 @@ import * as path from "path";
 import * as os from "os";
 import { pathToFileURL } from "url";
 import { TextDocument } from "vscode-languageserver-textdocument";
-import { analyzeDocument, parseAwLib, setAwLibTable, clearAwLibTable, parseParameteThr, setParameteThrTable, clearParameteThrTable } from "@mcuhelper/mcu-language";
+import { analyzeDocument, clearDocument, parseAwLib, setAwLibTable, clearAwLibTable, parseParameteThr, setParameteThrTable, clearParameteThrTable } from "@mcuhelper/mcu-language";
 import {
   wordAtPosition,
   isOnStatementKeyword,
@@ -28,6 +28,7 @@ function openFixture(name: string) {
 }
 
 function openText(text: string, uri = "file:///inline.mcu") {
+  clearDocument(uri);
   const doc = TextDocument.create(uri, "mcunr", 1, text);
   const index = analyzeDocument(uri, text, 1);
   return { doc, index, uri };
@@ -262,7 +263,7 @@ describe("getHoverContent", () => {
     assert.ok(hover?.includes("Нуклид **FP1**"), hover ?? "(null)");
     assert.ok(hover?.includes("списке карты SI"), hover ?? "(null)");
     assert.ok(!hover?.includes("Концентрация:"), hover ?? "(null)");
-    assert.ok(!hover?.includes("Активность материала"), hover ?? "(null)");
+    assert.ok(!hover?.includes("Удельная активность материала"), hover ?? "(null)");
     assert.ok(!hover?.includes("Плотность материала"), hover ?? "(null)");
   });
 
@@ -289,7 +290,7 @@ describe("getHoverContent", () => {
     assert.ok(hover?.includes("Нуклид **U238**"), hover ?? "(null)");
     assert.ok(hover?.includes("списке карты SINOT"), hover ?? "(null)");
     assert.ok(!hover?.includes("Концентрация:"), hover ?? "(null)");
-    assert.ok(!hover?.includes("Активность материала"), hover ?? "(null)");
+    assert.ok(!hover?.includes("Удельная активность материала"), hover ?? "(null)");
     assert.ok(!hover?.includes("Плотность материала"), hover ?? "(null)");
   });
 
@@ -351,6 +352,20 @@ describe("getHoverContent", () => {
     assert.ok(hover);
     assert.ok(hover!.includes(nucl.name.toUpperCase()));
     assert.ok(hover!.includes("концентрация") || hover!.includes("яд/см"));
+  });
+
+  it("hover nuclide shows enrichment within element and mass fraction in material", () => {
+    const text = ["PIN 1 0", "MATR 1", "U235 1.0E-2", "U238 3.0E-2", "FINISH"].join("\n");
+    const { doc, index } = openText(text);
+    const nucl = index.ast.materials[0]!.nuclides.find((n) => n.name.toUpperCase() === "U235")!;
+    const hover = getHoverContent(doc, { line: nucl.range.start.line, character: 1 }, index, { enableIaeaNuclide: false });
+    assert.ok(hover);
+    assert.ok(hover!.includes("содержание в элементе U"), hover ?? "");
+    // 1/(1+3)=0.25 => 25%
+    assert.ok(hover!.includes("25"), hover ?? "");
+    assert.ok(hover!.includes("массовая доля в материале"), hover ?? "");
+    // mass ≈ 235/(235+3*238) ≈ 24.76%
+    assert.ok(/24\.7/.test(hover!), hover ?? "");
   });
 
   it("suggests add-to-sum-isotope when AW.LIB loaded and nuclide missing", () => {
@@ -419,7 +434,7 @@ describe("getHoverContent", () => {
   });
 
   it("uses EQU concentration when computing nuclide hover density", () => {
-    const text = ["PIN 1 0", "EQU CZR = 0.04273", "MATR 1", "ZR CZR", "FINISH"].join("\n");
+    const text = ["EQU CZR = 0.04273", "PIN 1 0", "MATR 1", "ZR CZR", "FINISH"].join("\n");
     const { doc, index, uri } = openText(text);
     const nucl = index.ast.materials[0]!.nuclides[0]!;
     const hover = getHoverContent(
@@ -459,7 +474,7 @@ CS33  55133 132.905451
     }
   });
 
-  it("shows volumetric activity from PARAMETE.THR T½", () => {
+  it("shows specific activity from PARAMETE.THR T½", () => {
     setAwLibTable(
       parseAwLib(`
 CS37  55137 136.907089
@@ -486,12 +501,13 @@ stop
         { enableIaeaNuclide: false },
         uri
       );
-      assert.ok(hover?.includes("Объёмная активность"), hover ?? "");
+      assert.ok(hover?.includes("Удельная активность:"), hover ?? "");
       assert.ok(hover?.includes("вклад в А мат."), hover ?? "");
       assert.ok(hover?.includes("100%"), hover ?? "");
       assert.ok(!hover?.includes("по T½ PARAMETE.THR"), hover ?? "");
-      assert.ok(hover?.includes("Бк/см³"), hover ?? "");
-      assert.ok(hover?.includes("Активность материала"), hover ?? "");
+      assert.ok(hover?.includes("Бк/г"), hover ?? "");
+      assert.ok(!hover?.includes("Бк/см³"), hover ?? "");
+      assert.ok(hover?.includes("Удельная активность материала"), hover ?? "");
       assert.ok(!hover?.includes("без объёма VOL"), hover ?? "");
     } finally {
       clearParameteThrTable();
@@ -632,6 +648,52 @@ stop
       );
       assert.ok(hoverU?.includes("Нуклид **U235**"), hoverU ?? "(null)");
       assert.ok(hoverU?.includes("0.00034711"), hoverU ?? "(null)");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("hover on nuclide inside include file uses parent expanded index", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-hover-incfile-"));
+    try {
+      const matsText = "N     4.994E-5\nO     1.338E-5\nU235  0.00034711\n";
+      const matsPath = path.join(dir, "mats.mcu");
+      fs.writeFileSync(matsPath, matsText, "utf8");
+      const mainText = ["PIN", "MATR 1 T=480", "#include mats", "FINISH"].join("\n");
+      const mainPath = path.join(dir, "main.mcu");
+      fs.writeFileSync(mainPath, mainText, "utf8");
+
+      const mainUri = pathToFileURL(mainPath).href;
+      const matsUri = pathToFileURL(matsPath).href;
+      const parentIndex = analyzeDocument(mainUri, mainText, 1, { baseDir: dir, expandInclude: true });
+      const matsDoc = TextDocument.create(matsUri, "mcunr", 1, matsText);
+      const standalone = analyzeDocument(matsUri, matsText, 1, { baseDir: dir, expandInclude: false });
+      assert.strictEqual(standalone.ast.materials.length, 0, "standalone include has no MATR");
+
+      const nLine = 0;
+      const miss = getHoverContent(
+        matsDoc,
+        { line: nLine, character: 0 },
+        standalone,
+        { enableIaeaNuclide: false },
+        matsUri
+      );
+      assert.ok(!miss?.includes("Нуклид **N**"), "standalone must miss parent MATR composition");
+
+      const hoverN = getHoverContent(
+        matsDoc,
+        { line: nLine, character: 0 },
+        parentIndex,
+        { enableIaeaNuclide: false },
+        matsUri
+      );
+      assert.ok(hoverN?.includes("Нуклид **N**"), hoverN ?? "(null)");
+      assert.ok(hoverN?.includes("4.994E-5"), hoverN ?? "(null)");
+      assert.ok(hoverN?.includes("Разложить на изотопы"), hoverN ?? "(null)");
+
+      const hit = findNuclideAtPosition(parentIndex, { line: nLine, character: 0 }, "N", matsUri);
+      assert.ok(hit);
+      assert.strictEqual(hit!.materialNumber, 1);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

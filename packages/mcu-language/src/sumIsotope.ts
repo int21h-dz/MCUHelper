@@ -18,7 +18,7 @@ export type SumIsotopeReasonKind = "si" | "sinot" | "siden";
 
 export interface SumIsotopeMembership {
   inSum: boolean;
-  /** Человекочитаемые причины (может быть несколько: SI/SINOT + SIDEN). */
+  /** Человекочитаемые причины (может быть несколько: SI + SIDEN). */
   reasons: string[];
   kinds: SumIsotopeReasonKind[];
 }
@@ -143,7 +143,13 @@ function listHit(name: string, list: ReadonlySet<string>): boolean {
 
 /**
  * Входит ли нуклид в суммарный изотоп при данном состоянии карт.
- * SIDEN объединяется с SI/SINOT (OR): порог плотности действует независимо.
+ *
+ * Правила (проектные):
+ * - по умолчанию — не в сумме;
+ * - SI: перечисленные → в сумме;
+ * - SINOT: перечисленные → не в сумме (вето, в т.ч. против SIDEN);
+ * - SIDEN: dens &lt; value → в сумме (если не в списке активного SINOT);
+ * - SI и SINOT взаимоисключающи (активен последний объявленный список).
  */
 export function evaluateSumIsotopeMembership(
   nuclide: Pick<NuclideEntry, "name" | "density">,
@@ -153,16 +159,14 @@ export function evaluateSumIsotopeMembership(
   const reasons: string[] = [];
   const kinds: SumIsotopeReasonKind[] = [];
   const nameU = nuclide.name.toUpperCase();
+  const blockedBySinot = state.listMode === "sinot" && listHit(nameU, state.list);
 
   if (state.listMode === "si" && listHit(nameU, state.list)) {
     kinds.push("si");
     reasons.push(`входит в суммарный изотоп (указан в SI)`);
-  } else if (state.listMode === "sinot" && !listHit(nameU, state.list)) {
-    kinds.push("sinot");
-    reasons.push(`входит в суммарный изотоп (не указан в SINOT)`);
   }
 
-  if (state.siden != null) {
+  if (!blockedBySinot && state.siden != null) {
     const dens = resolveNuclideConcentration(nuclide.density, vars);
     if (dens != null && dens < state.siden) {
       kinds.push("siden");

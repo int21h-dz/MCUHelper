@@ -2,7 +2,7 @@ import { pathToFileURL } from "url";
 import { readTextFileWithDetectedEncoding } from "./encodingDetect";
 
 import type { IncludeLineMapEntry } from "./ast";
-import { normalizeIncludeFsKey, parseIncludeLine, resolveIncludeFilePath } from "./includeResolve";
+import { normalizeIncludeFsKey, parseIncludeLine, resolveIncludeFilePath, textHasIncludeDirective } from "./includeResolve";
 
 export interface IncludeExpandError {
   message: string;
@@ -57,7 +57,7 @@ export function expandIncludes(
           continue;
         }
         const incText = readIncludeText(fsPath, includeTextOverrides);
-        if (/#include\s+(?:<|\S)/i.test(incText)) {
+        if (textHasIncludeDirective(incText)) {
           errors.push({ message: `Вложенный #include запрещён: ${incPath}`, includePath: incPath, mainLine });
         }
         out.push(`* --- included from ${incPath} ---`);

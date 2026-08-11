@@ -1301,7 +1301,7 @@ describe("nuclide parameter excess", () => {
   });
 
   it("accepts EQU name as nuclide concentration", () => {
-    const text = `${pin}EQU CZR = 0.04273\nMATR 1\nZR CZR\nFINISH`;
+    const text = `EQU CZR = 0.04273\n${pin}MATR 1\nZR CZR\nFINISH`;
     const ast = parseDocument(text, { uri: "pin.mcu" });
     const diags = analyzeSemantics(ast).filter((d) => d.code === "matr-nuclide-conc");
     assert.strictEqual(diags.length, 0, diags.map((d) => d.message).join("; "));

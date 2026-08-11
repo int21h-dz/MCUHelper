@@ -59,8 +59,12 @@ describe("keywords", () => {
     assert.ok(labelAllowedInFragment("DELN", "physical"));
     assert.ok(!labelAllowedInFragment("DELN", "registration"));
     assert.ok(labelAllowedInFragment("FINISH", "registration"));
-    assert.ok(labelAllowedInFragment("EQU", "physical"));
+    assert.ok(!labelAllowedInFragment("EQU", "physical"));
+    assert.ok(!labelAllowedInFragment("SET", "physical"));
+    assert.ok(labelAllowedInFragment("EQU", "geometry"));
     assert.ok(labelAllowedInFragment("SET", "geometry"));
+    assert.ok(labelAllowedInFragment("EQU", "source"));
+    assert.ok(labelAllowedInFragment("SET", "source"));
     assert.ok(labelAllowedInFragment("BUCL", "registration"));
     assert.ok(labelAllowedInFragment("BUCL", "burnupRegistration"));
     assert.ok(labelAllowedInFragment("VOL", "physical"));
@@ -69,6 +73,7 @@ describe("keywords", () => {
     assert.ok(labelAllowedInFragment("NTOT", "trajectory"));
     assert.ok(!labelAllowedInFragment("NTOT", "calculationControl"));
     assert.deepStrictEqual([...fragmentsForLabel("EMES")], ["source"]);
+    assert.deepStrictEqual([...fragmentsForLabel("EQU")].sort(), ["geometry", "source"]);
   });
 
   it("detectFragmentFromLabel maps burn-related labels", () => {

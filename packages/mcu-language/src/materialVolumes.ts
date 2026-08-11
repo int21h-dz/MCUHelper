@@ -1,6 +1,5 @@
 import type { DocumentAst } from "./ast";
 import { evaluateExpression } from "./expression";
-import { formatBodyVolumeCm3 } from "./bodyVolume";
 import { computeMaterialMassDensityGcm3, formatMassDensityGcm3 } from "./materialDensity";
 import { parseStatementNumbers } from "./burnupLoad";
 
@@ -98,11 +97,21 @@ export function formatSpecificBurnupMwdPerKg(energyKwd: number, totalMassG: numb
   return `**${fmtNum(v)} МВт·сут/кг** (MW·d/kg)`;
 }
 
+function fmtVolumeCell(v: number): string {
+  if (!Number.isFinite(v) || v <= 0) return "—";
+  // Явное число с карты VOL (без «см³» в ячейке — меньше шансов сломать markdown-таблицу).
+  if (v >= 1e-3 && v < 1e6) {
+    const s = v.toPrecision(6).replace(/\.?0+$/, "");
+    return s || String(v);
+  }
+  return v.toExponential(4);
+}
+
 export function formatMaterialMassTable(rows: MaterialMassRow[]): string {
   if (!rows.length) return "";
 
   const tableRows = rows.map((r) => {
-    const vol = r.volumeCm3 != null ? formatBodyVolumeCm3(r.volumeCm3).replace(" см³", "") : "—";
+    const vol = r.volumeCm3 != null ? fmtVolumeCell(r.volumeCm3) : "—";
     const rho = r.massDensityGcm3 != null ? formatMassDensityGcm3(r.massDensityGcm3).replace(" г/см³", "") : "—";
     const mass = r.massG != null ? formatMassG(r.massG) : "—";
     return `| ${r.number} | ${vol} | ${rho} | ${mass} |`;
@@ -111,7 +120,7 @@ export function formatMaterialMassTable(rows: MaterialMassRow[]): string {
   const totalG = totalMaterialMassG(rows);
   const lines = [
     "",
-    "| MATR | V, см³ | ρ, г/см³ | m |",
+    "| MATR | V (VOL), см³ | ρ, г/см³ | m = ρ·V |",
     "| --- | --- | --- | --- |",
     ...tableRows,
   ];
@@ -126,10 +135,13 @@ export function formatVolCardHover(ast: DocumentAst): string {
   if (!volumes?.length) return "\n\n*Карта VOL не найдена в варианте.*";
 
   const rows = buildMaterialMassRows(ast);
+  const volList = volumes.map((v) => `\`${fmtVolumeCell(v)}\``).join(", ");
   const lines = [
     "",
     "---",
     "### Объёмы и массы материалов (VOL)",
+    "",
+    `Значения с карты: ${volList}`,
     "",
     `Задано **${volumes.length}** объём(ов) (см³) по порядку номеров MATR.`,
     formatMaterialMassTable(rows),

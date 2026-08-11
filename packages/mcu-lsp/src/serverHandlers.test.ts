@@ -17,10 +17,12 @@ import {
   collectDiagnosticsBundle,
   handleGetDiagnostics,
   handleGetIndex,
+  handleGetIncludeGraph,
   handleGetSlice,
   handleValidateInput,
   handleRunMcuStep,
   resolveDocumentIndex,
+  resolveHoverDocumentIndex,
   resolveContinueFinalSession,
   hasVariantRunArtifacts,
   uriToBaseDir,
@@ -148,11 +150,38 @@ describe("serverHandlers extended", () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
+  it("resolveHoverDocumentIndex uses parent expanded AST for include buffer", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-hover-resolve-"));
+    try {
+      const matsPath = path.join(dir, "mats.mcu");
+      fs.writeFileSync(matsPath, "N 1.0E-5\n", "utf8");
+      const mainPath = path.join(dir, "main.mcu");
+      const mainText = "PIN\nMATR 1\n#include mats\nFINISH\n";
+      fs.writeFileSync(mainPath, mainText, "utf8");
+      const mainUri = pathToFileURL(mainPath).href;
+      const matsUri = pathToFileURL(matsPath).href;
+      const mainDoc = TextDocument.create(mainUri, "mcunr", 1, mainText);
+      const matsDoc = TextDocument.create(matsUri, "mcunr", 1, "N 1.0E-5\n");
+      const docs = new Map([
+        [mainUri, mainDoc],
+        [matsUri, matsDoc],
+      ]);
+      const getDoc = (u: string) => docs.get(u);
+      const parents = new Map<string, Set<string>>([[matsUri, new Set([mainUri])]]);
+      const index = resolveHoverDocumentIndex(matsDoc, parents, getDoc, docs.values());
+      assert.ok(index.ast.materials.some((m) => m.nuclides.some((n) => n.name.toUpperCase() === "N")));
+      assert.ok(index.ast.includeLineMap?.some((e) => e.source === "include"));
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("collectDiagnostics treats include as part of unified variant (EQU from include)", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-diag-equ-"));
     try {
       fs.writeFileSync(path.join(dir, "consts.mcu"), "EQU DENSU = 1.0E-3\n", "utf8");
-      const mainText = ["PIN", "#include consts", "MATR 1", "U235 DENSU", "FINISH"].join("\n");
+      // EQU до PIN (geometry-контекст); в physical после PIN — card-wrong-fragment.
+      const mainText = ["#include consts", "PIN", "MATR 1", "U235 DENSU", "FINISH"].join("\n");
       const mainPath = path.join(dir, "main.mcu");
       fs.writeFileSync(mainPath, mainText, "utf8");
       const uri = `file:///${mainPath.replace(/\\/g, "/")}`;
@@ -455,6 +484,19 @@ FINISH ALL`;
       assert.strictEqual(result!.includes![0]!.range.start.line, 1);
       assert.strictEqual(result!.includes![0]!.exists, true);
 
+      assert.ok(Array.isArray(result!.includeGraph));
+      assert.strictEqual(result!.includeGraph!.length, 1);
+      assert.strictEqual(result!.includeGraph![0]!.path, "si.inc");
+      assert.strictEqual(result!.includeGraph![0]!.exists, true);
+      assert.strictEqual(result!.includeGraph![0]!.mainLine, 1);
+      assert.ok(result!.includeGraph![0]!.encoding);
+      assert.strictEqual(typeof result!.includeGraph![0]!.diagCount, "number");
+
+      const graphOnly = handleGetIncludeGraph(uri, getDoc);
+      assert.ok(graphOnly);
+      assert.strictEqual(graphOnly!.length, 1);
+      assert.strictEqual(graphOnly![0]!.path, "si.inc");
+
       const si = result!.statements?.find((s) => s.label.toUpperCase() === "SI");
       assert.ok(!si, "SI from include must not appear in nav statements");
 
@@ -474,10 +516,12 @@ FINISH ALL`;
     const materials = Array.from({ length: 100 }, (_, i) => ({
       number: i + 1,
       nuclideCount: 300,
+      sumIsotopeCount: 1,
       nuclidesPreview: "U235",
       massDensityGcm3: null as number | null,
       volumeCm3: null as number | null,
       massG: null as number | null,
+      activityBqPerG: null as number | null,
       nuclides: Array.from({ length: 300 }, (__, j) => ({
         name: `N${j}`,
         concentration: "1",

@@ -55,7 +55,7 @@ export function lstPathCandidates(opts: {
 }
 
 /**
- * Debug → LST из temp-run.
+ * Debug / BURNUP → LST из temp-run.
  * Run/Final → FIN рядом с вариантом; если FIN нет — LST из temp-run.
  */
 export function resolvePostRunOpenTarget(opts: {
@@ -64,7 +64,7 @@ export function resolvePostRunOpenTarget(opts: {
   finOverwritten?: boolean;
   lstPath?: string;
 }): PostRunOpenTarget | undefined {
-  if (opts.mode === "i") {
+  if (opts.mode === "i" || opts.mode === "b") {
     return opts.lstPath ? { kind: "lst", path: opts.lstPath, reason: "debug" } : undefined;
   }
   if (opts.mode === "c" || opts.mode === "f") {

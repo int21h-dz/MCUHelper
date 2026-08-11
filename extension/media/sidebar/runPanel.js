@@ -10,6 +10,7 @@
     "mcuhelper.runCalculation": "Ctrl+Alt+R",
     "mcuhelper.continueCalculation": "Ctrl+Alt+Shift+C",
     "mcuhelper.finalOutput": "Ctrl+Alt+F",
+    "mcuhelper.burnup": "Ctrl+Alt+B",
   };
 
   let status = {
@@ -75,6 +76,7 @@
         "continue"
       ) +
       btn("output", "Final — OUTPUT · финальная выдача", "mcuhelper.finalOutput", canRun, disabledReason, "final") +
+      btn("flame", "Burnup — BURNUP · шаг выгорания", "mcuhelper.burnup", canRun, disabledReason, "burnup") +
       btn(
         "gear",
         pathsTooltip(),

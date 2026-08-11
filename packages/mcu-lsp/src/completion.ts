@@ -31,6 +31,7 @@ import {
 } from "vscode-languageserver";
 import { fullLine, wordAtPosition } from "./hover";
 import { uriToBaseDir } from "./serverHandlers";
+import { getScopedDefinition } from "./symbolRefs";
 
 export { getHover, getHoverAsync, getHoverContent } from "./hover";
 
@@ -384,6 +385,19 @@ export function getDefinition(
     }
   }
 
+  const scoped = getScopedDefinition(doc, pos, index);
+  if (scoped) {
+    return {
+      uri: scoped.uri,
+      range: {
+        start: scoped.range.start,
+        end: scoped.range.end,
+        offset: 0,
+        endOffset: 0,
+      },
+    };
+  }
+
   const line = fullLine(doc, pos);
   const word = wordAtPosition(line, pos.character);
   if (!word) return null;
@@ -406,15 +420,7 @@ export function getDefinition(
     return null;
   };
 
-  const c = index.ast.constants.find((x) => x.name.toUpperCase() === word.toUpperCase());
-  if (c) return asEditorDef(c.range);
-
-  const body = index.ast.bodies.find((b) => b.name.toUpperCase() === word.toUpperCase());
-  if (body) return asEditorDef(body.range);
-
-  const zone = index.ast.zones.find((z) => z.name.toUpperCase() === word.toUpperCase());
-  if (zone) return asEditorDef(zone.range);
-
+  // MATR number / fallback без scope (материалы глобальны).
   const mat = index.ast.materials.find((m) => m.number === parseInt(word.replace(/\D/g, ""), 10));
   if (mat) return asEditorDef(mat.range);
 
