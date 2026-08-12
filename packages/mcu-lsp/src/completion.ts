@@ -28,6 +28,7 @@ import {
   InsertTextFormat,
   MarkupKind,
   Position,
+  Range,
 } from "vscode-languageserver";
 import { fullLine, wordAtPosition } from "./hover";
 import { uriToBaseDir } from "./serverHandlers";
@@ -109,6 +110,29 @@ function isLineStartKeywordInput(prefix: string): boolean {
   const trimmed = prefix.trim();
   if (!trimmed) return true;
   return !/\s/.test(trimmed);
+}
+
+/** Диапазон замены первого токена строки (для textEdit подсказок). */
+function lineStartTokenRange(prefix: string, pos: Position): Range {
+  const lead = prefix.length - prefix.trimStart().length;
+  const token = firstLineToken(prefix);
+  const startChar = token ? lead : pos.character;
+  return {
+    start: { line: pos.line, character: startChar },
+    end: { line: pos.line, character: pos.character },
+  };
+}
+
+function withLineStartTextEdit(item: CompletionItem, prefix: string, pos: Position, newText: string): CompletionItem {
+  return {
+    ...item,
+    textEdit: { range: lineStartTokenRange(prefix, pos), newText },
+  };
+}
+
+export interface CompletionResult {
+  items: CompletionItem[];
+  isIncomplete: boolean;
 }
 
 function enumArgCompletions(
@@ -230,20 +254,21 @@ export function getCompletions(
   doc: { getText: (r: { start: Position; end: Position }) => string },
   pos: Position,
   index: DocumentIndex
-): CompletionItem[] {
+): CompletionResult {
   const prefix = linePrefix(doc, pos);
   const trimmed = prefix.trim();
   const firstWord = firstLineToken(prefix);
   const firstUpper = firstWord.toUpperCase();
   const fragment = fragmentAtLine(index, pos.line);
+  const typingLineStartKeyword = isLineStartKeywordInput(prefix) && firstWord.length > 0;
 
   const argCtx = parseCardArgContext(prefix);
   if (argCtx) {
-    return buildCardArgCompletions(argCtx, index);
+    return { items: buildCardArgCompletions(argCtx, index), isIncomplete: Boolean(argCtx.partial) };
   }
 
   const matrItems = buildMatrHeaderCompletions(prefix, index);
-  if (matrItems) return matrItems;
+  if (matrItems) return { items: matrItems, isIncomplete: false };
 
   const items: CompletionItem[] = [];
 
@@ -253,27 +278,42 @@ export function getCompletions(
       if (!cardAllowedInFragment(card, fragment)) continue;
       const inFragment = fragment && card.fragment === fragment ? "0" : "1";
       const exact = label === firstUpper ? "0" : "1";
-      items.push({
-        label,
-        kind: CompletionItemKind.Keyword,
-        detail: card.title,
-        documentation: cardDocumentation(card, index, pos.line),
-        sortText: `${exact}${inFragment}_${label}`,
-      });
+      items.push(
+        withLineStartTextEdit(
+          {
+            label,
+            kind: CompletionItemKind.Keyword,
+            detail: card.title,
+            documentation: cardDocumentation(card, index, pos.line),
+            sortText: `${exact}${inFragment}_${label}`,
+          },
+          prefix,
+          pos,
+          label
+        )
+      );
     }
 
     if (fragment === "geometry") {
       for (const body of BODY_TYPES) {
         if (firstWord && !body.key.startsWith(firstUpper)) continue;
-        items.push({
-          label: body.key,
-          kind: CompletionItemKind.Struct,
-          detail: body.title,
-          documentation: bodyDocumentation(body),
-          insertText: body.snippet,
-          insertTextFormat: InsertTextFormat.Snippet,
-          sortText: `2_${body.key}`,
-        });
+        items.push(
+          withLineStartTextEdit(
+            {
+              label: body.key,
+              filterText: body.key,
+              kind: CompletionItemKind.Struct,
+              detail: body.title,
+              documentation: bodyDocumentation(body),
+              insertText: body.snippet,
+              insertTextFormat: InsertTextFormat.Snippet,
+              sortText: `2_${body.key}`,
+            },
+            prefix,
+            pos,
+            body.snippet
+          )
+        );
       }
     }
   }
@@ -308,57 +348,62 @@ export function getCompletions(
     );
   }
 
-  for (const b of index.ast.bodies) {
-    if (b.name !== "*") {
-      items.push({ label: b.name, kind: CompletionItemKind.Variable, detail: `Тело ${b.bodyType}` });
+  if (!typingLineStartKeyword) {
+    for (const b of index.ast.bodies) {
+      if (b.name !== "*") {
+        items.push({ label: b.name, kind: CompletionItemKind.Variable, detail: `Тело ${b.bodyType}` });
+      }
     }
-  }
 
-  for (const c of index.ast.constants) {
-    items.push({ label: c.name, kind: CompletionItemKind.Constant, detail: c.expression });
-  }
+    for (const c of index.ast.constants) {
+      items.push({ label: c.name, kind: CompletionItemKind.Constant, detail: c.expression });
+    }
 
-  for (const m of index.ast.materials) {
+    for (const m of index.ast.materials) {
+      items.push({
+        label: `MAT${m.number}`,
+        kind: CompletionItemKind.Module,
+        detail: `Материал ${m.number}`,
+        insertText: String(m.number),
+      });
+    }
+
     items.push({
-      label: `MAT${m.number}`,
-      kind: CompletionItemKind.Module,
-      detail: `Материал ${m.number}`,
-      insertText: String(m.number),
+      label: "zone-snippet",
+      kind: CompletionItemKind.Snippet,
+      filterText: "ZONE",
+      insertText: "${1:ZON1} ${2:BODY} # m=${3:1} z=${4:1} o=${5:1}",
+      insertTextFormat: InsertTextFormat.Snippet,
+      detail: "Зона (формат #)",
+    });
+
+    items.push({
+      label: "trx-cell",
+      kind: CompletionItemKind.Snippet,
+      filterText: "TRX",
+      insertText: [
+        "HEAD 3 0",
+        "CONT T T M M M M M M",
+        "HEX C 0,0,0 1.806,0,100",
+        "RCZ FU 0,0,0 100 0.4915",
+        "RCZ ZA 0,0,0 100 0.5042",
+        "RCZ CL 0,0,0 100 0.5753",
+        "END",
+        "FUEL FU /1:1",
+        "SPACE ZA -FU /2:4",
+        "CLAD CL -ZA /3:3",
+        "WATR C -CL /4:2",
+        "END",
+        "FINISH",
+      ].join("\n"),
+      detail: "Пример ячейки TRX (UserGuide А.44)",
     });
   }
 
-  items.push({
-    label: "zone-snippet",
-    kind: CompletionItemKind.Snippet,
-    filterText: "ZONE",
-    insertText: "${1:ZON1} ${2:BODY} # m=${3:1} z=${4:1} o=${5:1}",
-    insertTextFormat: InsertTextFormat.Snippet,
-    detail: "Зона (формат #)",
-  });
-
-  items.push({
-    label: "trx-cell",
-    kind: CompletionItemKind.Snippet,
-    filterText: "TRX",
-    insertText: [
-      "HEAD 3 0",
-      "CONT T T M M M M M M",
-      "HEX C 0,0,0 1.806,0,100",
-      "RCZ FU 0,0,0 100 0.4915",
-      "RCZ ZA 0,0,0 100 0.5042",
-      "RCZ CL 0,0,0 100 0.5753",
-      "END",
-      "FUEL FU /1:1",
-      "SPACE ZA -FU /2:4",
-      "CLAD CL -ZA /3:3",
-      "WATR C -CL /4:2",
-      "END",
-      "FINISH",
-    ].join("\n"),
-    detail: "Пример ячейки TRX (UserGuide А.44)",
-  });
-
-  return items;
+  return {
+    items,
+    isIncomplete: typingLineStartKeyword && firstWord.length > 0 && firstWord.length < 6,
+  };
 }
 
 export function getDefinition(

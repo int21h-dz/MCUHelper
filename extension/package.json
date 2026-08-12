@@ -2,7 +2,7 @@
   "name": "mcuhelper-vscode",
   "displayName": "MCU-NR Helper",
   "description": "Подсветка, диагностика, hover и навигация для исходных данных MCU-NR",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "publisher": "mcuhelper",
   "repository": {
     "type": "git",

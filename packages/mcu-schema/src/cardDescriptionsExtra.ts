@@ -72,6 +72,16 @@ export const EXTRA_CARD_DESCRIPTIONS: ExtraCard[] = [
       "Печатает последние значения параметров вместо накопленных. Задаётся комментарием `C=` в колонках 1-2.",
     fragment: "physical",
   },
+  // --- Geometry ---
+  {
+    label: "MIR",
+    title: "Плоскость симметрии",
+    syntax: "MIR P Q",
+    description:
+      "Задаёт плоскость симметрии контейнера: (P·x)+Q=0. Вектор P направлен внутрь контейнера. Альтернатива — первое тело секции тел (SPH, RPP, HEX, RCZ, BOX).",
+    example: "MIR 0,0,1 0",
+    fragment: "geometry",
+  },
   // --- Geometry: накопление источника (не в UserGuide 220519) ---
   {
     label: "LFIXSO",

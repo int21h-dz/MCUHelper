@@ -419,7 +419,7 @@ documents.onDidSave((event) => {
 
 connection.onCompletion((params: CompletionParams) => {
   const doc = documents.get(params.textDocument.uri);
-  if (!doc) return [];
+  if (!doc) return { items: [] };
   const index = getDocumentIndex(params.textDocument.uri);
   if (!index || index.version !== doc.version) {
     const fresh = ensureDocumentIndex(doc);

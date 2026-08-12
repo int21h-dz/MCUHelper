@@ -14,7 +14,10 @@ const vsixPrefix = 'mcuhelper-vscode-';
 const vsixSuffix = '.vsix';
 const versionFieldRe = /("version"\s*:\s*")(\d+\.\d+(?:\.\d+)?)(")/;
 
-const releaseMajor = Number.parseInt(process.argv[2] ?? process.env.RELEASE_MAJOR ?? '0', 10);
+const args = process.argv.slice(2);
+const noBump = args.includes('--no-bump') || args.includes('-n');
+const majorArg = args.find((a) => a !== '--no-bump' && a !== '-n');
+const releaseMajor = Number.parseInt(majorArg ?? process.env.RELEASE_MAJOR ?? '0', 10);
 if (!Number.isFinite(releaseMajor) || releaseMajor < 0) {
   console.error('ОШИБКА: укажите неотрицательный MAJOR (аргумент или RELEASE_MAJOR).');
   process.exit(1);
@@ -51,11 +54,21 @@ if (!versionMatch) {
 }
 
 /** @type {{ major: number, minor: number } | null} */
-let maxVer = pickMaxMinor(null, parseVersion(versionMatch[2]));
-if (!maxVer && versionMatch[2]) {
+const currentParsed = parseVersion(versionMatch[2]);
+if (!currentParsed) {
   console.error(`ОШИБКА: некорректная версия в ${pkgPath}: ${versionMatch[2]}`);
   process.exit(1);
 }
+
+if (noBump) {
+  const currentLabel = `${currentParsed.major}.${currentParsed.minor}`;
+  process.stderr.write(`Версия без инкремента: ${currentLabel}\n`);
+  process.stdout.write(versionMatch[2]);
+  process.exit(0);
+}
+
+/** @type {{ major: number, minor: number } | null} */
+let maxVer = pickMaxMinor(null, currentParsed);
 
 if (fs.existsSync(releaseDir)) {
   for (const name of fs.readdirSync(releaseDir)) {

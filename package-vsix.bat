@@ -4,11 +4,30 @@ cd /d "%~dp0"
 
 rem Release MAJOR (MINOR is auto-incremented from release/ folder)
 set "RELEASE_MAJOR=0"
+set "NO_BUMP="
+
+rem CLI override (для автоматизации без меню)
+if /i "%~1"=="nobump" set "NO_BUMP=1"
+if /i "%~1"=="--no-bump" set "NO_BUMP=1"
+if /i "%~1"=="-n" set "NO_BUMP=1"
+if /i "%~1"=="bump" set "NO_BUMP=0"
+if /i "%~1"=="--bump" set "NO_BUMP=0"
+if /i "%~1"=="-b" set "NO_BUMP=0"
 
 echo ========================================
 echo  MCU-NR Helper - VSIX build
 echo ========================================
 echo   MAJOR=%RELEASE_MAJOR%
+echo.
+
+if not defined NO_BUMP call :choose_mode
+if not defined NO_BUMP goto :fail
+
+if "!NO_BUMP!"=="1" (
+  echo   Mode: no version bump
+) else (
+  echo   Mode: auto bump version
+)
 echo.
 
 echo [1/7] npm install (root)...
@@ -56,9 +75,15 @@ copy /Y "media\Thenx.png" "extension\media\Thenx.png" >nul
 if errorlevel 1 goto :fail
 
 echo.
-echo [5/7] Bump version (release + package.json)...
+if "!NO_BUMP!"=="1" (
+  echo [5/7] Version ^(no bump^)...
+  set "BUMP_ARGS=%RELEASE_MAJOR% --no-bump"
+) else (
+  echo [5/7] Bump version (release + package.json)...
+  set "BUMP_ARGS=%RELEASE_MAJOR%"
+)
 set "RELEASE_VERSION="
-for /f "usebackq delims=" %%V in (`node "%~dp0scripts\bump-vsix-version.js" %RELEASE_MAJOR%`) do set "RELEASE_VERSION=%%V"
+for /f "usebackq delims=" %%V in (`node "%~dp0scripts\bump-vsix-version.js" !BUMP_ARGS!`) do set "RELEASE_VERSION=%%V"
 if not defined RELEASE_VERSION goto :fail
 echo   mcuhelper-vscode-!RELEASE_VERSION!.vsix
 
@@ -79,6 +104,31 @@ echo   code --install-extension "%~dp0release\mcuhelper-vscode-!RELEASE_VERSION!
 echo   (or: Extensions -^> ... -^> Install from VSIX)
 echo.
 goto :eof
+
+:choose_mode
+set "CURRENT_VERSION="
+for /f "usebackq delims=" %%V in (`node -p "require('./extension/package.json').version"`) do set "CURRENT_VERSION=%%V"
+echo Текущая версия: !CURRENT_VERSION!
+echo.
+echo Выберите режим сборки:
+echo   1 - Увеличить версию ^(новый релиз^)
+echo   2 - Без изменения версии ^(пересборка^)
+echo.
+set "MODE_CHOICE="
+set /p "MODE_CHOICE=Ваш выбор [1]: "
+if "!MODE_CHOICE!"=="" set "MODE_CHOICE=1"
+if "!MODE_CHOICE!"=="1" (
+  set "NO_BUMP=0"
+  exit /b 0
+)
+if "!MODE_CHOICE!"=="2" (
+  set "NO_BUMP=1"
+  exit /b 0
+)
+echo.
+echo Неверный выбор: "!MODE_CHOICE!". Введите 1 или 2.
+echo.
+goto :choose_mode
 
 :fail
 echo.

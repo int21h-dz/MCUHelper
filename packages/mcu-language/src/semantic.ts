@@ -32,6 +32,7 @@ import { buildScopedVars, constScopeKey } from "./constantScope";
 import { collectZoneBodyRefs, isAllSpaceZoneRef } from "./zoneBodyRefs";
 import { formatExpandedLineRef } from "./includeLineMap";
 import { analyzeCrossModuleLinks } from "./crossModuleAudit";
+import { analyzeIdentifierNames } from "./identifierValidation";
 
 export function analyzeSemantics(ast: DocumentAst): DiagnosticMessage[] {
   const diags: DiagnosticMessage[] = [...ast.diagnostics];
@@ -270,6 +271,7 @@ export function analyzeSemantics(ast: DocumentAst): DiagnosticMessage[] {
   diags.push(...analyzeEnergyGroupStatements(ast));
   diags.push(...analyzePositiveQuantities(ast));
   diags.push(...analyzeUndefinedVariables(ast));
+  diags.push(...analyzeIdentifierNames(ast));
   diags.push(...analyzeBodyParameterCounts(ast));
   diags.push(...analyzeNuclideParameterCounts(ast));
   diags.push(...analyzeMatrCardParams(ast));

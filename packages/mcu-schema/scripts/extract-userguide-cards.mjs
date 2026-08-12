@@ -43,6 +43,12 @@ const MANUAL = {
   ZONPRI: { aliasOf: "ZONP" },
   SUMZON: { aliasOf: "SUMZ" },
   NAMVAR: { aliasOf: "NAMV" },
+  MIR: {
+    syntax: "MIR P Q",
+    description:
+      "Задаёт плоскость симметрии контейнера: (P·x)+Q=0. Вектор P направлен внутрь контейнера.",
+    fragment: "geometry",
+  },
 };
 
 const cards = new Map();

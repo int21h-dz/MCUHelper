@@ -79,7 +79,7 @@ describe("serverHandlers integration", () => {
     const index = getDocumentIndex(uri)!;
     const matrLine = index.ast.materials[0]?.range.start.line ?? 2;
     const completions = getCompletions(doc, { line: 0, character: 0 }, index);
-    assert.ok(completions.length > 0);
+    assert.ok(completions.items.length > 0);
     const hover = getHoverContent(
       doc,
       { line: matrLine + 1, character: 2 },

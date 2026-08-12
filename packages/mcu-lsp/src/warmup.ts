@@ -11,7 +11,7 @@ export function warmupLanguageServer(): void {
   try {
     const doc = TextDocument.create(WARMUP_URI, "mcunr", 1, WARMUP_TEXT);
     const index = analyzeDocument(WARMUP_URI, WARMUP_TEXT, 1, { expandInclude: false });
-    getCompletions(doc, { line: 0, character: 1 }, index);
+    getCompletions(doc, { line: 0, character: 1 }, index).items;
     collectDiagnostics(doc);
   } catch {
     // ignore warmup errors
