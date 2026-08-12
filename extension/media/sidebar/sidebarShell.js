@@ -80,6 +80,19 @@
     return searchHtml("mcu-nav-search", meta.searchPh || "Поиск…", panelHint(state.panel));
   }
 
+  /** Явная кнопка в панели Материалы (view/title-капля легко теряется). */
+  function materialsToolbarHtml() {
+    if (state.panel !== "mcuhelper.materials") return "";
+    return (
+      '<div class="mcu-panel-toolbar">' +
+      '<button type="button" class="mcu-panel-tool-btn" data-action="run-command" data-command="mcuhelper.waterSteam" data-args="null" title="Параметры воды / пара (IF97) → dens H и O">' +
+      I.getIcon("droplet") +
+      "<span>Вода / пар</span>" +
+      "</button>" +
+      "</div>"
+    );
+  }
+
   function navPillLabel(node) {
     const id = node.id || "";
     if (id.startsWith("mat-") && !id.includes("-n-")) {
@@ -259,6 +272,7 @@
     const tip = panelHint(state.panel);
     root.innerHTML =
       panelShellOpen(state.panel) +
+      materialsToolbarHtml() +
       '<div class="mcu-empty"' +
       (tip ? ' title="' + esc(tip) + '"' : "") +
       ">" +
@@ -266,6 +280,7 @@
       "<div>" +
       esc(message || "Откройте файл MCU-NR") +
       "</div></div></div>";
+    bindNavInteractions();
   }
 
   function bindDrag(el, text, format) {
@@ -579,7 +594,9 @@
     if (!nodes || nodes.length === 0) {
       root.innerHTML =
         panelShellOpen(state.panel) +
+        materialsToolbarHtml() +
         '<div class="mcu-empty">Нет данных в текущем файле</div></div>';
+      bindNavInteractions();
       return;
     }
     for (const key of Object.keys(groupCopyCsv)) delete groupCopyCsv[key];
@@ -587,6 +604,7 @@
     const searchPart = panelHasSearch(state.panel) ? navSearchHtml() : "";
     root.innerHTML =
       panelShellOpen(state.panel) +
+      materialsToolbarHtml() +
       searchPart +
       '<div class="mcu-nav-body mcu-catalog-body" style="--panel-accent:' +
       esc(accent) +

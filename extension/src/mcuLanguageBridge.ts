@@ -66,3 +66,73 @@ export function loadResultSummaryApi(): {
 } {
   return requireLanguage("resultSummary");
 }
+
+export type WaterSteamState = {
+  T: number;
+  P: number;
+  rho: number;
+  nH: number;
+  nO: number;
+  phase: "liquid" | "vapor" | "unknown";
+  quality: number | null;
+  warning?: string;
+};
+
+export type SaturationPoint = {
+  T: number;
+  P: number;
+  rhoF: number;
+  rhoG: number;
+};
+
+export type PressureUnit = "Pa" | "kPa" | "MPa" | "atm" | "bar";
+
+export function loadWaterSteamApi(): {
+  ATM_MPA: number;
+  DEFAULT_WATER_T_K: number;
+  PRESSURE_UNITS: ReadonlyArray<{ id: PressureUnit; label: string }>;
+  pressureToMPa: (value: number, unit: PressureUnit) => number;
+  pressureFromMPa: (pMPa: number, unit: PressureUnit) => number;
+  nuclearHOFromMassDensity: (rhoGcm3: number) => { nH: number; nO: number };
+  waterElementFamily: (name: string) => "H" | "O" | null;
+  materialHasHO: (nuclideNames: ReadonlyArray<string>) => boolean;
+  WATER_DENSITY_MIXTURE_FOOTNOTE: string;
+  extractWaterComponentFromNuclides: (
+    nuclides: ReadonlyArray<{ name: string; concentration: string }>
+  ) => {
+    nH: number;
+    nO: number;
+    rhoGcm3: number;
+    nH2O: number;
+    nHTotal: number;
+    nOTotal: number;
+    warning?: string;
+  } | null;
+  massDensityGcm3FromHONuclides: (
+    nuclides: ReadonlyArray<{ name: string; concentration: string }>
+  ) => number | null;
+  stateFromPT: (pMPa: number, T: number) => WaterSteamState;
+  stateFromTRho: (
+    T: number,
+    rhoGcm3: number,
+    pMPa?: number,
+    opts?: { forcePsat?: boolean }
+  ) => WaterSteamState;
+  stateFromPRho: (pMPa: number, rhoGcm3: number) => WaterSteamState;
+  stateFromPsat: (
+    pMPa: number,
+    opts?: { phase?: "liquid" | "vapor" | "unknown"; rho?: number | null }
+  ) => WaterSteamState;
+  psatAtT: (T: number) => SaturationPoint;
+  satAtP: (pMPa: number) => SaturationPoint;
+  defaultAmbientState: () => WaterSteamState;
+  initialStateFromMaterial: (opts: { T?: number | null; rho?: number | null }) => WaterSteamState;
+  buildSaturationCurve: (opts?: {
+    tMin?: number;
+    tMax?: number;
+    steps?: number;
+  }) => SaturationPoint[];
+  formatMcuNuclearDens: (n: number) => string;
+} {
+  return requireLanguage("waterSteam");
+}

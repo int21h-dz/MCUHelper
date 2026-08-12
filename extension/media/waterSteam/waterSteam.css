@@ -1,0 +1,281 @@
+:root {
+  --ws-bg: var(--vscode-editor-background, #1e1e1e);
+  --ws-fg: var(--vscode-editor-foreground, #d4d4d4);
+  --ws-border: var(--vscode-panel-border, #3c3c3c);
+  --ws-input-bg: var(--vscode-input-background, #3c3c3c);
+  --ws-input-fg: var(--vscode-input-foreground, #cccccc);
+  --ws-accent: #2a7f9e;
+  --ws-accent-soft: color-mix(in srgb, #2a7f9e 20%, transparent);
+  --ws-liquid: #3d9a8b;
+  --ws-vapor: #6b8cae;
+  --ws-two-phase: #c4a35a;
+  --ws-header: var(--vscode-sideBarSectionHeader-background, #252526);
+  --ws-muted: var(--vscode-descriptionForeground, #9d9d9d);
+  --ws-btn: var(--vscode-button-background, #0e639c);
+  --ws-btn-fg: var(--vscode-button-foreground, #fff);
+  --ws-btn-sec: var(--vscode-button-secondaryBackground, #3a3d41);
+  --ws-btn-sec-fg: var(--vscode-button-secondaryForeground, #ccc);
+  --ws-err: var(--vscode-errorForeground, #f48771);
+  --ws-font: var(--vscode-editor-font-family, Consolas, "Courier New", monospace);
+  --ws-ui: var(--vscode-font-family, system-ui, sans-serif);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--ws-bg);
+  color: var(--ws-fg);
+  font: 12.5px/1.4 var(--ws-ui);
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.ws-header {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-end;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--ws-border);
+  background:
+    linear-gradient(180deg, var(--ws-accent-soft), transparent 72%),
+    var(--ws-header);
+}
+
+.ws-header h1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
+.ws-sub {
+  margin: 4px 0 0;
+  color: var(--ws-muted);
+}
+
+.ws-doc {
+  color: var(--ws-muted);
+  font-family: var(--ws-font);
+  font-size: 11px;
+  max-width: 42%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-note {
+  margin: 0;
+  padding: 8px 16px;
+  color: var(--ws-muted);
+  border-bottom: 1px solid var(--ws-border);
+  font-size: 12px;
+}
+
+.ws-footnote {
+  margin: 0;
+  padding: 0 16px 8px;
+  color: var(--ws-muted);
+  border-bottom: 1px solid var(--ws-border);
+  font-size: 11px;
+  line-height: 1.35;
+  opacity: 0.88;
+}
+
+.ws-footnote[hidden] {
+  display: none !important;
+}
+
+.ws-layout {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(240px, 0.9fr);
+  gap: 0;
+}
+
+.ws-chart-wrap {
+  padding: 12px 12px 8px;
+  border-right: 1px solid var(--ws-border);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+#chart {
+  width: 100%;
+  height: auto;
+  flex: 1 1 auto;
+  min-height: 280px;
+  background:
+    radial-gradient(ellipse at 20% 10%, color-mix(in srgb, var(--ws-liquid) 12%, transparent), transparent 55%),
+    radial-gradient(ellipse at 80% 90%, color-mix(in srgb, var(--ws-vapor) 10%, transparent), transparent 50%),
+    var(--ws-bg);
+  border: 1px solid var(--ws-border);
+  border-radius: 4px;
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+}
+
+.ws-hover {
+  margin: 6px 2px 0;
+  min-height: 1.35em;
+  font-family: var(--ws-font);
+  font-size: 12px;
+  color: var(--ws-fg);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ws-hover.is-cursor {
+  color: var(--ws-accent, #2a7f9e);
+}
+
+.ws-panel {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow: auto;
+}
+
+.ws-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 12px;
+}
+
+.ws-span-2 {
+  grid-column: 1 / -1;
+}
+
+.ws-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ws-field-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--ws-muted);
+}
+
+.ws-field-head input[type="radio"] {
+  margin: 0;
+  accent-color: var(--ws-accent, #2a7f9e);
+  cursor: pointer;
+}
+
+.ws-field.is-dependent .ws-field-head span {
+  color: var(--ws-accent, #2a7f9e);
+  font-weight: 650;
+}
+
+.ws-field.is-dependent input[type="number"] {
+  opacity: 0.85;
+  border-color: color-mix(in srgb, var(--ws-accent, #2a7f9e) 45%, var(--ws-border));
+}
+
+.ws-p-inputs {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.ws-p-inputs input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ws-p-inputs select {
+  flex: 0 0 5.5rem;
+  min-width: 5.5rem;
+  font-family: var(--ws-ui);
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--ws-accent, #2a7f9e) 50%, var(--ws-border));
+  border-radius: 3px;
+  background: var(--ws-input-bg);
+  color: var(--ws-input-fg);
+  cursor: pointer;
+}
+
+.ws-grid input {
+  font-family: var(--ws-font);
+  font-size: 12.5px;
+  padding: 6px 8px;
+  border: 1px solid var(--ws-border);
+  border-radius: 3px;
+  background: var(--ws-input-bg);
+  color: var(--ws-input-fg);
+}
+
+.ws-grid input[readonly] {
+  opacity: 0.92;
+}
+
+.ws-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ws-btn {
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  background: var(--ws-btn);
+  color: var(--ws-btn-fg);
+}
+
+.ws-btn:hover { filter: brightness(1.08); }
+
+.ws-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: none;
+}
+
+.ws-btn-sec {
+  background: var(--ws-btn-sec);
+  color: var(--ws-btn-sec-fg);
+}
+
+.ws-btn-accent {
+  background: var(--ws-liquid);
+  color: #fff;
+}
+
+.ws-err {
+  margin: 0;
+  color: var(--ws-err);
+  font-size: 12px;
+}
+
+@media (max-width: 720px) {
+  .ws-layout {
+    grid-template-columns: 1fr;
+  }
+  .ws-chart-wrap {
+    border-right: none;
+    border-bottom: 1px solid var(--ws-border);
+  }
+}

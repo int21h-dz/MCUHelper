@@ -152,7 +152,11 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         return;
       }
       if (msg.type === "runCommand" && typeof msg.command === "string") {
-        await vscode.commands.executeCommand(msg.command, msg.args);
+        if (msg.args == null) {
+          await vscode.commands.executeCommand(msg.command);
+        } else {
+          await vscode.commands.executeCommand(msg.command, msg.args);
+        }
         return;
       }
       if (msg.type === "copyText" && typeof msg.text === "string") {

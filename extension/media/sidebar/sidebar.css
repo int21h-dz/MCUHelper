@@ -121,6 +121,45 @@ body {
   color: var(--vscode-input-placeholderForeground, #888);
 }
 
+/* ── Toolbar внутри панели (Материалы → Вода/пар) ── */
+.mcu-panel-toolbar {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px 0;
+  flex: 0 0 auto;
+}
+
+.mcu-panel-tool-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  justify-content: center;
+  padding: 7px 10px;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--panel-accent, #2a7f9e) 45%, var(--vscode-panel-border, #444));
+  background: color-mix(in srgb, var(--panel-accent, #2a7f9e) 16%, transparent);
+  color: var(--vscode-foreground, #ddd);
+  font: inherit;
+  font-size: var(--mcu-size-sm, 12px);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.mcu-panel-tool-btn:hover {
+  background: color-mix(in srgb, var(--panel-accent, #2a7f9e) 28%, transparent);
+}
+
+.mcu-panel-tool-btn:active {
+  transform: translateY(1px);
+}
+
+.mcu-panel-tool-btn .mcu-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--panel-accent, #2a7f9e);
+}
+
 /* ── Empty ── */
 .mcu-empty {
   padding: 20px 14px;

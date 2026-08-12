@@ -280,6 +280,11 @@
         "icon": "$(symbol-ruler)"
       },
       {
+        "command": "mcuhelper.waterSteam",
+        "title": "MCU-NR: Вода / пар",
+        "icon": "$(droplet)"
+      },
+      {
         "command": "mcuhelper.showIncludeGraph",
         "title": "MCU-NR: Граф #include",
         "icon": "$(type-hierarchy)"
@@ -469,6 +474,11 @@
           "command": "mcuhelper.editDefaultPhy",
           "when": "view == mcuhelper.run",
           "group": "navigation@3"
+        },
+        {
+          "command": "mcuhelper.waterSteam",
+          "when": "view == mcuhelper.materials",
+          "group": "navigation@1"
         }
       ],
       "editor/context": [
@@ -596,6 +606,7 @@
     "test": "npm run build && node --test -r ./src/test-setup.js dist/**/*.test.js"
   },
   "dependencies": {
+    "iapws-if97": "^2.2.0",
     "iconv-lite": "^0.6.3",
     "vscode-languageclient": "^9.0.1",
     "vscode-languageserver": "^9.0.1",

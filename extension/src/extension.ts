@@ -27,6 +27,8 @@ import { runMcuStepFlow } from "./mcuStepRunner";
 import { batchValidateInput } from "./batchValidateCommand";
 import { resolvePostRunOpenTarget, shouldFocusDiagnosticsAfterRun } from "./runPanelHelpers";
 import { runRegistrationBuilder } from "./registrationBuilderCommand";
+import { runWaterSteam } from "./waterSteamCommand";
+import { registerWaterSteamFocusTracker } from "./waterSteamPanel";
 import { showIncludeGraph } from "./includeGraphCommand";
 import { compareResults } from "./compareResultsCommand";
 import { registerMcuCodeActions } from "./codeActions";
@@ -158,6 +160,7 @@ export function activate(context: vscode.ExtensionContext): void {
   registerDiagnosticNavigation(context, () => client);
   registerIncludePreview(context);
   registerMatrCodeLens(context);
+  registerWaterSteamFocusTracker(context);
   sidebarProviders = createSidebarProviders(context, client);
   setSidebarReadyHandler(() => scheduleRefresh());
   // Догоняющий refresh: ранний librariesSynced / State.Running могли прийти до providers.
@@ -253,6 +256,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("mcuhelper.finalOutput", () => runMcuStepCommand("f")),
     vscode.commands.registerCommand("mcuhelper.burnup", () => runMcuStepCommand("b")),
     vscode.commands.registerCommand("mcuhelper.registrationBuilder", () => runRegistrationBuilder(context, client)),
+    vscode.commands.registerCommand("mcuhelper.waterSteam", () => runWaterSteam(context, client)),
     vscode.commands.registerCommand("mcuhelper.showIncludeGraph", () => showIncludeGraph(client)),
     vscode.commands.registerCommand("mcuhelper.compareResults", () => compareResults()),
     registerMcuCodeActions(),
