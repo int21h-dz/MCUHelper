@@ -1,3 +1,4 @@
+import * as path from "path";
 import * as vscode from "vscode";
 import type { LanguageClient } from "vscode-languageclient/node";
 import { isMcunrDocument } from "./contentDetect";
@@ -370,6 +371,47 @@ export function buildDiagnosticTreeWithIncludes(
 
 let diagnosticsSidebarGeneration = 0;
 
+/** Совпадение токена `#include` с путём include-файла (имя, относительный или абсолютный путь). */
+export function includeReferencesPath(includeToken: string, targetFsPath: string, mainDir: string): boolean {
+  const token = includeToken.trim().replace(/\\/g, "/");
+  if (!token) return false;
+  const targetNorm = path.resolve(targetFsPath).toLowerCase().replace(/\\/g, "/");
+  const targetBase = path.basename(targetNorm);
+  const tokenLower = token.toLowerCase();
+  if (tokenLower === targetBase) return true;
+  if (tokenLower === path.basename(targetFsPath, path.extname(targetFsPath)).toLowerCase()) return true;
+
+  const resolved = path.resolve(mainDir, token).toLowerCase().replace(/\\/g, "/");
+  if (resolved === targetNorm) return true;
+  for (const ext of ["", ".mcu", ".mcunr"]) {
+    if (`${resolved}${ext}` === targetNorm) return true;
+  }
+  return false;
+}
+
+/**
+ * Диагностики варианта — единый разбор main+#include.
+ * Если активен include-файл, ищем открытый main с директивой `#include` на него.
+ */
+export function resolveDiagnosticsTargetDocument(doc: vscode.TextDocument): vscode.TextDocument {
+  if (!isMcunrDocument(doc) || doc.uri.scheme !== "file") return doc;
+  const selfPath = doc.uri.fsPath;
+  const includeRe = /^\s*#include\s+(?:<([^>]+)>|(\S+))/gim;
+
+  for (const open of vscode.workspace.textDocuments) {
+    if (open.languageId !== "mcunr" || open.uri.scheme !== "file") continue;
+    if (open.uri.toString() === doc.uri.toString()) continue;
+    const mainDir = path.dirname(open.uri.fsPath);
+    includeRe.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = includeRe.exec(open.getText())) !== null) {
+      const inc = (m[1] ?? m[2])?.trim();
+      if (inc && includeReferencesPath(inc, selfPath, mainDir)) return open;
+    }
+  }
+  return doc;
+}
+
 export async function applyDiagnosticsToSidebar(
   webview: vscode.Webview,
   panelId: string,
@@ -377,7 +419,8 @@ export async function applyDiagnosticsToSidebar(
   client: LanguageClient | undefined
 ): Promise<void> {
   const generation = ++diagnosticsSidebarGeneration;
-  if (!document || !isMcunrDocument(document)) {
+  const targetDoc = document ? resolveDiagnosticsTargetDocument(document) : undefined;
+  if (!targetDoc || !isMcunrDocument(targetDoc)) {
     if (generation !== diagnosticsSidebarGeneration) return;
     webview.postMessage({
       type: "empty",
@@ -399,7 +442,7 @@ export async function applyDiagnosticsToSidebar(
 
   let response: { diagnostics: vscode.Diagnostic[]; includeGroups: Array<{ path: string; uri: string; mainIncludeLine: number; diagnostics: vscode.Diagnostic[] }> };
   try {
-    response = await fetchMcuDiagnosticResponse(client, document.uri);
+    response = await fetchMcuDiagnosticResponse(client, targetDoc.uri);
   } catch {
     if (generation !== diagnosticsSidebarGeneration) return;
     webview.postMessage({
@@ -412,7 +455,7 @@ export async function applyDiagnosticsToSidebar(
 
   if (generation !== diagnosticsSidebarGeneration) return;
 
-  const diags = response.diagnostics.filter((d) => d.range.start.line < document.lineCount);
+  const diags = response.diagnostics.filter((d) => d.range.start.line < targetDoc.lineCount);
   if (diags.length === 0 && response.includeGroups.every((g) => g.diagnostics.length === 0)) {
     webview.postMessage({
       type: "empty",
@@ -422,7 +465,7 @@ export async function applyDiagnosticsToSidebar(
     return;
   }
 
-  const uri = document.uri.toString();
+  const uri = targetDoc.uri.toString();
   const nodes = buildDiagnosticTreeWithIncludes(uri, diags, response.includeGroups);
   webview.postMessage({
     type: "tree",

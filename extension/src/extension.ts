@@ -14,11 +14,11 @@ import { maybeSetMcunrLanguage, scoreMcunrContent, isMcunrDocument } from "./con
 import { maybeFixDocumentEncoding, detectEncodingCommand } from "./encodingDetect";
 import { registerExpandNaturalIsotope, hoverMiddleware } from "./expandNaturalIsotope";
 import { registerAddToSumIsotope } from "./addToSumIsotope";
-import { createSidebarProviders, refreshSidebarsCoalesced, setSidebarReadyHandler, setSumIsotopeDecorationHandler, type SidebarViewId, type SidebarViewProvider } from "./sidebarView";
+import { createSidebarProviders, refreshDiagnosticsSidebar, refreshSidebarsCoalesced, setSidebarReadyHandler, setSumIsotopeDecorationHandler, type SidebarViewId, type SidebarViewProvider } from "./sidebarView";
 import { registerTemplateInsert } from "./templateInsert";
 import { buildCatalogPayload } from "./catalogBridge";
 import { registerDiagnosticNavigation, fetchMcuDiagnostics } from "./diagnosticNavigation";
-import { registerIncludePreview } from "./includePreview";
+import { registerIncludePreview, setIncludeDocumentOpenedHandler } from "./includePreview";
 import { registerMatrCodeLens, updateMatrCodeLensIndex } from "./matrCodeLens";
 import { clearLanguageDetectState, scheduleLanguageDetectOnEdit } from "./languageDetectScheduler";
 import { registerRunPanel, type RunPanelViewProvider } from "./runPanelView";
@@ -162,6 +162,9 @@ export function activate(context: vscode.ExtensionContext): void {
   registerMatrCodeLens(context);
   registerWaterSteamFocusTracker(context);
   sidebarProviders = createSidebarProviders(context, client);
+  setIncludeDocumentOpenedHandler(() => {
+    if (sidebarProviders) refreshDiagnosticsSidebar(sidebarProviders);
+  });
   setSidebarReadyHandler(() => scheduleRefresh());
   // Догоняющий refresh: ранний librariesSynced / State.Running могли прийти до providers.
   scheduleRefresh("all");
@@ -306,13 +309,11 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.onDidCloseTextDocument((doc) => {
       clearLanguageDetectState(doc);
     }),
-    vscode.languages.onDidChangeDiagnostics((e) => {
+    vscode.languages.onDidChangeDiagnostics(() => {
       const editor = vscode.window.activeTextEditor;
       if (!editor || editor.document.languageId !== "mcunr") return;
-      const activeUri = editor.document.uri.toString();
-      if (e.uris.some((u) => u.toString() === activeUri)) {
-        sidebarProviders?.get("mcuhelper.lexerErrors")?.applyLexerErrors();
-      }
+      if (!sidebarProviders) return;
+      refreshDiagnosticsSidebar(sidebarProviders);
     })
   );
 }

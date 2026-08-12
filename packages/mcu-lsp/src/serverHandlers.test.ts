@@ -23,6 +23,7 @@ import {
   handleRunMcuStep,
   resolveDocumentIndex,
   resolveHoverDocumentIndex,
+  ensureSourceDocumentIndex,
   resolveContinueFinalSession,
   hasVariantRunArtifacts,
   uriToBaseDir,
@@ -171,6 +172,34 @@ describe("serverHandlers extended", () => {
       const index = resolveHoverDocumentIndex(matsDoc, parents, getDoc, docs.values());
       assert.ok(index.ast.materials.some((m) => m.nuclides.some((n) => n.name.toUpperCase() === "N")));
       assert.ok(index.ast.includeLineMap?.some((e) => e.source === "include"));
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("ensureDocumentIndex uses expanded AST after source-only cache (no false matr-gap)", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-src-cache-"));
+    try {
+      fs.writeFileSync(
+        path.join(dir, "mats.mcu"),
+        ["MATR 2", "U235 1.E-3", "MATR 3", "U238 1.E-3", "FINISH"].join("\n"),
+        "utf8"
+      );
+      const mainText = ["PIN 1 0", "MATR 1", "U235 1.E-3", "#include mats", "MATR 4", "U235 1.E-3", "FINISH"].join(
+        "\n"
+      );
+      const mainPath = path.join(dir, "main.mcu");
+      fs.writeFileSync(mainPath, mainText, "utf8");
+      const uri = `file:///${mainPath.replace(/\\/g, "/")}`;
+      const doc = TextDocument.create(uri, "mcunr", 1, mainText);
+
+      ensureSourceDocumentIndex(doc);
+      const bundle = collectDiagnosticsBundle(doc);
+      const gap = bundle.diagnostics.filter((d) => d.code === "matr-gap");
+      assert.ok(
+        gap.length === 0,
+        `expected no matr-gap with expanded includes, got: ${gap.map((d) => d.message).join("; ")}`
+      );
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

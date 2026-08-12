@@ -80,6 +80,7 @@ async function openIncludeAsMcunr(fsPath: string, viewColumn?: vscode.ViewColumn
     await vscode.languages.setTextDocumentLanguage(doc, "mcunr");
   }
   await vscode.window.showTextDocument(doc, { preview: false, viewColumn: viewColumn ?? vscode.ViewColumn.Beside });
+  onIncludeDocumentOpened?.();
 }
 
 class IncludeCodeLensProvider implements vscode.CodeLensProvider {
@@ -306,6 +307,12 @@ function applyIncludeExpandedDecorations(editor: vscode.TextEditor, blocks: Expa
     return new vscode.Range(start, new vscode.Position(endLine, endChar));
   });
   editor.setDecorations(type, ranges);
+}
+
+let onIncludeDocumentOpened: (() => void) | undefined;
+
+export function setIncludeDocumentOpenedHandler(handler: () => void): void {
+  onIncludeDocumentOpened = handler;
 }
 
 let includeExpandedDecoration: vscode.TextEditorDecorationType | undefined;

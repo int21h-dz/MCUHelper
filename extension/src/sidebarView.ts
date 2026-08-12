@@ -309,6 +309,21 @@ export type SidebarRefreshScope = "all" | "constants";
 
 let refreshInFlight: Promise<void> | null = null;
 let pendingRefreshScope: SidebarRefreshScope | null = null;
+let diagnosticsFollowUpTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** Обновить панель «Диагностика»; повтор через ~450 ms — после async revalidate parent при открытии #include. */
+export function refreshDiagnosticsSidebar(
+  providers: Map<SidebarViewId, SidebarViewProvider>,
+  options?: { followUp?: boolean }
+): void {
+  providers.get("mcuhelper.lexerErrors")?.applyLexerErrors();
+  if (options?.followUp === false) return;
+  if (diagnosticsFollowUpTimer) clearTimeout(diagnosticsFollowUpTimer);
+  diagnosticsFollowUpTimer = setTimeout(() => {
+    diagnosticsFollowUpTimer = undefined;
+    providers.get("mcuhelper.lexerErrors")?.applyLexerErrors();
+  }, 450);
+}
 
 function mergeRefreshScope(
   current: SidebarRefreshScope | null,

@@ -7,6 +7,7 @@ import {
   compareDiagnosticsByPosition,
   extractIsotopeNameFromDiag,
   findDiagnosticIndex,
+  includeReferencesPath,
   LEXER_DIAGNOSTIC_CODES,
   mapLspSeverityToVsCode,
   positionScore,
@@ -33,6 +34,14 @@ describe("diagnosticNavigation", () => {
   it("lexer codes include no-tabs and line-length", () => {
     assert.ok(LEXER_DIAGNOSTIC_CODES.has("no-tabs"));
     assert.ok(LEXER_DIAGNOSTIC_CODES.has("line-length"));
+  });
+
+  it("includeReferencesPath matches bare name and relative path", () => {
+    const mainDir = "C:\\proj\\variant";
+    const incPath = "C:\\proj\\variant\\confpd.mcu";
+    assert.equal(includeReferencesPath("confpd", incPath, mainDir), true);
+    assert.equal(includeReferencesPath("confpd.mcu", incPath, mainDir), true);
+    assert.equal(includeReferencesPath("other.mcu", incPath, mainDir), false);
   });
 
   it("findDiagnosticIndex next skips current and wraps", () => {

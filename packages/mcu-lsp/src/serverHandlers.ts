@@ -370,15 +370,9 @@ export function ensureDocumentIndex(doc: TextDocument): DocumentIndex {
   const uri = doc.uri;
   // Быстрый путь до getText()/hash: тот же version уже в кэше (типичный hover на 16MB).
   const cachedExpanded = getDocumentIndex(uri, true);
-  const cachedSource = getDocumentIndex(uri, false);
-  const versionHit =
-    (cachedExpanded && cachedExpanded.version === doc.version && cachedExpanded.includeFp === ""
-      ? cachedExpanded
-      : undefined) ??
-    (cachedSource && cachedSource.version === doc.version ? cachedSource : undefined);
-  if (versionHit && versionHit.includeFp === "") {
-    // Нет #include-отпечатка → текст не зависит от внешних файлов; можно не трогать 16MB.
-    return versionHit;
+  if (cachedExpanded && cachedExpanded.version === doc.version && cachedExpanded.includeFp === "") {
+    // Нет #include — expanded≡source, внешние файлы не влияют.
+    return cachedExpanded;
   }
 
   const text = doc.getText();
