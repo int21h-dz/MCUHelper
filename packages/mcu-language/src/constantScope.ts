@@ -70,6 +70,7 @@ export function listVisibleConstants(
     const v = evaluateExpression(c.expression, vars);
     if (v !== null) {
       vars.set(c.name, v);
+      vars.set(c.name.toUpperCase(), v);
       effective.set(c.name, {
         name: c.name,
         expression: c.expression,
@@ -100,7 +101,10 @@ export function buildScopedVars(
     const scope = c.scope ?? "global";
     if (scope !== "global" && scope !== contextScope) continue;
     const v = evaluateExpression(c.expression, vars);
-    if (v !== null) vars.set(c.name, v);
+    if (v !== null) {
+      vars.set(c.name, v);
+      vars.set(c.name.toUpperCase(), v);
+    }
   }
   return vars;
 }

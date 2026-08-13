@@ -516,7 +516,9 @@ connection.onRequest("mcuhelper/getNaturalIsotopeLines", async (args: { element:
   return getNaturalIsotopeLines(args.element, args.concentration);
 });
 
-connection.onRequest("mcuhelper/getGeometry", (uri: string) => handleGetGeometry(uri, getDoc));
+connection.onRequest("mcuhelper/getGeometry", (args: string | { uri: string; line?: number; character?: number }) =>
+  handleGetGeometry(args, getDoc)
+);
 
 connection.onRequest("mcuhelper/queryPoint", (args) => handleQueryPoint(args, getDoc));
 

@@ -222,6 +222,8 @@ export interface ConstantSummary {
     mutable: boolean;
     scope?: string;
     range: SourceRange;
+    /** URI файла определения (main или `#include`); задаёт getIndex для клика в панели. */
+    uri?: string;
 }
 export interface BodySummary {
     name: string;

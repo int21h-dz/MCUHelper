@@ -52,6 +52,18 @@ describe("serverHandlers integration", () => {
     assert.ok(scene!.primitives.length > 0);
   });
 
+  it("handleGetGeometry with line uses LCELL scope", () => {
+    const { uri, getDoc, text } = setupFixture("latt_example");
+    const line = text.split(/\r?\n/).findIndex((l) => /^\s*RCZ\s+K\b/i.test(l));
+    assert.ok(line >= 0);
+    const scene = handleGetGeometry({ uri, line, character: 0 }, getDoc);
+    assert.ok(scene);
+    const names = (scene!.primitives ?? []).map((p: { name: string }) => p.name);
+    assert.ok(names.includes("K"));
+    assert.ok(names.includes("L"));
+    assert.ok(!names.includes("CNT"));
+  });
+
   it("buildDocumentSymbols lists fragments and zones", () => {
     const { uri, getDoc } = setupFixture("trx_geometry");
     const index = handleGetIndex(uri, getDoc);

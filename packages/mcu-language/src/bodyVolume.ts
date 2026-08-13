@@ -90,12 +90,40 @@ export function computeBodyVolumeCm3(
     case "SHEX":
       if (nums.length < 2) return null;
       return HEX_AREA_FROM_KEY * nums[0] * nums[0] * Math.abs(nums[1]);
+    case "HEXG": {
+      if (nums.length < 9) return null;
+      const h = Math.hypot(nums[3], nums[4], nums[5]);
+      const n = h > 0 ? { x: nums[3] / h, y: nums[4] / h, z: nums[5] / h } : { x: 0, y: 0, z: 1 };
+      const vDot = nums[6] * n.x + nums[7] * n.y + nums[8] * n.z;
+      const dKey = Math.hypot(nums[6] - n.x * vDot, nums[7] - n.y * vDot, nums[8] - n.z * vDot);
+      return HEX_AREA_FROM_KEY * dKey * dKey * h;
+    }
     case "BOX":
       if (nums.length < 12) return null;
       return parallelepipedVolume(nums[3], nums[4], nums[5], nums[6], nums[7], nums[8], nums[9], nums[10], nums[11]);
     case "SBOX":
       if (nums.length < 9) return null;
       return parallelepipedVolume(nums[0], nums[1], nums[2], nums[3], nums[4], nums[5], nums[6], nums[7], nums[8]);
+    case "WED": {
+      if (nums.length < 12) return null;
+      return 0.5 * parallelepipedVolume(nums[3], nums[4], nums[5], nums[6], nums[7], nums[8], nums[9], nums[10], nums[11]);
+    }
+    case "ELL": {
+      if (nums.length < 7) return null;
+      const d = nums[6];
+      let a: number;
+      let b: number;
+      if (d < 0) {
+        a = Math.hypot(nums[3], nums[4], nums[5]);
+        b = Math.abs(d);
+      } else {
+        const c = 0.5 * Math.hypot(nums[3] - nums[0], nums[4] - nums[1], nums[5] - nums[2]);
+        b = Math.abs(d);
+        a = Math.sqrt(c * c + b * b);
+      }
+      if (!(a > 0 && b > 0)) return null;
+      return (4 / 3) * Math.PI * a * b * b;
+    }
     case "TRC": {
       if (nums.length < 8) return null;
       const h = Math.hypot(nums[3], nums[4], nums[5]);

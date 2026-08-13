@@ -31,10 +31,14 @@ describe("index smoke", () => {
     assert.ok(getCardByLabel("powe") || getCardByLabel("POWER"));
   });
 
-  it("getBodyByKey finds RCZ and RCC", () => {
+  it("getBodyByKey finds RCZ and ELL", () => {
     assert.ok(getBodyByKey("RCZ"));
     assert.ok(getBodyByKey("RCC"));
-    assert.ok(BODY_TYPES.length > 10);
+    assert.ok(getBodyByKey("ELL"));
+    assert.ok(getBodyByKey("WED"));
+    assert.ok(getBodyByKey("TRC"));
+    assert.ok(getBodyByKey("HEXG"));
+    assert.ok(BODY_TYPES.length > 20);
   });
 
   it("isGeoBodyLabel covers BODY_TYPES and TRANSF", () => {

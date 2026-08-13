@@ -12,6 +12,14 @@ describe("constants", () => {
   it("getBodyParamCount for known bodies", () => {
     assert.strictEqual(getBodyParamCount("RCZ"), 5);
     assert.strictEqual(getBodyParamCount("RPP"), 6);
+    assert.strictEqual(getBodyParamCount("ELL"), 7);
+    assert.strictEqual(getBodyParamCount("WED"), 12);
+    assert.strictEqual(getBodyParamCount("UCX"), 3);
+    assert.strictEqual(getBodyParamCount("SLA"), 6);
+    assert.strictEqual(getBodyParamCount("SLB"), 5);
+    assert.strictEqual(getBodyParamCount("TRC"), 8);
+    assert.strictEqual(getBodyParamCount("HEXG"), 9);
+    assert.strictEqual(getBodyParamCount("TRANSF"), 5);
     assert.strictEqual(getBodyParamCount("ARB"), "var");
     assert.strictEqual(getBodyParamCount("UNKNOWN"), undefined);
   });

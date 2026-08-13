@@ -27,6 +27,7 @@ import { runMcuStepFlow } from "./mcuStepRunner";
 import { batchValidateInput } from "./batchValidateCommand";
 import { resolvePostRunOpenTarget, shouldFocusDiagnosticsAfterRun } from "./runPanelHelpers";
 import { runRegistrationBuilder } from "./registrationBuilderCommand";
+import { runBodyGenerator } from "./bodyGeneratorCommand";
 import { runWaterSteam } from "./waterSteamCommand";
 import { registerWaterSteamFocusTracker } from "./waterSteamPanel";
 import { showIncludeGraph } from "./includeGraphCommand";
@@ -259,6 +260,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("mcuhelper.finalOutput", () => runMcuStepCommand("f")),
     vscode.commands.registerCommand("mcuhelper.burnup", () => runMcuStepCommand("b")),
     vscode.commands.registerCommand("mcuhelper.registrationBuilder", () => runRegistrationBuilder(context, client)),
+    vscode.commands.registerCommand("mcuhelper.bodyGenerator", () => runBodyGenerator(context, client)),
     vscode.commands.registerCommand("mcuhelper.waterSteam", () => runWaterSteam(context, client)),
     vscode.commands.registerCommand("mcuhelper.showIncludeGraph", () => showIncludeGraph(client)),
     vscode.commands.registerCommand("mcuhelper.compareResults", () => compareResults()),

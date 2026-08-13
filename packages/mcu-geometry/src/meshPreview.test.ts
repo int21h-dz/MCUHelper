@@ -6,6 +6,9 @@ import {
   buildMeshPreview,
   isMeshPreviewSupported,
   isMeshPreviewUnsupported,
+  selectNearbyBodies,
+  buildDraftBodyPreview,
+  DRAFT_BODY_COLOR,
 } from "./meshPreview";
 import type { GeometryScene, PrimitiveSolid } from "./types";
 
@@ -128,5 +131,142 @@ describe("meshPreview", () => {
     assert.strictEqual(m!.kind, "plane");
     assert.strictEqual(m!.center.x, 2);
     assert.deepStrictEqual(m!.normal, { x: 1, y: 0, z: 0 });
+  });
+
+  it("selectNearbyBodies keeps only close bodies", () => {
+    const focus = { min: { x: 0, y: 0, z: 0 }, max: { x: 1, y: 1, z: 1 } };
+    const near = prim("SPH", "near", [0.5, 0.5, 0.5, 0.2], {
+      min: { x: 0.3, y: 0.3, z: 0.3 },
+      max: { x: 0.7, y: 0.7, z: 0.7 },
+    });
+    const far = prim("SPH", "far", [100, 0, 0, 1], {
+      min: { x: 99, y: -1, z: -1 },
+      max: { x: 101, y: 1, z: 1 },
+    });
+    const picked = selectNearbyBodies(focus, [near, far], { maxCount: 5, maxGapFactor: 4 });
+    assert.deepStrictEqual(
+      picked.map((p) => p.name),
+      ["near"]
+    );
+  });
+
+  it("skips section container as nearest and keeps camera on locals", () => {
+    const container = prim("HEX", "C", [0, 0, 0, 20, 0, 100], {
+      min: { x: -20, y: -20, z: 0 },
+      max: { x: 20, y: 20, z: 100 },
+    });
+    const fuel = prim("RCZ", "FU", [0, 0, 0, 100, 0.5], {
+      min: { x: -0.5, y: -0.5, z: 0 },
+      max: { x: 0.5, y: 0.5, z: 100 },
+    });
+    const prev = buildDraftBodyPreview({
+      bodyType: "RCZ",
+      name: "newz",
+      params: [2, 0, 0, 100, 0.4],
+      scenePrimitives: [container, fuel],
+      nearby: { maxCount: 8, maxGapFactor: 20 },
+    });
+    assert.ok(prev.nearest);
+    assert.strictEqual(prev.nearest!.name, "FU");
+    assert.ok(!prev.neighborNames.includes("C"));
+    assert.ok(prev.bbox);
+    assert.ok(prev.bbox!.max.x < 15);
+  });
+
+  it("buildDraftBodyPreview colors draft and neighbors", () => {
+    const neighbor = prim("RPP", "box1", [-2, -1, -2, -1, 0, 1], {
+      min: { x: -2, y: -2, z: 0 },
+      max: { x: -1, y: -1, z: 1 },
+    });
+    const prev = buildDraftBodyPreview({
+      bodyType: "SPH",
+      name: "ball",
+      params: [0, 0, 0.5, 0.5],
+      scenePrimitives: [neighbor],
+      nearby: { maxCount: 8, maxGapFactor: 20 },
+    });
+    assert.ok(prev.meshes.length >= 1);
+    assert.strictEqual(prev.focusName, "ball");
+    assert.ok(prev.neighborNames.includes("box1"));
+    assert.ok(prev.nearest);
+    assert.strictEqual(prev.nearest!.name, "box1");
+    assert.ok(prev.nearest!.gap >= 0);
+    assert.strictEqual(prev.meshes[0]!.color, DRAFT_BODY_COLOR);
+    assert.ok(prev.slices.length === 3);
+    assert.deepStrictEqual(
+      prev.slices.map((s) => s.axis),
+      ["z", "y", "x"]
+    );
+    const xy = prev.slices[0]!;
+    assert.ok(xy.polylines.some((p) => p.highlight && p.points.length >= 8));
+  });
+
+  it("slices SPH as a circle on XY through the center", () => {
+    const prev = buildDraftBodyPreview({
+      bodyType: "SPH",
+      name: "s",
+      params: [0, 0, 0, 2],
+      scenePrimitives: [],
+    });
+    const xy = prev.slices.find((s) => s.axis === "z");
+    assert.ok(xy);
+    const draft = xy!.polylines.find((p) => p.highlight);
+    assert.ok(draft);
+    const r = Math.max(...draft!.points.map((q) => Math.hypot(q.u, q.v)));
+    assert.ok(Math.abs(r - 2) < 0.05);
+  });
+
+  it("maps ELL/WED/TRC/UCZ for slices", () => {
+    const ell = buildDraftBodyPreview({
+      bodyType: "ELL",
+      name: "e",
+      params: [0, 0, -1, 0, 0, 1, 1],
+      scenePrimitives: [],
+    });
+    assert.ok(!ell.unsupported);
+    const xy = ell.slices.find((s) => s.axis === "z");
+    const draft = xy?.polylines.find((p) => p.highlight);
+    assert.ok(draft && draft.points.length >= 8);
+
+    const wed = buildDraftBodyPreview({
+      bodyType: "WED",
+      name: "w",
+      params: [0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0, 3],
+      scenePrimitives: [],
+    });
+    const wedXy = wed.slices.find((s) => s.axis === "z");
+    assert.ok(wedXy?.polylines.some((p) => p.highlight && p.points.length >= 3));
+
+    const trc = buildDraftBodyPreview({
+      bodyType: "TRC",
+      name: "t",
+      params: [0, 0, 0, 0, 0, 10, 2, 1],
+      scenePrimitives: [],
+    });
+    const trcXy = trc.slices.find((s) => s.axis === "z");
+    const trcDraft = trcXy?.polylines.find((p) => p.highlight);
+    assert.ok(trcDraft && trcDraft.points.length >= 8);
+
+    const ucz = buildDraftBodyPreview({
+      bodyType: "UCZ",
+      name: "u",
+      params: [0, 0, 1],
+      scenePrimitives: [],
+    });
+    const uczXy = ucz.slices.find((s) => s.axis === "z");
+    const uczDraft = uczXy?.polylines.find((p) => p.highlight);
+    assert.ok(uczDraft);
+    const rr = Math.max(...uczDraft!.points.map((q) => Math.hypot(q.u, q.v)));
+    assert.ok(Math.abs(rr - 1) < 0.08);
+
+    const hexg = buildDraftBodyPreview({
+      bodyType: "HEXG",
+      name: "hg",
+      params: [0, 0, 0, 0, 0, 10, 2, 0, 0],
+      scenePrimitives: [],
+    });
+    const hexgXy = hexg.slices.find((s) => s.axis === "z");
+    const hexgDraft = hexgXy?.polylines.find((p) => p.highlight);
+    assert.ok(hexgDraft && hexgDraft.points.length === 6);
   });
 });

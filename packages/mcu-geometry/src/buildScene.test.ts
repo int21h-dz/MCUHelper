@@ -37,4 +37,20 @@ describe("buildScene", () => {
     assert.strictEqual(scene.primitives.length, 0);
     assert.ok(scene.bbox.max.x === 10);
   });
+
+  it("buildScene({scope}) returns LCELL bodies, not the global container", () => {
+    const ast = parseDocument(fs.readFileSync(path.join(fixtures, "latt_example.mcu"), "utf8"), {
+      uri: "latt-scope",
+    });
+    const global = buildScene(ast);
+    assert.ok(global.primitives.some((p) => p.name === "CNT"));
+    assert.ok(!global.primitives.some((p) => p.name === "K" && p.type === "RCZ"));
+
+    const cell = buildScene(ast, { scope: "lcell:A" });
+    const names = cell.primitives.map((p) => p.name);
+    assert.ok(names.includes("K"));
+    assert.ok(names.includes("L"));
+    assert.ok(!names.includes("CNT"));
+    assert.strictEqual(cell.activeScope, "lcell:A");
+  });
 });

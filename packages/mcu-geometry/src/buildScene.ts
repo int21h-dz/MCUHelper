@@ -1,7 +1,7 @@
 import type { DocumentAst } from "@mcuhelper/mcu-language";
 import { buildZoneRegistrationMap, parseNumbers } from "@mcuhelper/mcu-language";
 import { colorForBody, colorForZone } from "./colors";
-import { buildPrimitive, buildVars, bboxUnion, emptyBbox, isGlobalScope } from "./primitives";
+import { buildPrimitive, buildVars, bboxUnion, emptyBbox } from "./primitives";
 import { collectBodyRefs, parseZoneExpression } from "./zoneExpression";
 import type {
   GeometryScene,
@@ -18,15 +18,21 @@ function bodyZoneHint(bodyName: string, zones: ZoneSolid[]): string | undefined 
   return undefined;
 }
 
-export function buildScene(ast: DocumentAst): GeometryScene {
+export function buildScene(ast: DocumentAst, options?: { scope?: string }): GeometryScene {
   const vars = buildVars(ast);
+  const want = options?.scope;
+  const inScope = (s?: string) => {
+    const sc = s ?? "global";
+    if (!want || want === "global") return !sc || sc === "global";
+    return sc === want;
+  };
 
   const primitives: PrimitiveSolid[] = [];
   let sceneBbox = emptyBbox();
   let first = true;
 
   for (const b of ast.bodies) {
-    if (!isGlobalScope(b.scope)) continue;
+    if (!inScope(b.scope)) continue;
     const p = buildPrimitive(b.bodyType, b.name, b.params, vars, b.scope);
     if (p) {
       primitives.push(p);
@@ -37,7 +43,7 @@ export function buildScene(ast: DocumentAst): GeometryScene {
 
   const zoneReg = buildZoneRegistrationMap(ast.zones);
   const zones: ZoneSolid[] = ast.zones
-    .filter((z) => isGlobalScope(z.scope))
+    .filter((z) => inScope(z.scope))
     .map((z, idx) => {
       const r = zoneReg.get(z.name);
       const parsedExpression = parseZoneExpression(z.expression) ?? undefined;
@@ -106,7 +112,7 @@ export function buildScene(ast: DocumentAst): GeometryScene {
     bbox: sceneBbox,
     cameraPresets: ast.cameraPresets,
     materials,
-    activeScope: "global",
+    activeScope: want && want !== "global" ? want : "global",
   };
 }
 

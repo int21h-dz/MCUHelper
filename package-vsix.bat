@@ -60,6 +60,9 @@ copy /Y "packages\mcu-language\dist\encodingDetect.js" "extension\vendor\mcu-lan
 copy /Y "packages\mcu-language\dist\detect.js" "extension\vendor\mcu-language\detect.js" >nul
 copy /Y "packages\mcu-language\dist\includeResolve.js" "extension\vendor\mcu-language\includeResolve.js" >nul
 copy /Y "packages\mcu-language\dist\registrationBuilder.js" "extension\vendor\mcu-language\registrationBuilder.js" >nul
+copy /Y "packages\mcu-language\dist\bodyGenerator.js" "extension\vendor\mcu-language\bodyGenerator.js" >nul
+copy /Y "packages\mcu-language\dist\expression.js" "extension\vendor\mcu-language\expression.js" >nul
+copy /Y "packages\mcu-language\dist\constants.js" "extension\vendor\mcu-language\constants.js" >nul
 copy /Y "packages\mcu-language\dist\resultSummary.js" "extension\vendor\mcu-language\resultSummary.js" >nul
 if errorlevel 1 goto :fail
 if not exist "extension\vendor\mcu-geometry" mkdir "extension\vendor\mcu-geometry"

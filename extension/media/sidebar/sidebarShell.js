@@ -80,17 +80,29 @@
     return searchHtml("mcu-nav-search", meta.searchPh || "Поиск…", panelHint(state.panel));
   }
 
-  /** Явная кнопка в панели Материалы (view/title-капля легко теряется). */
-  function materialsToolbarHtml() {
-    if (state.panel !== "mcuhelper.materials") return "";
-    return (
-      '<div class="mcu-panel-toolbar">' +
-      '<button type="button" class="mcu-panel-tool-btn" data-action="run-command" data-command="mcuhelper.waterSteam" data-args="null" title="Параметры воды / пара (IF97) → dens H и O">' +
-      I.getIcon("droplet") +
-      "<span>Вода / пар</span>" +
-      "</button>" +
-      "</div>"
-    );
+  /** Явная кнопка в панели (иконка view/title легко теряется). */
+  function panelToolbarHtml() {
+    if (state.panel === "mcuhelper.materials") {
+      return (
+        '<div class="mcu-panel-toolbar">' +
+        '<button type="button" class="mcu-panel-tool-btn" data-action="run-command" data-command="mcuhelper.waterSteam" data-args="null" title="Параметры воды / пара (IF97) → dens H и O">' +
+        I.getIcon("droplet") +
+        "<span>Вода / пар</span>" +
+        "</button>" +
+        "</div>"
+      );
+    }
+    if (state.panel === "mcuhelper.bodies") {
+      return (
+        '<div class="mcu-panel-toolbar">' +
+        '<button type="button" class="mcu-panel-tool-btn" data-action="run-command" data-command="mcuhelper.bodyGenerator" data-args="null" title="Конструктор геометрических тел MCU-NR">' +
+        I.getIcon("body") +
+        "<span>Генератор тел</span>" +
+        "</button>" +
+        "</div>"
+      );
+    }
+    return "";
   }
 
   function navPillLabel(node) {
@@ -272,7 +284,7 @@
     const tip = panelHint(state.panel);
     root.innerHTML =
       panelShellOpen(state.panel) +
-      materialsToolbarHtml() +
+      panelToolbarHtml() +
       '<div class="mcu-empty"' +
       (tip ? ' title="' + esc(tip) + '"' : "") +
       ">" +
@@ -594,7 +606,7 @@
     if (!nodes || nodes.length === 0) {
       root.innerHTML =
         panelShellOpen(state.panel) +
-        materialsToolbarHtml() +
+        panelToolbarHtml() +
         '<div class="mcu-empty">Нет данных в текущем файле</div></div>';
       bindNavInteractions();
       return;
@@ -604,7 +616,7 @@
     const searchPart = panelHasSearch(state.panel) ? navSearchHtml() : "";
     root.innerHTML =
       panelShellOpen(state.panel) +
-      materialsToolbarHtml() +
+      panelToolbarHtml() +
       searchPart +
       '<div class="mcu-nav-body mcu-catalog-body" style="--panel-accent:' +
       esc(accent) +

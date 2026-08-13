@@ -2,6 +2,7 @@ import { evaluateExpression, parseNumbers } from "@mcuhelper/mcu-language";
 import type { DocumentAst } from "@mcuhelper/mcu-language";
 import type { BoundingBox, PrimitiveSolid } from "./types";
 import { hexBboxXY, hexFlatToFlat, hexKeyAngle } from "./hex2d";
+import { bboxFromBodyParams } from "./meshPreview";
 
 export function emptyBbox(): BoundingBox {
   return { min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 } };
@@ -87,12 +88,16 @@ export function buildPrimitive(
   else if (t === "RCZ" && nums.length >= 5) bbox = bboxFromRcz(nums);
   else if (t === "SPH" && nums.length >= 4) bbox = bboxFromSph(nums);
   else if ((t === "HEX" || t === "HEXX" || t === "HEXY") && nums.length >= 3) bbox = bboxFromHex(nums, t);
-  else if (nums.length >= 2)
-    bbox = {
-      min: { x: nums[0] - 1, y: nums[1] - 1, z: nums[2] ?? 0 },
-      max: { x: nums[0] + 1, y: nums[1] + 1, z: (nums[2] ?? 0) + (nums[3] ?? 1) },
-    };
-  else return null;
+  else {
+    const guessed = bboxFromBodyParams(t, nums);
+    if (guessed) bbox = guessed;
+    else if (nums.length >= 2)
+      bbox = {
+        min: { x: nums[0] - 1, y: nums[1] - 1, z: nums[2] ?? 0 },
+        max: { x: nums[0] + 1, y: nums[1] + 1, z: (nums[2] ?? 0) + (nums[3] ?? 1) },
+      };
+    else return null;
+  }
   return { type: t, name, params: nums, bbox, scope };
 }
 

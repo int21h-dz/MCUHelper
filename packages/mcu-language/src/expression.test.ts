@@ -52,4 +52,10 @@ describe("expression edge cases", () => {
     const v = evaluateExpression("SIN(SQRT(17.5*COS(PI/4)))", vars);
     assert.ok(v !== null && Number.isFinite(v));
   });
+
+  it("resolves EQU names case-insensitively", () => {
+    const vars = new Map([["LG2", 6.25]]);
+    assert.equal(evaluateExpression("12.5+LG2", vars), 18.75);
+    assert.equal(evaluateExpression("12.5+lg2", vars), 18.75);
+  });
 });

@@ -5,6 +5,7 @@ import * as os from "os";
 import * as path from "path";
 import iconv from "iconv-lite";
 import { expandIncludes, expandRepeats } from "./preprocessor";
+import { mapExpandedLineToMain } from "./includeLineMap";
 import { normalizeIncludeFsKey } from "./includeResolve";
 
 describe("preprocessor", () => {
@@ -94,6 +95,36 @@ describe("preprocessor", () => {
       ]
     );
     fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("expandIncludes maps several #include and main lines between them", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-inc-multi-"));
+    try {
+      fs.writeFileSync(path.join(dir, "a.inc"), "*1\n*2\n*3\nEQU INA = 1\n", "utf8");
+      fs.writeFileSync(path.join(dir, "b.inc"), "EQU INB = 2\n", "utf8");
+      const result = expandIncludes(
+        ["EQU BEFORE = 0", "#include a.inc", "EQU MID = 1", "#include b.inc", "EQU AFTER = 2"].join("\n"),
+        dir
+      );
+      const mainOf = (n: number) => result.lineMap.findIndex((e) => e.source === "main" && e.mainLine === n);
+      const before = mainOf(0);
+      const mid = mainOf(2);
+      const after = mainOf(4);
+      assert.strictEqual(before, 0);
+      assert.ok(mid > before);
+      assert.ok(after > mid);
+      assert.strictEqual(mapExpandedLineToMain(result.lineMap, before), 0);
+      assert.strictEqual(mapExpandedLineToMain(result.lineMap, mid), 2);
+      assert.strictEqual(mapExpandedLineToMain(result.lineMap, after), 4);
+      const ina = result.lineMap.find((e) => e.source === "include" && e.includePath === "a.inc" && e.includeLine === 3);
+      const inb = result.lineMap.find((e) => e.source === "include" && e.includePath === "b.inc" && e.includeLine === 0);
+      assert.ok(ina);
+      assert.ok(inb);
+      assert.ok(ina!.mainIncludeLine === 1);
+      assert.ok(inb!.mainIncludeLine === 3);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("expandIncludes prefers open-buffer overrides over disk", () => {

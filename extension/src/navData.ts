@@ -126,6 +126,8 @@ export interface IndexPayload {
       mutable: boolean;
       scope?: string;
       range: SourceRange;
+      /** Файл определения, если константа из `#include` (иначе URI текущего документа). */
+      uri?: string;
     }>;
     bodies: Array<{
       name: string;
@@ -581,7 +583,7 @@ export function buildConstantsTree(
       id: `const-${c.name}`,
       label: c.name,
       description: `${c.mutable ? "SET" : "EQU"} = ${formatConstValue(c.value)}  ← ${c.expression}${scopeNote}`,
-      uri,
+      uri: c.uri ?? uri,
       range: c.range,
     };
   });

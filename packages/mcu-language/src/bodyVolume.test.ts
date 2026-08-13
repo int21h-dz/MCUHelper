@@ -107,6 +107,31 @@ describe("bodyVolume", () => {
     assert.ok(rec != null && rec > 0);
   });
 
+  it("computes ELL (foci) and WED", () => {
+    const ell = computeBodyVolumeCm3(
+      body({ bodyType: "ELL", params: ["0", "0", "-1", "0", "0", "1", "1"] }),
+      vars
+    );
+    const c = 1;
+    const b = 1;
+    const a = Math.sqrt(c * c + b * b);
+    const expect = (4 / 3) * Math.PI * a * b * b;
+    assert.ok(ell != null && Math.abs(ell - expect) < 1e-6);
+
+    const wed = computeBodyVolumeCm3(
+      body({ bodyType: "WED", params: ["0", "0", "0", "2", "0", "0", "0", "2", "0", "0", "0", "3"] }),
+      vars
+    );
+    assert.ok(wed != null && Math.abs(wed - 6) < 1e-6);
+
+    const hexg = computeBodyVolumeCm3(
+      body({ bodyType: "HEXG", params: ["0", "0", "0", "0", "0", "10", "2", "0", "0"] }),
+      vars
+    );
+    const hexgExpect = (Math.sqrt(3) / 2) * 4 * 10;
+    assert.ok(hexg != null && Math.abs(hexg - hexgExpect) < 1e-6);
+  });
+
   it("TRANSF delegates to prototype", () => {
     const proto = body({ name: "P", bodyType: "RPP", params: ["0", "2", "0", "2", "0", "2"] });
     const transf = body({

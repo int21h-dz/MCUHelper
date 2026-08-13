@@ -51,6 +51,7 @@ import {
   type SolverResult,
   type McuMode,
 } from "./solver";
+import { rangeToEditorLocation } from "./symbolRefs";
 
 export interface McuServerSettings {
   mcuNrPath: string;
@@ -264,6 +265,31 @@ export function projectNavStatements(index: DocumentIndex): NavStatementPayload[
       range: {
         start: { line: range.start.line, character: range.start.character },
         end: { line: range.end.line, character: range.end.character },
+      },
+    });
+  }
+  return out;
+}
+
+/**
+ * EQU/SET для панели «Константы»: range/uri в координатах редактора
+ * (main после свёртки `#include`, либо файл include).
+ */
+export function projectNavConstants(
+  index: DocumentIndex,
+  constants: DocumentIndex["summaries"]["constants"]
+): DocumentIndex["summaries"]["constants"] {
+  const out: DocumentIndex["summaries"]["constants"] = [];
+  for (const c of constants) {
+    const loc = rangeToEditorLocation(index, c.range);
+    if (!loc) continue;
+    out.push({
+      ...c,
+      uri: loc.uri,
+      range: {
+        ...c.range,
+        start: loc.range.start,
+        end: loc.range.end,
       },
     });
   }
@@ -1109,6 +1135,7 @@ export function handleGetIndex(
     editorContext = { line, character: char, scope };
     summaries.constants = listVisibleConstants(index.ast.constants, scope, expandedLine, char);
   }
+  summaries.constants = projectNavConstants(index, summaries.constants);
 
   /** Компактный список для decorations — не зависит от slim nuclides.
    * При #include ranges в expanded-координатах → remap только на строки main, иначе decorations
@@ -1155,10 +1182,20 @@ export function handleGetIncludeGraph(
   return projectIncludeGraph(index);
 }
 
-export function handleGetGeometry(uri: string, getDoc: (uri: string) => TextDocument | undefined) {
+export function handleGetGeometry(
+  args: string | { uri: string; line?: number; character?: number },
+  getDoc: (uri: string) => TextDocument | undefined
+) {
+  const uri = typeof args === "string" ? args : args?.uri;
+  if (!uri) return null;
   const index = resolveDocumentIndex(uri, getDoc);
   if (!index) return null;
-  return buildScene(index.ast);
+  let scope: string | undefined;
+  if (typeof args === "object" && args && args.line != null && args.line >= 0) {
+    const expandedLine = mapMainLineToExpanded(index.ast.includeLineMap, args.line);
+    scope = resolveScopeAtLine(index.ast.statements, expandedLine);
+  }
+  return buildScene(index.ast, { scope });
 }
 
 export function handleQueryPoint(

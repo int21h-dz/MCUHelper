@@ -3,7 +3,7 @@ import assert from "node:assert";
 import { BODY_PARAM_GROUPS, getBodyParamGroups } from "./bodyParamGroups";
 
 describe("bodyParamGroups", () => {
-  const cases = ["RCC", "RCZ", "RPP", "HEX", "SPH", "BOX"] as const;
+  const cases = ["RCC", "RCZ", "RPP", "HEX", "HEXG", "SPH", "BOX", "ELL", "WED", "TRC"] as const;
 
   for (const key of cases) {
     it(`defines groups for ${key}`, () => {
@@ -23,9 +23,16 @@ describe("bodyParamGroups", () => {
     assert.strictEqual(getBodyParamGroups("UNKNOWN"), undefined);
   });
 
-  it("BODY_PARAM_GROUPS has PLG and QUAD", () => {
-    assert.ok(BODY_PARAM_GROUPS.PLG);
-    assert.ok(BODY_PARAM_GROUPS.QUAD);
+  it("TRANSF groups describe reflection M and rotation R, not translation", () => {
+    const groups = getBodyParamGroups("TRANSF")!;
+    assert.ok(groups);
+    const mr = groups.find((g) => g.label.includes("M"));
+    assert.ok(mr);
+    assert.match(mr!.documentation, /отражен/i);
+    assert.ok(!/сдвиг/i.test(mr!.documentation));
+    const abf = groups.find((g) => g.label.includes("A"));
+    assert.ok(abf);
+    assert.match(abf!.documentation, /\(A,\s*B,\s*0\)/);
   });
 
   it("BOX uses four coordinate triplets B, P1, P2, P3", () => {

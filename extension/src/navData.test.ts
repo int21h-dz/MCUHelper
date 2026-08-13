@@ -424,6 +424,19 @@ describe("navData", () => {
     assert.ok(tree[0]!.children!.some((c) => c.description?.includes("SET")));
   });
 
+  it("constants tree uses per-constant uri from include", () => {
+    const payload = richPayload();
+    payload.summaries.constants[0] = {
+      ...payload.summaries.constants[0]!,
+      uri: "file:///inc/consts.inc",
+    };
+    const tree = buildConstantsTree(payload, "file:///t.mcu");
+    const r = tree.find((n) => n.label === "R");
+    assert.strictEqual(r?.uri, "file:///inc/consts.inc");
+    const h = tree.find((n) => n.label === "H");
+    assert.strictEqual(h?.uri, "file:///t.mcu");
+  });
+
   it("bodies tree groups by scope", () => {
     const tree = buildBodiesTree(richPayload(), "file:///t.mcu");
     assert.ok(tree.some((n) => n.label === "Общие"));

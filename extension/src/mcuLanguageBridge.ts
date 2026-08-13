@@ -42,6 +42,49 @@ export function loadRegistrationBuilderApi(): {
   return requireLanguage("registrationBuilder");
 }
 
+export type BodyParamField = {
+  id: string;
+  label: string;
+  defaultValue: string;
+  hint?: string;
+};
+
+export type BodyTypeOption = {
+  key: string;
+  title: string;
+  description: string;
+  fields: BodyParamField[];
+  formatGroups: number[][];
+};
+
+export type BodyGeneratorInput = {
+  bodyType: string;
+  name: string;
+  params: string[];
+};
+
+export function loadBodyGeneratorApi(): {
+  listBodyGeneratorTypes: () => BodyTypeOption[];
+  getBodyGeneratorType: (key: string) => BodyTypeOption | undefined;
+  buildBodyStatement: (input: BodyGeneratorInput) => {
+    text: string;
+    warnings: string[];
+    okToInsert: boolean;
+  };
+  resolveBodyParamNumbers: (
+    params: string[],
+    vars: Map<string, number>
+  ) => { nums: number[]; warnings: string[] };
+  constantsToVarMap: (
+    constants: Array<{ name: string; value?: number | null; expression?: string }>
+  ) => Map<string, number>;
+  isValidBodyName: (name: string) => boolean;
+  sanitizeBodyName: (raw: string) => string;
+  allocateBodyName: (bodyType: string, existingNames: Iterable<string>) => string;
+} {
+  return requireLanguage("bodyGenerator");
+}
+
 export type ResultSummary = {
   sourcePath: string;
   keff?: number;

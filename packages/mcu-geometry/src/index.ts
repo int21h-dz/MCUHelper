@@ -42,6 +42,13 @@ export {
   isMeshPreviewUnsupported,
   bodyToMeshDescriptor,
   buildMeshPreview,
+  bboxGap,
+  bboxFromBodyParams,
+  selectNearbyBodies,
+  rankNearbyBodies,
+  buildDraftBodyPreview,
+  DRAFT_BODY_COLOR,
+  NEIGHBOR_BODY_COLOR,
 } from "./meshPreview";
 export type {
   MeshKind,
@@ -49,4 +56,7 @@ export type {
   UnsupportedMeshBody,
   MeshPreviewOptions,
   MeshPreviewResult,
+  NearbyBodiesOptions,
+  DraftBodyPreviewInput,
+  DraftBodyPreviewResult,
 } from "./meshPreview";

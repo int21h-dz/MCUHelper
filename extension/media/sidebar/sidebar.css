@@ -121,7 +121,7 @@ body {
   color: var(--vscode-input-placeholderForeground, #888);
 }
 
-/* ── Toolbar внутри панели (Материалы → Вода/пар) ── */
+/* ── Toolbar внутри панели (Материалы → Вода/пар, Тела → Генератор) ── */
 .mcu-panel-toolbar {
   display: flex;
   gap: 6px;

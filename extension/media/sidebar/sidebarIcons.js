@@ -120,7 +120,7 @@
       title: "Тела",
       icon: "body",
       accent: "#4a9eff",
-      hint: "Клик — переход к телу",
+      hint: "Клик — переход к телу · кнопка «Генератор тел» — конструктор SPH/RCZ/HEX/…",
       searchPh: "Фильтр тел…",
     },
     "mcuhelper.constants": {

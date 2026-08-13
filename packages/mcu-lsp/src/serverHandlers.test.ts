@@ -5,7 +5,7 @@ import * as os from "os";
 import * as path from "path";
 import { pathToFileURL } from "url";
 import { TextDocument } from "vscode-languageserver-textdocument";
-import { analyzeDocument, clearAwLibTable, clearParameteThrTable, parseAwLib, parseParameteThr, setAwLibTable, setParameteThrTable } from "@mcuhelper/mcu-language";
+import { analyzeDocument, clearAwLibTable, clearParameteThrTable, parseAwLib, parseParameteThr, setAwLibTable, setParameteThrTable, sameIncludeFileUri } from "@mcuhelper/mcu-language";
 import { setAwMassMismatchesForTest } from "./awLibVerify";
 import { setCachedSolverResult } from "./solver";
 import {
@@ -536,6 +536,115 @@ FINISH ALL`;
       const pinFrag = result!.fragments?.find((f) => f.id === "physical");
       assert.ok(pinFrag);
       assert.ok(pinFrag!.endLine < 20, "fragment end should be remapped to main lines, not expanded");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("handleGetIndex remaps constant ranges past collapsed #include", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-const-inc-"));
+    try {
+      const incName = "consts.inc";
+      const incPath = path.join(dir, incName);
+      fs.writeFileSync(incPath, "* c1\n* c2\n* c3\nEQU INC = 10\n", "utf8");
+      const mainPath = path.join(dir, "main.mcu");
+      const text = ["EQU PRE = 1", `#include ${incName}`, "EQU POST = 2", "FINISH"].join("\n");
+      fs.writeFileSync(mainPath, text, "utf8");
+      const uri = pathToFileURL(mainPath).href;
+      const incUri = pathToFileURL(incPath).href;
+      const doc = TextDocument.create(uri, "mcunr", 1, text);
+      const getDoc = (u: string) => (u === uri ? doc : undefined);
+      const result = handleGetIndex(uri, getDoc);
+      assert.ok(result);
+
+      const pre = result!.summaries.constants.find((c) => c.name === "PRE");
+      const post = result!.summaries.constants.find((c) => c.name === "POST");
+      const inc = result!.summaries.constants.find((c) => c.name === "INC");
+      assert.ok(pre);
+      assert.ok(post);
+      assert.ok(inc);
+
+      assert.strictEqual(pre!.range.start.line, 0);
+      assert.strictEqual(post!.range.start.line, 2, "POST must be main line 2, not expanded");
+      assert.ok(post!.range.start.line < 5, "collapsed main has 4 lines");
+      assert.ok(pre!.uri === uri || pre!.uri == null);
+      assert.ok(post!.uri === uri || post!.uri == null);
+
+      assert.strictEqual(inc!.range.start.line, 3);
+      assert.ok(inc!.uri);
+      assert.ok(
+        inc!.uri === incUri || inc!.uri.toLowerCase() === incUri.toLowerCase(),
+        `INC uri ${inc!.uri} vs ${incUri}`
+      );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("handleGetIndex remaps constants around several #include of different sizes", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-const-multi-"));
+    try {
+      const aPath = path.join(dir, "a.inc");
+      const bPath = path.join(dir, "b.inc");
+      const cPath = path.join(dir, "c.inc");
+      const aText = ["* pad", "* pad", "* pad", "* pad", "* pad", "EQU INA = 10"].join("\n");
+      const bText = "EQU INB = 20";
+      const cText = ["* x", "* y", "* z", "EQU INC = 30"].join("\n");
+      fs.writeFileSync(aPath, aText, "utf8");
+      fs.writeFileSync(bPath, bText, "utf8");
+      fs.writeFileSync(cPath, cText, "utf8");
+      const mainLines = [
+        "EQU BEFORE = 1",
+        "#include a.inc",
+        "EQU MID1 = 2",
+        "#include b.inc",
+        "EQU MID2 = 3",
+        "#include c.inc",
+        "EQU AFTER = 4",
+        "FINISH",
+      ];
+      const text = mainLines.join("\n");
+      const mainPath = path.join(dir, "main.mcu");
+      fs.writeFileSync(mainPath, text, "utf8");
+      const uri = pathToFileURL(mainPath).href;
+      const doc = TextDocument.create(uri, "mcunr", 1, text);
+      const getDoc = (u: string) => (u === uri ? doc : undefined);
+      const result = handleGetIndex(uri, getDoc);
+      assert.ok(result);
+
+      const byName = (name: string) => result!.summaries.constants.find((c) => c.name === name);
+      const before = byName("BEFORE");
+      const mid1 = byName("MID1");
+      const mid2 = byName("MID2");
+      const after = byName("AFTER");
+      const ina = byName("INA");
+      const inb = byName("INB");
+      const inc = byName("INC");
+      assert.ok(before && mid1 && mid2 && after && ina && inb && inc);
+
+      assert.strictEqual(before!.range.start.line, 0);
+      assert.strictEqual(mid1!.range.start.line, 2);
+      assert.strictEqual(mid2!.range.start.line, 4);
+      assert.strictEqual(after!.range.start.line, 6);
+      assert.ok(after!.range.start.line < mainLines.length);
+
+      assert.strictEqual(ina!.range.start.line, 5);
+      assert.strictEqual(inb!.range.start.line, 0);
+      assert.strictEqual(inc!.range.start.line, 3);
+      assert.ok(sameIncludeFileUri(ina!.uri, pathToFileURL(aPath).href), String(ina!.uri));
+      assert.ok(sameIncludeFileUri(inb!.uri, pathToFileURL(bPath).href), String(inb!.uri));
+      assert.ok(sameIncludeFileUri(inc!.uri, pathToFileURL(cPath).href), String(inc!.uri));
+
+      const scoped = handleGetIndex({ uri, line: 4, character: 80 }, getDoc);
+      assert.ok(scoped);
+      const names = scoped!.summaries.constants.map((c) => c.name);
+      assert.ok(names.includes("BEFORE") && names.includes("INA") && names.includes("MID1"));
+      assert.ok(names.includes("INB") && names.includes("MID2"));
+      assert.ok(!names.includes("INC"), "INC is after cursor (third include)");
+      assert.ok(!names.includes("AFTER"));
+      const scopedMid2 = scoped!.summaries.constants.find((c) => c.name === "MID2");
+      assert.ok(scopedMid2);
+      assert.strictEqual(scopedMid2!.range.start.line, 4);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

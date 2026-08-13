@@ -37,6 +37,7 @@ export * from "./constants";
 export * from "./naturalIsotopes";
 export * from "./otherModules";
 export * from "./registrationBuilder";
+export * from "./bodyGenerator";
 export * from "./zoneRegistration";
 export * from "./zoneStatement";
 export * from "./zoneBodyRefs";

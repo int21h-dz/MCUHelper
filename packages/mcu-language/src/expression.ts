@@ -1,6 +1,17 @@
 const DEG = Math.PI / 180;
 const BUILTIN_FUNCS = new Set(["SIN", "COS", "TG", "SQRT", "LN", "LOG", "FUNH"]);
 
+/** MCU: имена EQU/SET не зависят от регистра. */
+export function lookupVar(vars: Map<string, number>, name: string): number | undefined {
+  if (vars.has(name)) return vars.get(name);
+  const u = name.toUpperCase();
+  if (vars.has(u)) return vars.get(u);
+  for (const [k, v] of vars) {
+    if (k.toUpperCase() === u) return v;
+  }
+  return undefined;
+}
+
 /**
  * Параметр, оканчивающийся на `*` (DF-1*, 2*), и следующий токен — один операнд умножения.
  * «DF-1* DELT» → «DF-1*DELT» (DF − 1·DELT).
@@ -39,7 +50,7 @@ export function findUndefinedVariables(expr: string, vars: Map<string, number>):
   const seen = new Set<string>();
   const out: string[] = [];
   for (const name of collectVariableReferences(expr)) {
-    if (!vars.has(name) && !seen.has(name)) {
+    if (lookupVar(vars, name) === undefined && !seen.has(name)) {
       seen.add(name);
       out.push(name);
     }
@@ -173,8 +184,9 @@ function evalExpr(expr: string, vars: Map<string, number>): number {
       if (upper === "FUNH") return arg < 0 ? 0 : 1;
       throw new Error("fn");
     }
-    if (!vars.has(id)) throw new Error("undef " + id);
-    return vars.get(id)!;
+    const val = lookupVar(vars, id);
+    if (val === undefined) throw new Error("undef " + id);
+    return val;
   }
 
   function parseUnary(): number {

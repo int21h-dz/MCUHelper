@@ -280,6 +280,11 @@
         "icon": "$(symbol-ruler)"
       },
       {
+        "command": "mcuhelper.bodyGenerator",
+        "title": "MCU-NR: Генератор тел",
+        "icon": "$(symbol-misc)"
+      },
+      {
         "command": "mcuhelper.waterSteam",
         "title": "MCU-NR: Вода / пар",
         "icon": "$(droplet)"
@@ -478,6 +483,11 @@
         {
           "command": "mcuhelper.waterSteam",
           "when": "view == mcuhelper.materials",
+          "group": "navigation@1"
+        },
+        {
+          "command": "mcuhelper.bodyGenerator",
+          "when": "view == mcuhelper.bodies",
           "group": "navigation@1"
         }
       ],
