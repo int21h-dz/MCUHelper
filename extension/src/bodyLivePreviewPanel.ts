@@ -31,6 +31,7 @@ type MeshPreviewApi = {
     scenePrimitives: NonNullable<GeometrySceneLike["primitives"]>;
     sceneBbox?: GeometrySceneLike["bbox"];
     nearby?: { maxCount?: number; maxGapFactor?: number; excludeName?: string };
+    transf?: { protoName: string; mode: string; A: number; B: number; f: number };
   }) => {
     slices?: unknown[];
     neighborNames?: string[];
@@ -214,15 +215,38 @@ export class BodyLivePreviewPanel {
     const constants = await this.fetchConstants(uri, startLine, editor.selection.active.character);
     if (gen !== this.generation || !this.panel) return;
     const vars = api.constantsToVarMap(constants);
-    const resolved = api.resolveBodyParamNumbers(parsed.params, vars);
-    warnings.push(...resolved.warnings);
+    const isTransf = parsed.bodyType.toUpperCase() === "TRANSF";
+    const resolved = isTransf
+      ? { nums: [] as number[], warnings: [] as string[] }
+      : api.resolveBodyParamNumbers(parsed.params, vars);
+    const transf = isTransf ? api.resolveTransfParams(parsed.params, vars) : null;
+    warnings.push(...(isTransf ? transf?.warnings ?? [] : resolved.warnings));
 
     const scene = await this.fetchScene(uri, editor.document.version, startLine, editor.selection.active.character);
     if (gen !== this.generation || !this.panel) return;
 
     let draftPreview: ReturnType<MeshPreviewApi["buildDraftBodyPreview"]> | null = null;
-    const finite = resolved.nums.length > 0 && resolved.nums.every(Number.isFinite);
-    if (this.meshApi && finite) {
+    const finite = isTransf
+      ? Boolean(transf?.ok)
+      : resolved.nums.length > 0 && resolved.nums.every(Number.isFinite);
+    if (this.meshApi && finite && isTransf && transf) {
+      draftPreview = this.meshApi.buildDraftBodyPreview({
+        bodyType: "TRANSF",
+        name: parsed.name,
+        params: [transf.A, transf.B, transf.f],
+        scenePrimitives: scene?.primitives ?? [],
+        sceneBbox: scene?.bbox,
+        nearby: { maxCount: 12, maxGapFactor: 4, excludeName: parsed.name },
+        transf: {
+          protoName: transf.protoName,
+          mode: transf.mode,
+          A: transf.A,
+          B: transf.B,
+          f: transf.f,
+        },
+      });
+      warnings.push(...(draftPreview.warnings ?? []));
+    } else if (this.meshApi && finite && !isTransf) {
       draftPreview = this.meshApi.buildDraftBodyPreview({
         bodyType: parsed.bodyType,
         name: parsed.name,

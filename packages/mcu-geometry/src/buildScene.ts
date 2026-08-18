@@ -2,6 +2,7 @@ import type { DocumentAst } from "@mcuhelper/mcu-language";
 import { buildZoneRegistrationMap, parseNumbers } from "@mcuhelper/mcu-language";
 import { colorForBody, colorForZone } from "./colors";
 import { buildPrimitive, buildVars, bboxUnion, emptyBbox } from "./primitives";
+import { applyTransfToPrimitive, normalizeTransfMode } from "./meshPreview";
 import { collectBodyRefs, parseZoneExpression } from "./zoneExpression";
 import type {
   GeometryScene,
@@ -33,6 +34,26 @@ export function buildScene(ast: DocumentAst, options?: { scope?: string }): Geom
 
   for (const b of ast.bodies) {
     if (!inScope(b.scope)) continue;
+    if (b.bodyType.toUpperCase() === "TRANSF") {
+      const protoName = (b.protoName ?? "").toUpperCase();
+      const mode = normalizeTransfMode(b.transfMode ?? "");
+      const proto = primitives.find(
+        (p) =>
+          p.name.toUpperCase() === protoName &&
+          (p.scope ?? "global") === (b.scope ?? "global")
+      );
+      const nums = parseNumbers(b.params, vars);
+      if (proto && mode && nums.length >= 3 && nums.slice(0, 3).every(Number.isFinite)) {
+        const p = applyTransfToPrimitive(proto, b.name, mode, nums[0]!, nums[1]!, nums[2]!);
+        if (p) {
+          p.scope = b.scope;
+          primitives.push(p);
+          sceneBbox = first ? p.bbox : bboxUnion(sceneBbox, p.bbox);
+          first = false;
+        }
+      }
+      continue;
+    }
     const p = buildPrimitive(b.bodyType, b.name, b.params, vars, b.scope);
     if (p) {
       primitives.push(p);

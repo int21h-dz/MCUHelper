@@ -75,6 +75,18 @@ export function loadBodyGeneratorApi(): {
     params: string[],
     vars: Map<string, number>
   ) => { nums: number[]; warnings: string[] };
+  resolveTransfParams: (
+    params: string[],
+    vars: Map<string, number>
+  ) => {
+    protoName: string;
+    mode: string;
+    A: number;
+    B: number;
+    f: number;
+    warnings: string[];
+    ok: boolean;
+  };
   constantsToVarMap: (
     constants: Array<{ name: string; value?: number | null; expression?: string }>
   ) => Map<string, number>;

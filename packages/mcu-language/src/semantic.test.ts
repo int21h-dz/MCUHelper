@@ -42,6 +42,27 @@ FINISH`;
     assert.ok(d.some((x) => x.code === "transf-ref" && x.message.includes("MISSING")));
   });
 
+  it("errors on TRANSF with forbidden prototype type", () => {
+    const text = `HEAD 3 0
+RPP P1 0 1 0 1 0 1
+TRANSF T1 P1 M 0 0 0
+FINISH`;
+    const d = diags(text);
+    assert.ok(
+      d.some((x) => x.code === "transf-proto" && /RPP/i.test(x.message)),
+      d.map((x) => `${x.code}:${x.message}`).join(" | ")
+    );
+  });
+
+  it("errors on TRANSF with bad mode letter", () => {
+    const text = `HEAD 3 0
+RCZ CYL 0 0 0 1 1
+TRANSF T1 CYL X 0 0 90
+FINISH`;
+    const d = diags(text);
+    assert.ok(d.some((x) => x.code === "transf-mode"));
+  });
+
   it("errors on MATR number gap (ordinal mismatch)", () => {
     const text = `PIN 1 0
 MATR 1

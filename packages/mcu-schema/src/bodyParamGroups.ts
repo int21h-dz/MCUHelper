@@ -158,8 +158,8 @@ export const BODY_PARAM_GROUPS: Record<string, BodyParamGroup[]> = {
   TRANSF: [
     { label: "newName", documentation: "Имя нового тела" },
     { label: "protoName", documentation: "Имя тела-прототипа" },
-    { label: "M|R", documentation: "M — отражение от вертикальной плоскости через (A,B,0); R — поворот вокруг вертикали через (A,B,0)" },
-    { label: "A B f", documentation: "Точка (A,B,0) и угол f° к OX (у M — наклон плоскости, у R — угол поворота)" },
+    { label: "M|R", documentation: "Буква типа: M — отражение от вертикальной плоскости, R — поворот вокруг вертикали. Не координата." },
+    { label: "A B f", documentation: "Точка симметрии (A,B,0) в OXY (через неё плоскость M или ось R) и угол f° к OX (у M наклон плоскости, у R угол поворота)" },
   ],
   UPOLY: [
     { label: "name", documentation: "Имя кривой" },

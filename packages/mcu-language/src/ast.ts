@@ -60,6 +60,8 @@ export interface BodyNode {
   scope?: string;
   transf?: boolean;
   protoName?: string;
+  /** UserGuide §9.1.3.22: M — отражение, R — поворот. */
+  transfMode?: string;
 }
 
 export interface ZoneTailLegacy {
@@ -283,6 +285,7 @@ export interface BodySummary {
   scope?: string;
   transf?: boolean;
   protoName?: string;
+  transfMode?: string;
   range: SourceRange;
 }
 

@@ -531,6 +531,53 @@ stop
     assert.ok(hover?.includes("10"));
   });
 
+  it("hover on EQU at body param shows role and computed value", () => {
+    const text = "HEAD 3 0\nEQU R = 10\nEQU H = 25\nRCZ Z1 0,0,0 H R\nFINISH";
+    const { doc, index } = openText(text);
+    const line = doc.getText().split("\n")[3]!;
+    const ch = line.lastIndexOf("R");
+    const hover = getHoverContent(doc, { line: 3, character: ch }, index, { enableIaeaNuclide: false });
+    assert.ok(hover?.includes("Параметр"), hover ?? "(null)");
+    assert.ok(hover?.includes("Радиус") || hover?.includes("R"), hover ?? "(null)");
+    assert.ok(hover?.includes("EQU R"), hover ?? "(null)");
+    assert.ok(hover?.includes("10"), hover ?? "(null)");
+    assert.ok(!hover?.includes("Значение"), hover ?? "(null)");
+  });
+
+  it("hover on EQU expression shows computed value once", () => {
+    const text = "HEAD 3 0\nEQU A = 5\nEQU R = A+5\nRCZ Z1 0,0,0 1 R\nFINISH";
+    const { doc, index } = openText(text);
+    const line = doc.getText().split("\n")[3]!;
+    const ch = line.lastIndexOf("R");
+    const hover = getHoverContent(doc, { line: 3, character: ch }, index, { enableIaeaNuclide: false });
+    assert.ok(hover?.includes("EQU R"), hover ?? "(null)");
+    assert.ok(hover?.includes("A+5"), hover ?? "(null)");
+    assert.ok(hover?.includes("Значение"), hover ?? "(null)");
+    assert.ok(hover?.includes("**10**"), hover ?? "(null)");
+    assert.equal((hover!.match(/Значение/g) ?? []).length, 1);
+  });
+
+  it("hover on SET usage shows last assigned value", () => {
+    const text = "HEAD 3 0\nSET X = 1\nSET X = 2\nRCZ Z1 0,0,0 X 1\nFINISH";
+    const { doc, index } = openText(text);
+    const line = doc.getText().split("\n")[3]!;
+    const ch = line.lastIndexOf("X");
+    const hover = getHoverContent(doc, { line: 3, character: ch }, index, { enableIaeaNuclide: false });
+    assert.ok(hover?.includes("SET X"), hover ?? "(null)");
+    assert.ok(hover?.includes("`2`"), hover ?? "(null)");
+    assert.ok(!hover?.includes("Значение"), hover ?? "(null)");
+  });
+
+  it("hover on EQU concentration shows role and value", () => {
+    const text = ["EQU CZR = 0.04273", "PIN 1 0", "MATR 1", "ZR CZR", "FINISH"].join("\n");
+    const { doc, index } = openText(text);
+    const line = doc.getText().split("\n")[3]!;
+    const ch = line.indexOf("CZR");
+    const hover = getHoverContent(doc, { line: 3, character: ch + 1 }, index, { enableIaeaNuclide: false });
+    assert.ok(hover?.includes("EQU CZR"), hover ?? "(null)");
+    assert.ok(hover?.includes("0.04273"), hover ?? "(null)");
+  });
+
   it("hover VOL keyword appends volume table", () => {
     const text = "PIN 1 0\nMATR 1\nU235 1.E-3\nVOL 1.0 0.5\nFINISH";
     const { doc, index } = openText(text);

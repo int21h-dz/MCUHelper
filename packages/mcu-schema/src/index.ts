@@ -202,7 +202,8 @@ export const GEO_CARDS: CardSchema[] = [
     label: "TRANSF",
     title: "Преобразование тела",
     syntax: "TRANSF <newName> <protoName> M|R A B f",
-    description: "M — отражение, R — поворот вокруг вертикали через (A,B,0).",
+    description:
+      "M|R — тип (M отражение, R поворот). (A,B,0) — точка симметрии в OXY: через неё плоскость отражения или ось поворота; f — угол к OX.",
     fragment: "geometry",
   },
 ];

@@ -203,18 +203,35 @@ function parseMaterial(stmt: string, range: SourceRange): MaterialNode | null {
   };
 }
 
+function normalizeTransfModeToken(raw: string): string {
+  const u = raw.trim().toUpperCase();
+  return u === "M" || u === "R" ? u : raw.trim();
+}
+
+function transfBody(
+  name: string,
+  protoName: string | undefined,
+  modeTok: string | undefined,
+  rest: string[],
+  range: SourceRange
+): BodyNode {
+  return {
+    kind: "body",
+    bodyType: "TRANSF",
+    name,
+    params: mergeTrailingMultiplyOperands(rest),
+    range,
+    transf: true,
+    protoName,
+    transfMode: modeTok ? normalizeTransfModeToken(modeTok) : undefined,
+  };
+}
+
 function parseBody(stmt: string, range: SourceRange): BodyNode | null {
-  const transf = stmt.match(/^TRANSF\s+(\S+)\s+(\S+)\s+(\S+)\s+(.+)/i);
+  const transf = stmt.match(/^TRANSF\s+(\S+)\s+(\S+)\s+(\S+)\s*(.*)$/i);
   if (transf) {
-    return {
-      kind: "body",
-      bodyType: "TRANSF",
-      name: transf[1],
-      params: transf[4].split(/[\s,]+/).filter(Boolean),
-      range,
-      transf: true,
-      protoName: transf[2],
-    };
+    const rest = transf[4] ? transf[4].split(/[\s,]+/).filter(Boolean) : [];
+    return transfBody(transf[1]!, transf[2], transf[3], rest, range);
   }
 
   const parts = stmt.trim().split(/\s+/);
@@ -243,6 +260,9 @@ function parseBody(stmt: string, range: SourceRange): BodyNode | null {
   const params = mergeTrailingMultiplyOperands(
     parts.slice(paramsStart).join(" ").split(/[\s,]+/).filter(Boolean)
   );
+  if (bodyType === "TRANSF") {
+    return transfBody(name, params[0], params[1], params.slice(2), range);
+  }
   return { kind: "body", bodyType, name, params, range };
 }
 

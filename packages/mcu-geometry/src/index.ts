@@ -49,6 +49,11 @@ export {
   buildDraftBodyPreview,
   DRAFT_BODY_COLOR,
   NEIGHBOR_BODY_COLOR,
+  applyTransfToBodyParams,
+  applyTransfToPrimitive,
+  normalizeTransfMode,
+  transfPoint,
+  TRANSF_FORBIDDEN_PROTOS,
 } from "./meshPreview";
 export type {
   MeshKind,

@@ -896,6 +896,193 @@ export function bboxFromBodyParams(bodyType: string, params: number[]): Bounding
   return null;
 }
 
+/** UserGuide §9.1.3.22: не могут быть прототипами TRANSF. */
+export const TRANSF_FORBIDDEN_PROTOS = new Set(["RPP", "SBOX", "SHEX", "PLX", "PLY", "UCX", "UCY"]);
+
+export function normalizeTransfMode(raw: string): "M" | "R" | null {
+  const u = (raw ?? "").trim().toUpperCase();
+  return u === "M" || u === "R" ? u : null;
+}
+
+function rot2(x: number, y: number, rad: number): { x: number; y: number } {
+  const c = Math.cos(rad);
+  const s = Math.sin(rad);
+  return { x: c * x - s * y, y: s * x + c * y };
+}
+
+/** Точка: вертикальный поворот R или отражение M вокруг (A,B,0), угол f° к OX. */
+export function transfPoint(p: Vec3, mode: "M" | "R", A: number, B: number, fDeg: number): Vec3 {
+  const f = (fDeg * Math.PI) / 180;
+  const px = p.x - A;
+  const py = p.y - B;
+  if (mode === "R") {
+    const r = rot2(px, py, f);
+    return { x: r.x + A, y: r.y + B, z: p.z };
+  }
+  const aligned = rot2(px, py, -f);
+  const back = rot2(aligned.x, -aligned.y, f);
+  return { x: back.x + A, y: back.y + B, z: p.z };
+}
+
+/** Вектор: линейная часть M/R (без сдвига). */
+export function transfVec(v: Vec3, mode: "M" | "R", fDeg: number): Vec3 {
+  return transfPoint(v, mode, 0, 0, fDeg);
+}
+
+function putPoint(out: number[], i: number, p: Vec3): void {
+  out[i] = p.x;
+  out[i + 1] = p.y;
+  out[i + 2] = p.z;
+}
+
+function getPoint(p: number[], i: number): Vec3 {
+  return { x: p[i] ?? 0, y: p[i + 1] ?? 0, z: p[i + 2] ?? 0 };
+}
+
+function transfTranslation(mode: "M" | "R", A: number, B: number, fDeg: number): Vec3 {
+  const C = { x: A, y: B, z: 0 };
+  const LC = transfVec(C, mode, fDeg);
+  return { x: A - LC.x, y: B - LC.y, z: -LC.z };
+}
+
+/**
+ * Новые числовые параметры тела после TRANSF. Тип не меняется (UserGuide §9.1.3.22).
+ * null — запрещённый/неподдерживаемый прототип.
+ */
+export function applyTransfToBodyParams(
+  bodyType: string,
+  params: number[],
+  mode: "M" | "R",
+  A: number,
+  B: number,
+  f: number
+): number[] | null {
+  const t = bodyType.toUpperCase();
+  if (TRANSF_FORBIDDEN_PROTOS.has(t)) return null;
+  const out = params.slice();
+  const P = (i: number) => putPoint(out, i, transfPoint(getPoint(params, i), mode, A, B, f));
+  const V = (i: number) => putPoint(out, i, transfVec(getPoint(params, i), mode, f));
+
+  switch (t) {
+    case "SPH":
+      if (out.length < 4) return null;
+      P(0);
+      return out;
+    case "RCC":
+      if (out.length < 7) return null;
+      P(0);
+      V(3);
+      return out;
+    case "RCZ":
+      if (out.length < 5) return null;
+      P(0);
+      return out;
+    case "UCZ": {
+      if (out.length < 3) return null;
+      const q = transfPoint({ x: params[0] ?? 0, y: params[1] ?? 0, z: 0 }, mode, A, B, f);
+      out[0] = q.x;
+      out[1] = q.y;
+      return out;
+    }
+    case "HEX":
+      if (out.length < 6) return null;
+      P(0);
+      V(3);
+      return out;
+    case "HEXX":
+    case "HEXY": {
+      if (out.length < 5) return null;
+      P(0);
+      const D = Math.abs(params[4] ?? 1);
+      const f0 = params[5] ?? 0;
+      const rad = (f0 * Math.PI) / 180;
+      const vx = t === "HEXY" ? -D * Math.sin(rad) : D * Math.cos(rad);
+      const vy = t === "HEXY" ? D * Math.cos(rad) : D * Math.sin(rad);
+      const v = transfVec({ x: vx, y: vy, z: 0 }, mode, f);
+      const D2 = Math.hypot(v.x, v.y) || D;
+      out[4] = D2;
+      out[5] = t === "HEXY" ? (Math.atan2(-v.x, v.y) * 180) / Math.PI : (Math.atan2(v.y, v.x) * 180) / Math.PI;
+      return out;
+    }
+    case "HEXG":
+      if (out.length < 9) return null;
+      P(0);
+      V(3);
+      V(6);
+      return out;
+    case "BOX":
+    case "WED":
+      if (out.length < 12) return null;
+      P(0);
+      V(3);
+      V(6);
+      V(9);
+      return out;
+    case "ELL":
+      if (out.length < 7) return null;
+      P(0);
+      if ((params[6] ?? 0) < 0) V(3);
+      else P(3);
+      return out;
+    case "SLA":
+      if (out.length < 6) return null;
+      P(0);
+      V(3);
+      return out;
+    case "SLB": {
+      if (out.length < 5) return null;
+      const n2 = transfVec(getPoint(params, 0), mode, f);
+      putPoint(out, 0, n2);
+      const tr = transfTranslation(mode, A, B, f);
+      const add = n2.x * tr.x + n2.y * tr.y + n2.z * tr.z;
+      out[3] = (params[3] ?? 0) + add;
+      out[4] = (params[4] ?? 0) + add;
+      return out;
+    }
+    case "PLG": {
+      if (out.length < 4) return null;
+      const n2 = transfVec({ x: params[0] ?? 0, y: params[1] ?? 0, z: params[2] ?? 0 }, mode, f);
+      out[0] = n2.x;
+      out[1] = n2.y;
+      out[2] = n2.z;
+      const tr = transfTranslation(mode, A, B, f);
+      out[3] = (params[3] ?? 0) + n2.x * tr.x + n2.y * tr.y + n2.z * tr.z;
+      return out;
+    }
+    case "PLZ":
+      return out;
+    case "TRC":
+      if (out.length < 8) return null;
+      P(0);
+      V(3);
+      return out;
+    case "REC":
+      if (out.length < 12) return null;
+      P(0);
+      V(3);
+      V(6);
+      V(9);
+      return out;
+    default:
+      return null;
+  }
+}
+
+export function applyTransfToPrimitive(
+  proto: PrimitiveSolid,
+  newName: string,
+  mode: "M" | "R",
+  A: number,
+  B: number,
+  f: number
+): PrimitiveSolid | null {
+  const params = applyTransfToBodyParams(proto.type, proto.params, mode, A, B, f);
+  if (!params) return null;
+  const bbox = bboxFromBodyParams(proto.type, params);
+  if (!bbox) return null;
+  return { type: proto.type.toUpperCase(), name: newName, params, bbox, scope: proto.scope };
+}
+
 export function bboxContains(outer: BoundingBox, inner: BoundingBox, eps = 1e-9): boolean {
   return (
     outer.min.x <= inner.min.x + eps &&
@@ -1014,6 +1201,14 @@ export interface DraftBodyPreviewInput {
   scenePrimitives: PrimitiveSolid[];
   sceneBbox?: BoundingBox;
   nearby?: NearbyBodiesOptions;
+  /** UserGuide §9.1.3.22: черновик TRANSF — прототип из сцены + M|R A B f. */
+  transf?: {
+    protoName: string;
+    mode: string;
+    A: number;
+    B: number;
+    f: number;
+  };
 }
 
 export interface DraftBodyPreviewResult {
@@ -1621,9 +1816,85 @@ export function buildBodySlices(
  */
 export function buildDraftBodyPreview(input: DraftBodyPreviewInput): DraftBodyPreviewResult {
   const warnings: string[] = [];
-  const t = input.bodyType.toUpperCase();
+  let t = input.bodyType.toUpperCase();
+  let params = input.params;
   const name = input.name.trim() || "draft";
-  const bbox = bboxFromBodyParams(t, input.params);
+
+  if (t === "TRANSF") {
+    const spec = input.transf;
+    if (!spec) {
+      return {
+        meshes: [],
+        focusName: name,
+        neighborNames: [],
+        nearest: undefined,
+        bbox: null,
+        unsupported: true,
+        warnings: ["TRANSF: нет прототипа и M|R A B f (UserGuide §9.1.3.22)"],
+        slices: [],
+      };
+    }
+    const mode = normalizeTransfMode(spec.mode);
+    if (!mode) {
+      return {
+        meshes: [],
+        focusName: name,
+        neighborNames: [],
+        nearest: undefined,
+        bbox: null,
+        unsupported: true,
+        warnings: [`TRANSF: тип «${spec.mode}» — ожидается M или R`],
+        slices: [],
+      };
+    }
+    const want = spec.protoName.trim().toUpperCase();
+    const proto = input.scenePrimitives.find((p) => p.name.toUpperCase() === want);
+    if (!proto) {
+      return {
+        meshes: [],
+        focusName: name,
+        neighborNames: [],
+        nearest: undefined,
+        bbox: null,
+        unsupported: true,
+        warnings: [
+          `TRANSF: прототип «${spec.protoName}» не найден в текущей секции тел (должен быть описан раньше, UserGuide §9.1.3.22)`,
+        ],
+        slices: [],
+      };
+    }
+    if (TRANSF_FORBIDDEN_PROTOS.has(proto.type.toUpperCase())) {
+      return {
+        meshes: [],
+        focusName: name,
+        neighborNames: [],
+        nearest: undefined,
+        bbox: null,
+        unsupported: true,
+        warnings: [
+          `TRANSF: ${proto.type} не может быть прототипом (не RPP, SBOX, SHEX, PLX, PLY, UCX, UCY)`,
+        ],
+        slices: [],
+      };
+    }
+    const next = applyTransfToBodyParams(proto.type, proto.params, mode, spec.A, spec.B, spec.f);
+    if (!next) {
+      return {
+        meshes: [],
+        focusName: name,
+        neighborNames: [],
+        nearest: undefined,
+        bbox: null,
+        unsupported: true,
+        warnings: [`TRANSF: не удалось преобразовать прототип ${proto.type} ${proto.name}`],
+        slices: [],
+      };
+    }
+    t = proto.type.toUpperCase();
+    params = next;
+  }
+
+  const bbox = bboxFromBodyParams(t, params);
   if (!bbox) {
     return {
       meshes: [],
@@ -1640,7 +1911,7 @@ export function buildDraftBodyPreview(input: DraftBodyPreviewInput): DraftBodyPr
   const draftSolid: PrimitiveSolid = {
     type: t,
     name,
-    params: input.params,
+    params,
     bbox,
     color: DRAFT_BODY_COLOR,
   };

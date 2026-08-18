@@ -386,7 +386,7 @@ const BODY_GENERATOR_TYPES: BodyTypeOption[] = [
     key: "TRANSF",
     title: "Преобразование тела",
     description:
-      "Отражение (M) или поворот (R) вокруг вертикали через (A,B,0); f — угол к OX в градусах. Прототип не RPP/SBOX/SHEX/PLX/PLY/UCX/UCY.",
+      "Копия прототипа: буква M — отражение, R — поворот. Точка симметрии (A,B,0) в OXY; f — угол к OX. Прототип не RPP/SBOX/SHEX/PLX/PLY/UCX/UCY.",
     fields: [
       { id: "proto", label: "proto", defaultValue: "C1" },
       { id: "mode", label: "M|R", defaultValue: "R" },
@@ -482,10 +482,10 @@ const PARAM_GROUP_HINTS: Record<string, string[]> = {
   ],
   TRANSF: [
     "Имя тела-прототипа (не RPP, SBOX, SHEX, PLX, PLY, UCX, UCY)",
-    "M — отражение от вертикальной плоскости, R — поворот вокруг вертикали",
-    "A — X точки (A,B,0) на оси или плоскости",
-    "B — Y точки (A,B,0) на оси или плоскости",
-    "f° к OX: у M наклон плоскости, у R угол поворота",
+    "Буква типа: M — отражение, R — поворот (это не координата)",
+    "X точки симметрии (A,B,0): через неё вертикальная плоскость (M) или ось (R)",
+    "Y точки симметрии (A,B,0)",
+    "f° к OX: у M наклон плоскости отражения, у R угол поворота",
   ],
 };
 
@@ -763,6 +763,13 @@ export function buildBodyStatement(input: BodyGeneratorInput): {
     );
   }
 
+  if (typeKey === "TRANSF") {
+    const mode = (params[1] ?? "").trim().toUpperCase();
+    if (mode && mode !== "M" && mode !== "R") {
+      warnings.push("Тип преобразования — буква M (отражение) или R (поворот), UserGuide §9.1.3.22.");
+    }
+  }
+
   const body = formatParamGroups(params, schema.formatGroups);
   // ARB: поле «хвост» уже содержит пробелы и «/» — не трогаем
   const text =
@@ -803,6 +810,42 @@ export function resolveBodyParamNumbers(
     nums.push(v);
   }
   return { nums, warnings };
+}
+
+export interface TransfResolvedParams {
+  protoName: string;
+  mode: string;
+  A: number;
+  B: number;
+  f: number;
+  warnings: string[];
+  ok: boolean;
+}
+
+/**
+ * TRANSF: proto и M|R — идентификаторы, не выражения.
+ * UserGuide §9.1.3.22: `TRANSF <новое> <прототип> M|R A B f`.
+ */
+export function resolveTransfParams(params: string[], vars: Map<string, number>): TransfResolvedParams {
+  const warnings: string[] = [];
+  const protoName = (params[0] ?? "").trim();
+  const modeRaw = (params[1] ?? "").trim();
+  const mode = modeRaw.toUpperCase();
+  if (!protoName) warnings.push("Не задано имя тела-прототипа");
+  if (mode !== "M" && mode !== "R") {
+    warnings.push("Тип преобразования должен быть M (отражение) или R (поворот), UserGuide §9.1.3.22");
+  }
+  const rest = resolveBodyParamNumbers(params.slice(2, 5), vars);
+  warnings.push(...rest.warnings);
+  const A = rest.nums[0] ?? Number.NaN;
+  const B = rest.nums[1] ?? Number.NaN;
+  const f = rest.nums[2] ?? Number.NaN;
+  const ok =
+    protoName.length > 0 &&
+    (mode === "M" || mode === "R") &&
+    rest.nums.length >= 3 &&
+    rest.nums.every(Number.isFinite);
+  return { protoName, mode: modeRaw, A, B, f, warnings, ok };
 }
 
 function putVar(vars: Map<string, number>, name: string, value: number): void {

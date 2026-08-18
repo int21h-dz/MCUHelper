@@ -32,6 +32,9 @@ import {
   getCompositionLineParameterHover,
   getBodyLineParameterHover,
   looksLikeZoneStatement,
+  listVisibleConstants,
+  mapMainLineToExpanded,
+  resolveScopeAtPosition,
   mcuNuclideAtomicWeight,
   mcuNuclideToIaeaElement,
   resolveNuclideConcentration,
@@ -130,14 +133,54 @@ export function isOnStatementKeyword(line: string, character: number, word: stri
   return character >= start && character < end;
 }
 
-function constantValue(index: DocumentIndex, name: string): number | null {
+/** Числовой литерал (в т.ч. 1.E-3): выражение уже и есть значение — не дублировать. */
+function expressionIsNumericLiteral(expr: string, value: number): boolean {
+  const s = expr.replace(/\s+/g, "");
+  if (!/^[+-]?(?:\d+\.?\d*|\.\d+)(?:[Ee][+-]?\d+)?$/.test(s)) return false;
+  const n = Number(s);
+  return Number.isFinite(n) && n === value;
+}
+
+function lastConstantByName(
+  index: DocumentIndex,
+  name: string
+): { name: string; expression: string; mutable: boolean; value: number | null } | null {
+  const want = name.toUpperCase();
   const vars = new Map<string, number>();
+  let last: { name: string; expression: string; mutable: boolean; value: number | null } | null = null;
   for (const c of index.ast.constants) {
     const v = evaluateExpression(c.expression, vars);
-    if (v !== null) vars.set(c.name, v);
-    if (c.name.toUpperCase() === name.toUpperCase()) return v;
+    if (v !== null) {
+      vars.set(c.name, v);
+      vars.set(c.name.toUpperCase(), v);
+    }
+    if (c.name.toUpperCase() === want) {
+      last = { name: c.name, expression: c.expression, mutable: c.mutable, value: v };
+    }
   }
-  return null;
+  return last;
+}
+
+/** EQU/SET под курсором: выражение + вычисленное значение в текущем scope. */
+function formatConstantHoverAt(
+  index: DocumentIndex,
+  name: string,
+  editorLine: number,
+  character: number
+): string | null {
+  const expandedLine = mapMainLineToExpanded(index.ast.includeLineMap, editorLine);
+  const scope = resolveScopeAtPosition(index.ast, expandedLine, character);
+  const vis = listVisibleConstants(index.ast.constants, scope, expandedLine, character + 1);
+  const want = name.toUpperCase();
+  const found =
+    vis.filter((c) => c.name.toUpperCase() === want).pop() ?? lastConstantByName(index, name);
+  if (!found) return null;
+  const showValue =
+    found.value !== null &&
+    Number.isFinite(found.value) &&
+    !expressionIsNumericLiteral(found.expression, found.value);
+  const valText = showValue ? `\n\nЗначение: **${found.value}**` : "";
+  return `**${found.mutable ? "SET" : "EQU"} ${found.name}**\n\n\`${found.expression}\`${valText}`;
 }
 
 function hoverForKeyword(word: string): string | null {
@@ -634,6 +677,9 @@ export function getHoverContent(
       paramHover += "\n\nПроизвольный идентификатор, например `fuel`, `MOD`, `clad`.";
     }
   }
+  const constHover =
+    index && rawWord ? formatConstantHoverAt(index, rawWord, pos.line, pos.character) : null;
+  if (paramHover && constHover) return `${paramHover}\n\n---\n\n${constHover}`;
   if (paramHover) return paramHover;
 
   return getHover(doc, pos, index, editorUri);
@@ -744,12 +790,8 @@ export function getHover(
     return null;
   }
 
-  const konst = index.ast.constants.find((c) => c.name.toUpperCase() === word);
-  if (konst) {
-    const val = constantValue(index, konst.name);
-    const valText = val !== null ? `\n\nЗначение: **${val}**` : "";
-    return `**${konst.mutable ? "SET" : "EQU"} ${konst.name}**\n\n\`${konst.expression}\`${valText}`;
-  }
+  const konstHover = formatConstantHoverAt(index, rawWord, pos.line, pos.character);
+  if (konstHover) return konstHover;
 
   const bodyNode = index.ast.bodies.find((b) => b.name.toUpperCase() === word);
   if (bodyNode) {

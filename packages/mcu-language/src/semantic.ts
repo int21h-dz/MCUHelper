@@ -14,6 +14,7 @@ import type {
 import { computeBodyVolumeCm3 } from "./bodyVolume";
 import { evaluateExpression } from "./expression";
 import { analyzeBodyParameterCounts } from "./bodyParamValidation";
+import { TRANSF_FORBIDDEN_PROTO_TYPES } from "./constants";
 import { analyzeEnergyGroupStatements } from "./energyGroups";
 import { analyzeBurnupSemantics } from "./burnupSemantics";
 import { analyzeMatrCardParams } from "./matrCardValidation";
@@ -97,6 +98,26 @@ export function analyzeSemantics(ast: DocumentAst): DiagnosticMessage[] {
           severity: "error",
           message: `TRANSF: неизвестное тело-прототип ${b.protoName}`,
           code: "transf-ref",
+          range: b.range,
+        });
+      } else {
+        const proto = bodyNames.get(bodyKey(b.protoName, protoScope));
+        const protoType = proto?.type.toUpperCase() ?? "";
+        if (TRANSF_FORBIDDEN_PROTO_TYPES.has(protoType)) {
+          diags.push({
+            severity: "error",
+            message: `TRANSF: ${protoType} не может быть прототипом (UserGuide §9.1.3.22: не RPP, SBOX, SHEX, PLX, PLY, UCX, UCY)`,
+            code: "transf-proto",
+            range: b.range,
+          });
+        }
+      }
+      const mode = (b.transfMode ?? "").toUpperCase();
+      if (mode && mode !== "M" && mode !== "R") {
+        diags.push({
+          severity: "error",
+          message: `TRANSF: тип преобразования «${b.transfMode}» — ожидается M (отражение) или R (поворот)`,
+          code: "transf-mode",
           range: b.range,
         });
       }
@@ -514,6 +535,7 @@ export function buildSummaries(ast: DocumentAst): {
           scope: b.scope,
           transf: b.transf,
           protoName: b.protoName,
+          transfMode: b.transfMode,
           range: b.range,
         };
       }),

@@ -53,4 +53,23 @@ describe("buildScene", () => {
     assert.ok(!names.includes("CNT"));
     assert.strictEqual(cell.activeScope, "lcell:A");
   });
+
+  it("materializes TRANSF as transformed prototype (UserGuide §9.1.3.22)", () => {
+    const ast = parseDocument(
+      `HEAD 3 0
+RCZ CYLRG 0,0,0 10 1
+TRANSF CYLFT CYLRG M 10.5, 0 90
+FINISH`,
+      { uri: "transf-a37" }
+    );
+    const scene = buildScene(ast);
+    const proto = scene.primitives.find((p) => p.name === "CYLRG");
+    const made = scene.primitives.find((p) => p.name === "CYLFT");
+    assert.ok(proto);
+    assert.ok(made);
+    assert.equal(made!.type, "RCZ");
+    assert.ok(Math.abs(made!.params[0] - 21) < 1e-6);
+    assert.ok(Math.abs(made!.params[1]) < 1e-6);
+    assert.equal(made!.params[3], 10);
+  });
 });

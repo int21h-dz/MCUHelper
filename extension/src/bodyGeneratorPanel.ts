@@ -42,6 +42,7 @@ type MeshPreviewApi = {
     scenePrimitives: NonNullable<GeometrySceneLike["primitives"]>;
     sceneBbox?: GeometrySceneLike["bbox"];
     nearby?: { maxCount?: number; maxGapFactor?: number; excludeName?: string };
+    transf?: { protoName: string; mode: string; A: number; B: number; f: number };
   }) => {
     meshes: unknown[];
     focusName: string;
@@ -361,25 +362,52 @@ export class BodyGeneratorPanel {
       let constsForEval = await this.fetchConstants();
       if (!this.panel) return;
       let vars = api.constantsToVarMap(constsForEval);
-      let resolved = api.resolveBodyParamNumbers(this.form.params, vars);
-      if (resolved.warnings.some((w) => /не удалось вычислить/i.test(w))) {
+      const isTransf = this.form.bodyType.toUpperCase() === "TRANSF";
+      let resolved = isTransf
+        ? { nums: [] as number[], warnings: [] as string[] }
+        : api.resolveBodyParamNumbers(this.form.params, vars);
+      let transf = isTransf ? api.resolveTransfParams(this.form.params, vars) : null;
+      const needRetry = isTransf
+        ? (transf?.warnings.some((w) => /не удалось вычислить/i.test(w)) ?? false)
+        : resolved.warnings.some((w) => /не удалось вычислить/i.test(w));
+      if (needRetry) {
         const uri = this.targetUri();
         if (uri) {
           const all = await this.fetchIndexConstants({ uri });
           constsForEval = this.mergeConstants(constsForEval, all);
           vars = api.constantsToVarMap(constsForEval);
-          resolved = api.resolveBodyParamNumbers(this.form.params, vars);
+          if (isTransf) transf = api.resolveTransfParams(this.form.params, vars);
+          else resolved = api.resolveBodyParamNumbers(this.form.params, vars);
         }
       }
-      const warnings = [...built.warnings, ...resolved.warnings];
+      const warnings = [...built.warnings, ...(isTransf ? transf?.warnings ?? [] : resolved.warnings)];
       if (!constsForEval.length && this.form.params.some((p) => /[A-Za-z]/.test(p))) {
-        warnings.push(
-          "EQU не загружены: кликните в MCU-файл (строка вставки) и нажмите «Обновить константы»."
-        );
+        if (!isTransf || this.form.params.slice(2).some((p) => /[A-Za-z]/.test(p))) {
+          warnings.push(
+            "EQU не загружены: кликните в MCU-файл (строка вставки) и нажмите «Обновить константы»."
+          );
+        }
       }
 
       let draftPreview: ReturnType<MeshPreviewApi["buildDraftBodyPreview"]> | null = null;
-      if (this.meshApi && resolved.nums.length > 0 && resolved.nums.every(Number.isFinite)) {
+      if (this.meshApi && isTransf && transf?.ok) {
+        draftPreview = this.meshApi.buildDraftBodyPreview({
+          bodyType: "TRANSF",
+          name: insertName,
+          params: [transf.A, transf.B, transf.f],
+          scenePrimitives: scene?.primitives ?? [],
+          sceneBbox: scene?.bbox,
+          nearby: { maxCount: this.form.nearbyCount, maxGapFactor: 4 },
+          transf: {
+            protoName: transf.protoName,
+            mode: transf.mode,
+            A: transf.A,
+            B: transf.B,
+            f: transf.f,
+          },
+        });
+        warnings.push(...(draftPreview.warnings ?? []));
+      } else if (this.meshApi && !isTransf && resolved.nums.length > 0 && resolved.nums.every(Number.isFinite)) {
         draftPreview = this.meshApi.buildDraftBodyPreview({
           bodyType: this.form.bodyType,
           name: insertName,

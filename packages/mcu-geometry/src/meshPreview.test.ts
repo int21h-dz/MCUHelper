@@ -12,6 +12,8 @@ import {
   firstContainerIndex,
   isNeighborExcluded,
   DRAFT_BODY_COLOR,
+  applyTransfToBodyParams,
+  transfPoint,
 } from "./meshPreview";
 import type { GeometryScene, PrimitiveSolid } from "./types";
 
@@ -494,5 +496,41 @@ describe("meshPreview extra types and slices", () => {
       scenePrimitives: [],
     });
     assert.ok(hexgTilt.slices.some((s) => s.polylines.some((p) => p.highlight)));
+  });
+
+  it("TRANSF R rotates a point 90° CCW around vertical", () => {
+    const p = transfPoint({ x: 1, y: 0, z: 3 }, "R", 0, 0, 90);
+    assert.ok(Math.abs(p.x) < 1e-9);
+    assert.ok(Math.abs(p.y - 1) < 1e-9);
+    assert.equal(p.z, 3);
+  });
+
+  it("TRANSF M mirrors RCZ across x=10.5 (UserGuide A.37 plane at 90°)", () => {
+    const next = applyTransfToBodyParams("RCZ", [0, 0, 0, 10, 1], "M", 10.5, 0, 90);
+    assert.ok(next);
+    assert.ok(Math.abs(next![0] - 21) < 1e-6);
+    assert.ok(Math.abs(next![1]) < 1e-6);
+    assert.equal(next![3], 10);
+    assert.equal(applyTransfToBodyParams("RPP", [0, 1, 0, 1, 0, 1], "R", 0, 0, 90), null);
+  });
+
+  it("buildDraftBodyPreview applies TRANSF to a scene prototype", () => {
+    const proto = prim("RCZ", "R01", [1, 0, 0, 10, 2], {
+      min: { x: -1, y: -2, z: 0 },
+      max: { x: 3, y: 2, z: 10 },
+    });
+    const prev = buildDraftBodyPreview({
+      bodyType: "TRANSF",
+      name: "R02",
+      params: [0, 0, 90],
+      scenePrimitives: [proto],
+      transf: { protoName: "R01", mode: "R", A: 0, B: 0, f: 90 },
+    });
+    assert.equal(prev.warnings.length, 0);
+    assert.ok(!prev.unsupported);
+    const draft = prev.meshes.find((m) => m.name === "R02");
+    assert.ok(draft);
+    assert.ok(Math.abs(draft!.center.x) < 1e-6);
+    assert.ok(Math.abs(draft!.center.y - 1) < 1e-6);
   });
 });

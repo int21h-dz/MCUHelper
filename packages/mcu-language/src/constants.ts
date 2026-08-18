@@ -22,6 +22,17 @@ const BODY_PARAM_COUNTS: Record<string, number | "var"> = {
   SBOX: 9, SHEX: 3, ARB: "var", QUAD: 10, TRANSF: 5,
 };
 
+/** UserGuide §9.1.3.22: эти типы не могут быть телами-прототипами TRANSF. */
+export const TRANSF_FORBIDDEN_PROTO_TYPES = new Set([
+  "RPP",
+  "SBOX",
+  "SHEX",
+  "PLX",
+  "PLY",
+  "UCX",
+  "UCY",
+]);
+
 export function getBodyParamCount(key: string): number | "var" | undefined {
   return BODY_PARAM_COUNTS[key.toUpperCase()];
 }

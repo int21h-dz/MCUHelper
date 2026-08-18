@@ -10,6 +10,7 @@ import {
   listBodyGeneratorTypes,
   parseBodySourceStatement,
   resolveBodyParamNumbers,
+  resolveTransfParams,
   sanitizeBodyName,
 } from "./bodyGenerator";
 
@@ -165,6 +166,17 @@ describe("bodyGenerator", () => {
     assert.equal(tr?.bodyType, "TRANSF");
     assert.equal(tr?.name, "CYLFT");
     assert.deepEqual(tr?.params, ["CYLRG", "M", "10.5", "0", "90"]);
+    const live = resolveTransfParams(["R01", "R", "0", "0", "90"], new Map());
+    assert.equal(live.ok, true);
+    assert.equal(live.protoName, "R01");
+    assert.equal(live.mode.toUpperCase(), "R");
+    assert.equal(live.A, 0);
+    assert.equal(live.B, 0);
+    assert.equal(live.f, 90);
+    assert.equal(live.warnings.length, 0);
+    const withEqu = resolveTransfParams(["R01", "M", "AX", "0", "0"], constantsToVarMap([{ name: "AX", value: 10.5 }]));
+    assert.equal(withEqu.ok, true);
+    assert.equal(withEqu.A, 10.5);
     const arb = parseBodySourceStatement("ARB N1 -1,-1,0 1,-1,0 / 1234");
     assert.equal(arb?.bodyType, "ARB");
     assert.ok(arb!.params[0]?.includes("/"));
