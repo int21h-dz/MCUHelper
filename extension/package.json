@@ -134,6 +134,11 @@
           ],
           "default": "off"
         },
+        "mcuhelper.liveBodyPreview": {
+          "type": "boolean",
+          "default": true,
+          "description": "Живое превью сечений при редактировании строки тела в варианте. Закрытая панель сама не откроется снова, пока не вызовете команду «Превью тела»."
+        },
         "mcuhelper.autoDetectLanguage": {
           "type": "boolean",
           "default": true,
@@ -283,6 +288,11 @@
         "command": "mcuhelper.bodyGenerator",
         "title": "MCU-NR: Генератор тел",
         "icon": "$(symbol-misc)"
+      },
+      {
+        "command": "mcuhelper.bodyLivePreview",
+        "title": "MCU-NR: Превью тела",
+        "icon": "$(eye)"
       },
       {
         "command": "mcuhelper.waterSteam",
@@ -499,6 +509,11 @@
           "command": "mcuhelper.bodyGenerator",
           "when": "view == mcuhelper.bodies",
           "group": "navigation@1"
+        },
+        {
+          "command": "mcuhelper.bodyLivePreview",
+          "when": "view == mcuhelper.bodies",
+          "group": "navigation@2"
         }
       ],
       "editor/context": [

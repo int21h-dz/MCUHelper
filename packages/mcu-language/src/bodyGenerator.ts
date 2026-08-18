@@ -3,7 +3,7 @@
  */
 
 import { getBodyParamCount } from "./constants";
-import { evaluateExpression } from "./expression";
+import { evaluateExpression, mergeTrailingMultiplyOperands } from "./expression";
 
 export interface BodyParamField {
   id: string;
@@ -512,6 +512,108 @@ export function getBodyGeneratorType(key: string): BodyTypeOption | undefined {
   const found = BODY_GENERATOR_TYPES.find((t) => t.key === key.toUpperCase());
   if (!found) return undefined;
   return withFieldHints(found);
+}
+
+const BODY_SOURCE_KEYS = new Set(BODY_GENERATOR_TYPES.map((t) => t.key));
+
+export interface ParsedBodySource {
+  bodyType: string;
+  name: string;
+  params: string[];
+}
+
+export interface CollectedBodyStatement {
+  text: string;
+  startLine: number;
+  endLine: number;
+}
+
+function isFullLineComment(line: string): boolean {
+  if (!line.length) return false;
+  if (line[0] === "*") return true;
+  return line.length >= 2 && (line[0] === "C" || line[0] === "c") && line[1] === "=";
+}
+
+/** Продолжение предложения: пробел в колонке 1 (UserGuide §7.1). */
+function isContinuationLine(line: string): boolean {
+  return line.length > 0 && line[0] === " ";
+}
+
+/** Убрать `;комментарий` и полный комментарий строки. */
+export function stripBodyLineComment(line: string): string {
+  if (isFullLineComment(line)) return "";
+  const semi = line.indexOf(";");
+  const cut = semi >= 0 ? line.slice(0, semi) : line;
+  return cut.trim();
+}
+
+/**
+ * Собрать предложение с продолжениями вокруг `lineIndex` (0-based).
+ * Курсор на продолжении → берём голову + хвост.
+ */
+export function collectContinuedStatement(
+  lines: readonly string[],
+  lineIndex: number
+): CollectedBodyStatement | null {
+  if (lineIndex < 0 || lineIndex >= lines.length) return null;
+  if (!isContinuationLine(lines[lineIndex]!) && isFullLineComment(lines[lineIndex]!)) {
+    return null;
+  }
+  let start = lineIndex;
+  while (start > 0 && isContinuationLine(lines[start]!)) start--;
+  if (isFullLineComment(lines[start]!)) return null;
+  let end = start;
+  while (end + 1 < lines.length && isContinuationLine(lines[end + 1]!)) end++;
+  const parts: string[] = [];
+  for (let i = start; i <= end; i++) {
+    const piece = stripBodyLineComment(lines[i]!);
+    if (piece) parts.push(piece);
+  }
+  const text = parts.join(" ").replace(/\s+/g, " ").trim();
+  if (!text) return null;
+  return { text, startLine: start, endLine: end };
+}
+
+/** Разобрать строку тела из исходника варианта (не AST). */
+export function parseBodySourceStatement(text: string): ParsedBodySource | null {
+  const raw = stripBodyLineComment(text).replace(/\s+/g, " ").trim();
+  if (!raw) return null;
+
+  const head = raw.split(/[\s,]+/).filter(Boolean);
+  if (!head.length) return null;
+  const h0 = head[0]!.toUpperCase();
+  const h1 = head[1]?.toUpperCase();
+
+  if (h0 === "TRANSF") {
+    return {
+      bodyType: "TRANSF",
+      name: head[1] ?? "*",
+      params: mergeTrailingMultiplyOperands(head.slice(2)),
+    };
+  }
+
+  let bodyType: string | undefined;
+  let name: string;
+  let rest: string[];
+  if (BODY_SOURCE_KEYS.has(h0)) {
+    bodyType = h0;
+    name = head[1] ?? "*";
+    rest = head.slice(2);
+  } else if (h1 && BODY_SOURCE_KEYS.has(h1)) {
+    bodyType = h1;
+    name = head[0]!;
+    rest = head.slice(2);
+  } else {
+    return null;
+  }
+
+  const schema = getBodyGeneratorType(bodyType);
+  if (!schema) return null;
+  if (schema.fields.length === 1 && schema.fields[0]?.id === "tail") {
+    const tailMatch = raw.match(/^\S+\s+\S+\s+([\s\S]*)$/);
+    return { bodyType, name, params: [tailMatch?.[1]?.trim() ?? rest.join(" ")] };
+  }
+  return { bodyType, name, params: mergeTrailingMultiplyOperands(rest) };
 }
 
 /** MCU id: буква + до 5 букв/цифр, либо `*` (автоимя). UserGuide §9. */

@@ -2,6 +2,20 @@
 (function () {
 const vscode = acquireVsCodeApi();
 
+function readLiveMode() {
+  const bootEl = document.getElementById("bg-boot");
+  if (!bootEl || !bootEl.textContent) return false;
+  try {
+    const boot = JSON.parse(bootEl.textContent);
+    return boot && boot.mode === "live";
+  } catch (err) {
+    return false;
+  }
+}
+
+const liveMode = readLiveMode();
+if (liveMode) document.body.classList.add("bg-live");
+
 const els = {
   docLabel: document.getElementById("docLabel"),
   bodyType: document.getElementById("bodyType"),
@@ -23,6 +37,7 @@ const els = {
   capXY: document.getElementById("capXY"),
   capXZ: document.getElementById("capXZ"),
   capYZ: document.getElementById("capYZ"),
+  idleHint: document.getElementById("idleHint"),
 };
 
 let types = [];
@@ -313,6 +328,7 @@ function onTypeChange(keepValues) {
 }
 
 function renderWarnings(list) {
+  if (!els.warnings) return;
   els.warnings.innerHTML = "";
   (list || []).forEach((w) => {
     const li = document.createElement("li");
@@ -597,7 +613,8 @@ window.addEventListener("message", (event) => {
   const msg = event.data;
   if (!msg || !msg.type) return;
   if (msg.type === "state") {
-    els.docLabel.textContent = msg.docLabel || "";
+    if (els.docLabel) els.docLabel.textContent = msg.docLabel || "";
+    if (liveMode) return;
     constants = msg.constants || [];
     fillTypes(msg.types || [], msg.form && msg.form.bodyType);
     fillEquList();
@@ -612,15 +629,18 @@ window.addEventListener("message", (event) => {
     }
   }
   if (msg.type === "preview") {
+    if (msg.docLabel && els.docLabel) els.docLabel.textContent = msg.docLabel;
+    if (els.idleHint) els.idleHint.textContent = "";
     if (msg.constants) {
       constants = msg.constants;
       fillEquList();
     }
-    els.preview.textContent = msg.text || "";
+    if (els.preview) els.preview.textContent = msg.text || "";
     renderWarnings(msg.warnings || []);
     if (els.autoNameHint) {
       els.autoNameHint.textContent = msg.autoName ? "вставится как " + msg.autoName : "";
     }
+    if (msg.resetView) sliceSlots.forEach(resetSliceView);
     const dp = msg.draftPreview;
     if (dp) {
       slices = dp.slices || [];
@@ -639,12 +659,17 @@ window.addEventListener("message", (event) => {
         }
       }
       drawSlices();
-    } else {
+    } else if (msg.resetView || !liveMode) {
       slices = [];
       if (els.neighborInfo) els.neighborInfo.textContent = "";
       if (els.nearestInfo) els.nearestInfo.textContent = "ближайшее: —";
       drawSlices();
     }
+  }
+  if (msg.type === "idle") {
+    if (els.idleHint) els.idleHint.textContent = msg.message || "";
+    if (msg.docLabel && els.docLabel) els.docLabel.textContent = msg.docLabel;
+    return;
   }
   if (msg.type === "error") {
     renderWarnings([msg.message || "Ошибка"]);
@@ -656,6 +681,7 @@ window.addEventListener("message", (event) => {
   if (!bootEl || !bootEl.textContent) return;
   try {
     const boot = JSON.parse(bootEl.textContent);
+    if (boot.mode === "live") return;
     constants = boot.constants || [];
     fillTypes(boot.types || [], boot.form && boot.form.bodyType);
     if (boot.form) {

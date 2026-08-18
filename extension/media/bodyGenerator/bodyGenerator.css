@@ -402,6 +402,18 @@ legend {
   overflow: auto;
 }
 
+body.bg-live .bg-live-layout {
+  grid-template-columns: 1fr;
+}
+
+body.bg-live .bg-preview {
+  padding-top: 8px;
+}
+
+body.bg-live .bg-form {
+  display: none;
+}
+
 @media (max-width: 820px) {
   .bg-layout {
     grid-template-columns: 1fr;

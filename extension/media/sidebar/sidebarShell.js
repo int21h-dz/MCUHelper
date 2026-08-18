@@ -103,6 +103,10 @@
         I.getIcon("body") +
         "<span>Генератор тел</span>" +
         "</button>" +
+        '<button type="button" class="mcu-panel-tool-btn" data-action="run-command" data-command="mcuhelper.bodyLivePreview" data-args="null" title="Живые сечения тела под курсором в варианте">' +
+        I.getIcon("eye") +
+        "<span>Превью тела</span>" +
+        "</button>" +
         "</div>"
       );
     }

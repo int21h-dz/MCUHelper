@@ -28,6 +28,7 @@ import { batchValidateInput } from "./batchValidateCommand";
 import { resolvePostRunOpenTarget, shouldFocusDiagnosticsAfterRun } from "./runPanelHelpers";
 import { runRegistrationBuilder } from "./registrationBuilderCommand";
 import { runBodyGenerator } from "./bodyGeneratorCommand";
+import { registerBodyLivePreview, runBodyLivePreview } from "./bodyLivePreviewCommand";
 import { runWaterSteam } from "./waterSteamCommand";
 import { runMaterialsBuilder } from "./materialsBuilderCommand";
 import { registerWaterSteamFocusTracker } from "./waterSteamPanel";
@@ -253,6 +254,7 @@ export function activate(context: vscode.ExtensionContext): void {
   registerIncludePreview(context);
   registerMatrCodeLens(context);
   registerWaterSteamFocusTracker(context);
+  registerBodyLivePreview(context, client);
   sidebarProviders = createSidebarProviders(context, client);
   setIncludeDocumentOpenedHandler(() => {
     if (sidebarProviders) refreshDiagnosticsSidebar(sidebarProviders);
@@ -341,6 +343,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("mcuhelper.burnup", () => runMcuStepCommand("b")),
     vscode.commands.registerCommand("mcuhelper.registrationBuilder", () => runRegistrationBuilder(context, client)),
     vscode.commands.registerCommand("mcuhelper.bodyGenerator", () => runBodyGenerator(context, client)),
+    vscode.commands.registerCommand("mcuhelper.bodyLivePreview", () => runBodyLivePreview(context, client)),
     vscode.commands.registerCommand("mcuhelper.waterSteam", () => runWaterSteam(context, client)),
     vscode.commands.registerCommand("mcuhelper.materialsBuilder", () => runMaterialsBuilder(context, client)),
     vscode.commands.registerCommand("mcuhelper.showIncludeGraph", () => showIncludeGraph(client)),

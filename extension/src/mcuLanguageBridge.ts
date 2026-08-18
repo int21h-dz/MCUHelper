@@ -81,6 +81,15 @@ export function loadBodyGeneratorApi(): {
   isValidBodyName: (name: string) => boolean;
   sanitizeBodyName: (raw: string) => string;
   allocateBodyName: (bodyType: string, existingNames: Iterable<string>) => string;
+  parseBodySourceStatement: (text: string) => {
+    bodyType: string;
+    name: string;
+    params: string[];
+  } | null;
+  collectContinuedStatement: (
+    lines: readonly string[],
+    lineIndex: number
+  ) => { text: string; startLine: number; endLine: number } | null;
 } {
   return requireLanguage("bodyGenerator");
 }

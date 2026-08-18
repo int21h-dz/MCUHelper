@@ -3,10 +3,12 @@ import { describe, it } from "node:test";
 import {
   allocateBodyName,
   buildBodyStatement,
+  collectContinuedStatement,
   constantsToVarMap,
   getBodyGeneratorType,
   isValidBodyName,
   listBodyGeneratorTypes,
+  parseBodySourceStatement,
   resolveBodyParamNumbers,
   sanitizeBodyName,
 } from "./bodyGenerator";
@@ -147,5 +149,31 @@ describe("bodyGenerator", () => {
     const { nums, warnings } = resolveBodyParamNumbers(["12.5+LG2"], vars);
     assert.equal(warnings.length, 0);
     assert.equal(nums[0], 12.5);
+  });
+
+  it("parses body source lines and continuations", () => {
+    const rcz = parseBodySourceStatement("RCZ fuel 0,0,0 H R");
+    assert.ok(rcz);
+    assert.equal(rcz!.bodyType, "RCZ");
+    assert.equal(rcz!.name, "fuel");
+    assert.deepEqual(rcz!.params, ["0", "0", "0", "H", "R"]);
+    const commented = parseBodySourceStatement("RCZ fuel 0,0,0 1 1 ; note");
+    assert.deepEqual(commented?.params, ["0", "0", "0", "1", "1"]);
+    assert.equal(parseBodySourceStatement("* RCZ x 0,0,0 1 1"), null);
+    assert.equal(parseBodySourceStatement("MATR 1"), null);
+    const tr = parseBodySourceStatement("TRANSF CYLFT CYLRG M 10.5, 0 90");
+    assert.equal(tr?.bodyType, "TRANSF");
+    assert.equal(tr?.name, "CYLFT");
+    assert.deepEqual(tr?.params, ["CYLRG", "M", "10.5", "0", "90"]);
+    const arb = parseBodySourceStatement("ARB N1 -1,-1,0 1,-1,0 / 1234");
+    assert.equal(arb?.bodyType, "ARB");
+    assert.ok(arb!.params[0]?.includes("/"));
+    const joined = collectContinuedStatement(["RCZ A 0,0,0", " 1 2"], 1);
+    assert.ok(joined);
+    assert.equal(joined!.startLine, 0);
+    assert.equal(joined!.endLine, 1);
+    const parsed = parseBodySourceStatement(joined!.text);
+    assert.deepEqual(parsed?.params, ["0", "0", "0", "1", "2"]);
+    assert.equal(collectContinuedStatement(["* comment", " RCZ A 0"], 0), null);
   });
 });
