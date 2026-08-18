@@ -23,6 +23,7 @@ export * from "./bodyParamValidation";
 export * from "./sourceSpectrum";
 export * from "./sourceSpectrumChart";
 export * from "./nuclideIaea";
+export * from "./nuclideConcScan";
 export * from "./ast";
 export * from "./lexer";
 export * from "./preprocessor";
@@ -45,4 +46,5 @@ export * from "./netCartogram";
 export * from "./crossModuleAudit";
 export * from "./resultSummary";
 export * from "./waterSteam";
+export * from "./materialsCompendium";
 

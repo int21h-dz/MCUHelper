@@ -138,10 +138,61 @@ export function awLibNameFromIaeaLabel(label: string): string | null {
   return null;
 }
 
+export interface AwLibCatalogItem {
+  name: string;
+  zaid: number;
+  atomicWeight: number;
+  isNatural: boolean;
+}
+
+/** Плоский список AW.LIB для combobox конструктора материалов. */
+export function listAwLibCatalog(): AwLibCatalogItem[] {
+  if (!currentTable) return [];
+  return [...currentTable.byName.values()]
+    .map((e) => ({
+      name: e.name,
+      zaid: e.zaid,
+      atomicWeight: e.atomicWeight,
+      isNatural: e.isNatural,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export function formatAtomicWeightAmu(aw: number): string {
   if (!Number.isFinite(aw)) return "—";
   if (Math.abs(aw - Math.round(aw)) < 1e-12) return String(Math.round(aw));
   let s = aw.toFixed(8);
   s = s.replace(/\.?0+$/, "");
   return s;
+}
+
+/** Таблица AW.LIB из каталога LSP — чтобы конструктор считал ρ теми же A, что ховер. */
+export function setAwLibTableFromCatalog(items: AwLibCatalogItem[], sourcePath?: string): void {
+  if (!items.length) {
+    setAwLibTable(null);
+    return;
+  }
+  const byName = new Map<string, AwLibEntry>();
+  const byZA = new Map<string, AwLibEntry>();
+  for (const item of items) {
+    const name = item.name.trim().toUpperCase();
+    if (!name || !Number.isFinite(item.zaid) || !Number.isFinite(item.atomicWeight)) continue;
+    const z = Math.floor(item.zaid / 1000);
+    const aRem = item.zaid % 1000;
+    const isNatural = item.isNatural || aRem === 0;
+    const a = isNatural ? null : aRem;
+    const symMatch = name.match(/^([A-Z]{1,2})/);
+    const entry: AwLibEntry = {
+      name,
+      symbol: (symMatch?.[1] ?? name).toUpperCase(),
+      zaid: item.zaid,
+      atomicWeight: item.atomicWeight,
+      z,
+      a,
+      isNatural,
+    };
+    byName.set(name, entry);
+    if (a != null) byZA.set(zaKey(z, a), entry);
+  }
+  setAwLibTable({ byName, byZA, path: sourcePath, entryCount: byName.size });
 }

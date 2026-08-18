@@ -73,6 +73,8 @@
       '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1" stroke="currentColor" fill="none" stroke-width="1.3"/><path d="M2 6.5h12M2 10h12M6.5 3v10M10.5 3v10" stroke="currentColor" stroke-width="1.1"/></svg>',
     droplet:
       '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.2c2.6 3.2 4.3 5.2 4.3 7.2a4.3 4.3 0 11-8.6 0c0-2 1.7-4 4.3-7.2z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 11.2a1.6 1.6 0 01-1.6-1.6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none"/></svg>',
+    flask:
+      '<svg class="mcu-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2h4M7 2v4.2L3.4 13.2A1.4 1.4 0 004.6 15h6.8a1.4 1.4 0 001.2-1.8L9 6.2V2" stroke="currentColor" fill="none" stroke-width="1.3" stroke-linejoin="round"/><path d="M5 10h6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
   };
 
   const PANELS = {

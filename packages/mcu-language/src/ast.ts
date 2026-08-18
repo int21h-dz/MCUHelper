@@ -218,8 +218,14 @@ export interface MaterialSummary {
   group?: string;
   temperature?: number;
   nuclideCount: number;
+  /** Сколько нуклидов реально пошло в расчёт ρ текущего материала. */
+  usedNuclideCount: number;
   /** Сколько нуклидов входят в суммарный изотоп (SI/SINOT/SIDEN). */
   sumIsotopeCount: number;
+  /** Из sum-isotope: сколько нуклидов есть в AW.LIB и грубо учтены в ρ. */
+  sumIsotopeUsedCount: number;
+  /** Из sum-isotope: сколько нуклидов отсутствуют в AW.LIB и не учтены по банку. */
+  sumIsotopeMissingAwLibCount: number;
   nuclidesPreview: string;
   massDensityGcm3: number | null;
   volumeCm3: number | null;
@@ -231,9 +237,15 @@ export interface MaterialSummary {
     concentration: string;
     range: SourceRange;
     /** Нуклид входит в суммарный изотоп (SI/SINOT/SIDEN, UserGuide §8.5). */
-    sumIsotope?: { reasons: string[] };
+    sumIsotope?: {
+      reasons: string[];
+      /** Есть ли запись нуклида в AW.LIB; undefined если AW.LIB не загружена. */
+      inAwLib?: boolean;
+    };
   }>;
   range: SourceRange;
+  /** URI файла MATR (main или `#include`); задаёт getIndex для CodeLens. */
+  uri?: string;
 }
 
 export interface ZoneSummary {

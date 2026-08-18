@@ -506,15 +506,8 @@ function formatNuclideHoverLocal(
     }
     lines.push(rhoLine);
   }
-  if (mat && source.kind === "material") {
-    const sum = sumIsotopeForNuclide(index.ast, mat, {
-      name: word,
-      density: source.concentration,
-    });
-    if (sum.inSum) {
-      lines.push(`_${sum.reasons.join("; ")}_`);
-    }
-  }
+  // Причины SI/SIDEN — только в decoration hover (sumIsotopeHoverMessage),
+  // иначе VS Code склеивает курсивную строку и маркированный список.
   return lines.join("\n\n");
 }
 

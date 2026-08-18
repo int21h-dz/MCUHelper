@@ -550,6 +550,18 @@ export function parseDocument(text: string, options: ParseOptions): DocumentAst 
       inMaterialBlock = true;
       const mat = parseMaterial(stmt.text, stmt.range);
       if (mat) {
+        /** Continuation-строки MATR склеиваются в один stmt без `\n` — range иначе у всех = заголовок, серое SI не находит имя. */
+        const fromLines: NuclideEntry[] = [];
+        for (let k = i; k <= stmt.end; k++) {
+          const line = lines[k]!;
+          const raw = k === i ? line.text.replace(/^\s*MATR\s+\d+/i, "") : line.text;
+          if (isIgnorableAuxLine(raw)) continue;
+          if (!looksLikeNuclideLine(raw)) continue;
+          const parsed = parseNuclidesFromLine(raw, rangeFromLine(line));
+          if (parsed.diagnostic) diagnostics.push(parsed.diagnostic);
+          fromLines.push(...parsed.nuclides);
+        }
+        if (fromLines.length) mat.nuclides = fromLines;
         let j = stmt.end + 1;
         while (j < lines.length) {
           const nextStmt = mergeStatementLines(lines, j);

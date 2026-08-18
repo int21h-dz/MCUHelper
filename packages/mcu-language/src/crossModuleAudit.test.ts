@@ -99,6 +99,89 @@ FINISH`;
     assert.ok(diags.some((d) => d.code === "reg-obj-unknown" && d.message.includes("№9")));
   });
 
+  it("knows object numbers from NET O-cartogram (not only zone tails)", () => {
+    const text = `PIN 1 0
+MATR 1
+U235 1.0
+FINISH
+HEAD 1 0
+CONT T T
+RPP A 0 1 0 1 0 1
+Z1 A /1:1
+END
+NET N1 0 0 0 2 2
+T01 A A
+O0156 1 2
+END
+FINISH
+RGS
+PTYPE 1
+ORCT 2
+END
+FINISH`;
+    const ast = parseDocument(text, { uri: "reg-obj-net.mcu" });
+    const diags = analyzeRegistrationListLinks(ast);
+    assert.strictEqual(
+      diags.filter((d) => d.code === "reg-obj-unknown").length,
+      0,
+      diags.map((d) => d.message).join("; ")
+    );
+  });
+
+  it("keeps object numbers from earlier CELL when later CELL reuses the zone name", () => {
+    const text = `PIN 1 0
+MATR 1
+U235 1.0
+FINISH
+HEAD 1 0
+CONT T T
+CELL CA
+RPP A 0 1 0 1 0 1
+END
+Z1 A #M=1 #Z=1 #O=2
+END
+CELL CB
+RPP B 0 1 0 1 0 1
+END
+Z1 B #M=1 #Z=1 #O=1
+END
+END
+FINISH
+RGS
+PTYPE 1
+ORCT 2
+END
+FINISH`;
+    const ast = parseDocument(text, { uri: "reg-obj-cell.mcu" });
+    const diags = analyzeRegistrationListLinks(ast);
+    assert.strictEqual(
+      diags.filter((d) => d.code === "reg-obj-unknown").length,
+      0,
+      diags.map((d) => d.message).join("; ")
+    );
+  });
+
+  it("still warns when object is absent from zones and O-cartogram", () => {
+    const text = `PIN 1 0
+MATR 1
+U235 1.0
+FINISH
+HEAD 1 0
+CONT T T
+RPP A 0 1 0 1 0 1
+Z1 A /1:1
+END
+FINISH
+RGS
+PTYPE 1
+ORCT 2
+END
+FINISH`;
+    const ast = parseDocument(text, { uri: "reg-obj-missing.mcu" });
+    const diags = analyzeRegistrationListLinks(ast);
+    assert.ok(diags.some((d) => d.code === "reg-obj-unknown" && d.message.includes("№2")));
+  });
+
   it("skips checks when list is 0 (all)", () => {
     const text = `${geoPin}RGS
 PTYPE 1

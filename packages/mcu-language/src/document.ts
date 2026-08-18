@@ -19,6 +19,8 @@ export interface DocumentIndex {
   /** Отпечаток #include (mtime/size/буфер); пусто если expandInclude=false. */
   includeFp: string;
   summaries: ReturnType<typeof buildSummaries>;
+  /** hash текста, для которого считали summaries; иначе getIndex пересчитает. */
+  summariesSourceHash?: string;
 }
 
 const cache = new Map<string, DocumentIndex>();
@@ -36,6 +38,18 @@ export function getDocumentParseCount(): number {
 
 export function resetDocumentParseCount(): void {
   parseCount = 0;
+}
+
+export type AnalyzePhaseTimings = {
+  parseMs: number;
+  semanticsMs: number;
+  summariesMs: number;
+};
+
+let lastAnalyzeTimings: AnalyzePhaseTimings | null = null;
+
+export function getLastAnalyzeTimings(): AnalyzePhaseTimings | null {
+  return lastAnalyzeTimings;
 }
 
 /**
@@ -80,25 +94,45 @@ function buildIndex(
   version: number,
   hash: string,
   includeFp: string,
-  options?: Partial<ParseOptions>
+  options?: Partial<ParseOptions> & { skipSummaries?: boolean },
+  previous?: DocumentIndex
 ): DocumentIndex {
   parseCount++;
+  const t0 = performance.now();
   const ast = parseDocument(text, {
     uri,
     baseDir: options?.baseDir,
     expandInclude: options?.expandInclude,
     includeTextOverrides: options?.includeTextOverrides,
   });
+  const parseMs = performance.now() - t0;
+  const t1 = performance.now();
   ast.diagnostics = analyzeSemantics(ast);
-  const summaries = buildSummaries(ast);
-  return { uri, version, ast, hash, includeFp, summaries };
+  const semanticsMs = performance.now() - t1;
+  const t2 = performance.now();
+  const skipSummaries = Boolean(options?.skipSummaries && previous);
+  const summaries = skipSummaries ? previous!.summaries : buildSummaries(ast);
+  lastAnalyzeTimings = {
+    parseMs: Math.round(parseMs),
+    semanticsMs: Math.round(semanticsMs),
+    summariesMs: skipSummaries ? 0 : Math.round(performance.now() - t2),
+  };
+  return {
+    uri,
+    version,
+    ast,
+    hash,
+    includeFp,
+    summaries,
+    summariesSourceHash: skipSummaries ? previous!.summariesSourceHash ?? previous!.hash : hash,
+  };
 }
 
 export function analyzeDocument(
   uri: string,
   text: string,
   version: number,
-  options?: Partial<ParseOptions>
+  options?: Partial<ParseOptions> & { skipSummaries?: boolean }
 ): DocumentIndex {
   const expanded = options?.expandInclude !== false;
   const key = cacheKey(uri, expanded);
@@ -118,7 +152,7 @@ export function analyzeDocument(
     return cached;
   }
 
-  const index = buildIndex(uri, text, version, hash, includeFp, options);
+  const index = buildIndex(uri, text, version, hash, includeFp, options, cached);
   cache.set(key, index);
   return index;
 }
@@ -154,6 +188,7 @@ export function rebuildCachedSummaries(uris?: ReadonlyArray<string>): number {
   if (uris == null) {
     for (const index of cache.values()) {
       index.summaries = buildSummaries(index.ast);
+      index.summariesSourceHash = index.hash;
       n++;
     }
     return n;
@@ -166,6 +201,7 @@ export function rebuildCachedSummaries(uris?: ReadonlyArray<string>): number {
       const index = cache.get(cacheKey(uri, expanded));
       if (!index) continue;
       index.summaries = buildSummaries(index.ast);
+      index.summariesSourceHash = index.hash;
       n++;
     }
   }

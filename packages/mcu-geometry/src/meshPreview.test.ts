@@ -8,6 +8,9 @@ import {
   isMeshPreviewUnsupported,
   selectNearbyBodies,
   buildDraftBodyPreview,
+  bboxFromBodyParams,
+  firstContainerIndex,
+  isNeighborExcluded,
   DRAFT_BODY_COLOR,
 } from "./meshPreview";
 import type { GeometryScene, PrimitiveSolid } from "./types";
@@ -268,5 +271,228 @@ describe("meshPreview", () => {
     const hexgXy = hexg.slices.find((s) => s.axis === "z");
     const hexgDraft = hexgXy?.polylines.find((p) => p.highlight);
     assert.ok(hexgDraft && hexgDraft.points.length === 6);
+  });
+});
+
+describe("meshPreview extra types and slices", () => {
+  it("maps RCC/SBOX/HEX family/planes/infinite/slabs/REC", () => {
+    const rcc = bodyToMeshDescriptor(prim("RCC", "r", [0, 0, 0, 0, 0, 4, 1]));
+    assert.ok(rcc);
+    assert.strictEqual(rcc!.kind, "cylinder");
+    assert.ok(Math.abs(rcc!.height! - 4) < 1e-9);
+
+    const sbox = bodyToMeshDescriptor(prim("SBOX", "s", [2, 0, 0, 0, 3, 0, 0, 0, 4]));
+    assert.ok(sbox);
+    assert.strictEqual(sbox!.kind, "orientedBox");
+    assert.deepStrictEqual(sbox!.size, { x: 2, y: 3, z: 4 });
+
+    const hex = bodyToMeshDescriptor(prim("HEX", "h", [0, 0, 0, 2, 0, 10]));
+    assert.ok(hex);
+    assert.strictEqual(hex!.kind, "hex");
+    assert.ok(hex!.flatToFlat! > 0);
+
+    const hexx = bodyToMeshDescriptor(prim("HEXX", "hx", [0, 0, 0, 8, 3, 0]));
+    assert.strictEqual(hexx!.kind, "hex");
+    const hexy = bodyToMeshDescriptor(prim("HEXY", "hy", [0, 0, 0, 8, 3, 15]));
+    assert.strictEqual(hexy!.kind, "hex");
+    const shex = bodyToMeshDescriptor(prim("SHEX", "sh", [2, 10, 30]));
+    assert.strictEqual(shex!.kind, "hex");
+
+    const sceneBb = { min: { x: -5, y: -5, z: -5 }, max: { x: 5, y: 5, z: 5 } };
+    const ply = bodyToMeshDescriptor(prim("PLY", "py", [1]), sceneBb);
+    assert.deepStrictEqual(ply!.normal, { x: 0, y: 1, z: 0 });
+    const plz = bodyToMeshDescriptor(prim("PLZ", "pz", [2]), sceneBb);
+    assert.deepStrictEqual(plz!.normal, { x: 0, y: 0, z: 1 });
+    const plg = bodyToMeshDescriptor(prim("PLG", "pg", [0, 0, 1, 3]), sceneBb);
+    assert.ok(plg);
+    assert.strictEqual(plg!.kind, "plane");
+
+    const ucx = bodyToMeshDescriptor(prim("UCX", "ux", [1, 2, 0.5]), sceneBb);
+    assert.strictEqual(ucx!.axis!.x, 1);
+    const ucy = bodyToMeshDescriptor(prim("UCY", "uy", [1, 2, 0.5]), sceneBb);
+    assert.strictEqual(ucy!.axis!.y, 1);
+
+    const sla = bodyToMeshDescriptor(prim("SLA", "sa", [0, 0, 0, 1, 0, 0]));
+    assert.strictEqual(sla!.kind, "orientedBox");
+    const slb = bodyToMeshDescriptor(prim("SLB", "sb", [0, 0, 1, 0, 2]));
+    assert.strictEqual(slb!.kind, "orientedBox");
+
+    const rec = bodyToMeshDescriptor(
+      prim("REC", "e", [0, 0, 0, 0, 0, 10, 2, 0, 0, 0, 1, 0])
+    );
+    assert.strictEqual(rec!.kind, "ellipticCylinder");
+  });
+
+  it("bboxFromBodyParams covers the remaining body types", () => {
+    assert.ok(bboxFromBodyParams("RPP", [1, 0, 2, -1, 0, 4]));
+    assert.ok(bboxFromBodyParams("RCC", [0, 0, 0, 1, 0, 0, 0.5]));
+    assert.ok(bboxFromBodyParams("BOX", [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1]));
+    assert.ok(bboxFromBodyParams("SBOX", [1, 0, 0, 0, 1, 0, 0, 0, 1]));
+    assert.ok(bboxFromBodyParams("HEX", [0, 0, 0, 2, 0, 5]));
+    assert.ok(bboxFromBodyParams("HEXX", [0, 0, 0, 4, 2]));
+    assert.ok(bboxFromBodyParams("SHEX", [2, 8]));
+    assert.ok(bboxFromBodyParams("HEXG", [0, 0, 0, 0, 0, 10, 2, 0, 0]));
+    assert.ok(bboxFromBodyParams("PLX", [3]));
+    assert.ok(bboxFromBodyParams("PLY", [1]));
+    assert.ok(bboxFromBodyParams("PLZ", [0]));
+    assert.ok(bboxFromBodyParams("PLG", [1, 0, 0, 0]));
+    assert.ok(bboxFromBodyParams("ELL", [0, 0, 0, 0, 0, 2, 1]));
+    assert.ok(bboxFromBodyParams("ELL", [0, 0, 0, 0, 0, 2, -0.5]));
+    assert.ok(bboxFromBodyParams("WED", [0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0, 3]));
+    assert.ok(bboxFromBodyParams("UCX", [0, 0, 1]));
+    assert.ok(bboxFromBodyParams("UCY", [0, 0, 1]));
+    assert.ok(bboxFromBodyParams("UCZ", [0, 0, 1]));
+    assert.ok(bboxFromBodyParams("SLA", [0, 0, 0, 0, 0, 1]));
+    assert.ok(bboxFromBodyParams("SLB", [1, 0, 0, -1, 1]));
+    assert.ok(bboxFromBodyParams("TRC", [0, 0, 0, 0, 0, 5, 2, 1]));
+    assert.ok(bboxFromBodyParams("REC", [0, 0, 0, 0, 0, 4, 1, 0, 0, 0, 0.5, 0]));
+    const fb = bboxFromBodyParams("FOO", [8, 9, 1, 2]);
+    assert.ok(fb);
+    assert.strictEqual(fb!.min.x, 7);
+    assert.strictEqual(bboxFromBodyParams("FOO", []), null);
+  });
+
+  it("HEXG with V along H still builds a frame", () => {
+    const m = bodyToMeshDescriptor(prim("HEXG", "g", [0, 0, 0, 0, 0, 10, 0, 0, 4]));
+    assert.ok(m);
+    assert.strictEqual(m!.kind, "orientedHex");
+  });
+
+  it("buildMeshPreview records supported type with too few params as unsupported", () => {
+    const scene = {
+      primitives: [prim("RPP", "short", [0, 1])],
+      bbox: { min: { x: 0, y: 0, z: 0 }, max: { x: 1, y: 1, z: 1 } },
+    };
+    const prev = buildMeshPreview(scene);
+    assert.strictEqual(prev.meshes.length, 0);
+    assert.strictEqual(prev.unsupported[0]!.name, "short");
+  });
+
+  it("nearby ranks infinite cylinders and excludes planes", () => {
+    const focus = { min: { x: 0, y: 0, z: 0 }, max: { x: 1, y: 1, z: 1 } };
+    const ucx = prim("UCX", "ux", [0.5, 0.5, 0.2], {
+      min: { x: -10, y: 0.3, z: 0.3 },
+      max: { x: 10, y: 0.7, z: 0.7 },
+    });
+    const ucy = prim("UCY", "uy", [0.5, 0.5, 0.2], {
+      min: { x: 0.3, y: -10, z: 0.3 },
+      max: { x: 0.7, y: 10, z: 0.7 },
+    });
+    const ucz = prim("UCZ", "uz", [0.5, 0.5, 0.2], {
+      min: { x: 0.3, y: 0.3, z: -10 },
+      max: { x: 0.7, y: 0.7, z: 10 },
+    });
+    const plane = prim("PLX", "px", [0], {
+      min: { x: 0, y: -1, z: -1 },
+      max: { x: 0, y: 1, z: 1 },
+    });
+    const picked = selectNearbyBodies(focus, [ucx, ucy, ucz, plane], { maxCount: 8, maxGapFactor: 40 });
+    const names = picked.map((p) => p.name);
+    assert.ok(names.includes("ux"));
+    assert.ok(names.includes("uy"));
+    assert.ok(names.includes("uz"));
+    assert.ok(!names.includes("px"));
+    assert.ok(firstContainerIndex([plane, ucx]) < 0);
+    assert.ok(isNeighborExcluded(plane, focus, false));
+    assert.ok(!isNeighborExcluded(ucx, focus, false));
+  });
+
+  it("draft preview fallbacks: no bbox, ARB, neighbor without mesh", () => {
+    const empty = buildDraftBodyPreview({
+      bodyType: "RPP",
+      name: " ",
+      params: [1],
+      scenePrimitives: [],
+    });
+    assert.strictEqual(empty.meshes.length, 0);
+    assert.ok(empty.warnings.length);
+
+    const arb = buildDraftBodyPreview({
+      bodyType: "ARB",
+      name: "poly",
+      params: [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+      scenePrimitives: [],
+    });
+    assert.ok(arb.unsupported);
+
+    const hexgShort = buildDraftBodyPreview({
+      bodyType: "HEXG",
+      name: "hg",
+      params: [1, 2, 3],
+      scenePrimitives: [],
+    });
+    assert.ok(hexgShort.meshes.some((m) => m.kind === "bbox" && m.name === "hg"));
+
+    const weird = prim("ARB", "blob", [0, 0, 0], {
+      min: { x: 2, y: 0, z: 0 },
+      max: { x: 3, y: 1, z: 1 },
+    });
+    const withBlob = buildDraftBodyPreview({
+      bodyType: "SPH",
+      name: "ball",
+      params: [0, 0, 0, 0.5],
+      scenePrimitives: [weird],
+      nearby: { maxCount: 8, maxGapFactor: 40 },
+    });
+    assert.ok(withBlob.meshes.some((m) => m.kind === "bbox" && m.name === "blob"));
+  });
+
+  it("slices HEX/BOX/RCC-along-X/REC/TRC-along-X on all three planes", () => {
+    const hex = buildDraftBodyPreview({
+      bodyType: "HEX",
+      name: "h",
+      params: [0, 0, 0, 2, 0, 10],
+      scenePrimitives: [],
+    });
+    assert.ok(hex.slices.every((s) => s.polylines.some((p) => p.highlight)));
+
+    const box = buildDraftBodyPreview({
+      bodyType: "BOX",
+      name: "b",
+      params: [0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 4],
+      scenePrimitives: [],
+    });
+    assert.ok(box.slices.some((s) => s.polylines.some((p) => p.highlight && p.points.length >= 3)));
+
+    const rccX = buildDraftBodyPreview({
+      bodyType: "RCC",
+      name: "cx",
+      params: [0, 0, 0, 10, 0, 0, 1],
+      scenePrimitives: [],
+    });
+    const xy = rccX.slices.find((s) => s.axis === "z");
+    assert.ok(xy?.polylines.some((p) => p.highlight));
+
+    const rec = buildDraftBodyPreview({
+      bodyType: "REC",
+      name: "ec",
+      params: [0, 0, 0, 0, 0, 8, 2, 0, 0, 0, 1, 0],
+      scenePrimitives: [],
+    });
+    assert.ok(rec.slices[0]!.polylines.some((p) => p.highlight && p.points.length >= 8));
+
+    const recX = buildDraftBodyPreview({
+      bodyType: "REC",
+      name: "ecx",
+      params: [0, 0, 0, 8, 0, 0, 0, 1, 0, 0, 0, 0.5],
+      scenePrimitives: [],
+    });
+    assert.ok(recX.slices.find((s) => s.axis === "z")?.polylines.length);
+
+    const trcX = buildDraftBodyPreview({
+      bodyType: "TRC",
+      name: "tx",
+      params: [0, 0, 0, 10, 0, 0, 2, 1],
+      scenePrimitives: [],
+    });
+    assert.ok(trcX.slices.find((s) => s.axis === "z")?.polylines.some((p) => p.highlight));
+
+    const hexgTilt = buildDraftBodyPreview({
+      bodyType: "HEXG",
+      name: "hg2",
+      params: [0, 0, 0, 10, 0, 0, 0, 2, 0],
+      scenePrimitives: [],
+    });
+    assert.ok(hexgTilt.slices.some((s) => s.polylines.some((p) => p.highlight)));
   });
 });

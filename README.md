@@ -2,9 +2,9 @@
 
 **Расширение для [Visual Studio Code](https://code.visualstudio.com/download) и Language Server** для исходных данных семейства [MCU6](#о-mcu-и-mcu-nr).
 
-[`VS Code ^1.85`](https://code.visualstudio.com/download) · `Node.js` · язык `mcunr` · ~660 тестов
+[`VS Code ^1.85`](https://code.visualstudio.com/download) · `Node.js` · язык `mcunr` · 888 тестов
 
-> **English:** MCU Helper is a VS Code extension and Language Server for editing MCU6 input decks — text files that describe materials, 3D geometry, sources, tallying, and burnup for Monte Carlo particle transport. It brings syntax highlighting, diagnostics, completions, hover documentation, sum-isotope highlighting (`SI` / `SINOT` / `SIDEN`), MDBNR library checks (AW.LIB / PARAMETE.THR T½ vs IAEA), a module catalog, run actions for MCU-NR, and convenient navigation inside MCU input files.
+> **English:** MCU Helper is a VS Code extension and Language Server for editing MCU6 input decks — text files that describe materials, 3D geometry, sources, tallying, and burnup for Monte Carlo particle transport. It brings syntax highlighting, diagnostics, completions, hover documentation, MATR CodeLens (ρ, V, activity), sum-isotope highlighting (`SI` / `SINOT` / `SIDEN`), MDBNR library checks (AW.LIB / PARAMETE.THR T½ vs IAEA), PNNL materials builder, body generator with nearby-body slices, IAPWS-IF97 water/steam dens, a module catalog, run actions for MCU-NR, and convenient navigation inside MCU input files.
 
 ![Демонстрация MCU Helper в VS Code](media/Promo.gif)
 
@@ -15,9 +15,10 @@
 - [О MCU](#о-mcu-и-mcu-nr)
 - [Что такое McuHelper](#что-такое-mcuhelper)
 - [Возможности](#возможности)
+- [Конструкторы и калькуляторы](#конструкторы-и-калькуляторы)
+- [Сверка библиотек MDBNR](#сверка-библиотек-mdbnr)
 - [Установка](#установка)
 - [Быстрый старт](#быстрый-старт)
-- [Сверка библиотек MDBNR](#сверка-библиотек-mdbnr)
 - [Команды](#команды)
 - [Настройки](#настройки)
 - [Разработка](#разработка)
@@ -54,10 +55,10 @@
 | Компонент | Назначение |
 |-----------|------------|
 | [`packages/mcu-schema`](packages/mcu-schema) | Схемы карт PIN/GEO, типы тел, hover-тексты, каталог шаблонов модулей |
-| [`packages/mcu-language`](packages/mcu-language) | Лексер, парсер, семантический анализ, индекс документа |
-| [`packages/mcu-geometry`](packages/mcu-geometry) | Geometry IR, аналитика зон, запросы к геометрии |
+| [`packages/mcu-language`](packages/mcu-language) | Лексер, парсер, семантика, индекс, конструкторы MATR/тел, вода/пар |
+| [`packages/mcu-geometry`](packages/mcu-geometry) | Geometry IR, аналитика зон, сечения / превью черновика тела |
 | [`packages/mcu-lsp`](packages/mcu-lsp) | Language Server: diagnostics, completion, hover, custom requests |
-| [`extension/`](extension) | UI VS Code: боковая панель и команды |
+| [`extension/`](extension) | UI VS Code: боковая панель, webview-конструкторы, команды |
 
 ```mermaid
 flowchart LR
@@ -92,7 +93,8 @@ flowchart LR
 - **Автодополнение** — все карты (~229 меток), алиасы, аргументы карт (`SUMZON`→`SUMB`…`ZONG`, `CONTEN`→`DENS`…, `CODE`→`RSTP`…), символы документа
 - **Signature Help** — подсказка активного параметра при вводе тел (`RCC`, `RCZ`, …), карт (`MATR`, `POWER`, `STEP`, `SI`/`SINOT`/`SIDEN`, …), строк нуклидов
 - **Всплывающие подсказки** — описания из UserGuide; для нуклидов — концентрация, плотность, атомная масса, удельная активность (Бк/г = a_V/ρ) по T½ из PARAMETE.THR; данные **IAEA NDS** (природные смеси — bundled fallback без сети для частых элементов + кнопка разложения); для `POWER`/`STEP`, `EMES`/`EPRO`, `VOL` — дополнительные расчёты и мини-отчёты
-- **Суммарный изотоп** (UserGuide §8.5) — карты `SI` / `SINOT` / `SIDEN`: нуклиды входящие в суммарный изотоп подсвечиваются серым в редакторе и приглушённо в панели «Материалы»; в hover — причина пометки (список SI/SINOT или порог `SIDEN`)
+- **CodeLens над `MATR`** — компактная строка интегральных характеристик: всего нуклидов, сколько в SI, сколько из SI нет в AW.LIB, ρ, V, масса, удельная активность (Бк/г), T, GROUP. Lens садится на видимый заголовок `MATR` в этом файле (не на чужой include)
+- **Суммарный изотоп** (UserGuide §8.5) — карты `SI` / `SINOT` / `SIDEN`: нуклиды входящие в суммарный изотоп подсвечиваются серым в редакторе и приглушённо в панели «Материалы»; в hover — причина пометки (список SI/SINOT или порог `SIDEN`). Серая подсветка только в том файле, где нуклид реально написан (main и include не смешиваются)
 - **Автоопределение языка** `mcunr` по содержимому (`PIN`, `MATR`, `HEAD`, …)
 - **Автоопределение кодировки** — UTF-8 / Windows-1251 / CP866 / KOI8-R для legacy-файлов и `#include`
 - **Сворачивание (folding)** — фрагменты варианта, блоки `MATR`, `LCELL…ENDL` и `LATT`
@@ -110,9 +112,9 @@ flowchart LR
 | **Каталог** | 8 модулей варианта; карточки карт с hover; drag или клик → вставка шаблона |
 | **Диагностика** | Ошибки и предупреждения текущего файла; группы **`#include`** (переход в include-файл) и **«Сверка изотопов»** (AW/THR vs IAEA, экспорт CSV); открывается после MCU-run при ошибках LST |
 | **Навигация** | Фрагменты варианта, карты/операторы и `#include` (без тел, зон, EQU/SET, CONT); клик по include — к строке директивы в варианте |
-| **Материалы** | Дерево `MATR` с плотностью и группами; нуклиды суммарного изотопа — приглушённо |
-| **Константы** | Эффективный набор `EQU`/`SET` в позиции курсора (global + локальные LCELL/CELL) |
-| **Тела** | Список геометрических тел по scope |
+| **Материалы** | Дерево `MATR` с плотностью и группами; нуклиды суммарного изотопа — приглушённо. Кнопки **Конструктор материалов** и **Вода / пар** |
+| **Константы** | Эффективный набор `EQU`/`SET` в позиции курсора (global + локальные LCELL/CELL); клик ведёт к определению в main или в файле `#include` |
+| **Тела** | Список геометрических тел по scope. Кнопка **Генератор тел** |
 | **Сети** | Ячейки `NET` |
 | **Решётки** | Элементы `LATT` / `LCELL` |
 | **Зоны** | Булевы выражения зон |
@@ -172,7 +174,41 @@ flowchart LR
 - **MCU-NR: Определить язык по содержимому** — ручное переключение на `mcunr`
 - **MCU-NR: Определить кодировку** — повторная проверка кодировки файла
 - Встроенные настройки **cSpell** для языка `mcunr` (игнорирование имён карт и тел)
-  
+
+---
+
+## Конструкторы и калькуляторы
+
+Webview-панели рядом с редактором. Те же команды — кнопками на вкладках **Материалы** и **Тела** (и иконками в `view/title`).
+
+### Конструктор материалов
+
+Команда **MCU-NR: Конструктор материалов**. Справочник [PNNL Materials Compendium](https://github.com/pyne/materials-compendium/tree/develop) ([документация](https://materials-compendium.readthedocs.io/en/latest/index.html)) + таблица `AW.LIB` → карта `MATR`.
+
+- поиск по английскому и русскому имени, формуле, нуклидам; свои материалы сверху, бейдж «своё»;
+- черновик: номер, T, ρ, комментарий (`** …`), состав вручную или из справочника;
+- примеси — весовые % (доли перенормируются);
+- режим по умолчанию `DENSWA=` + весовые доли; переключатель — изотопные ядерные dens (тогда ρ считается по AW.LIB и только для чтения);
+- **Из контекста** — заполнить черновик из видимого `MATR` под курсором (не из expanded `#include`); имена нуклидов как в карте;
+- **В пользовательский банк** — сохранить текущий черновик в `globalStorage` (файл не входит в VSIX; обновление справочника и расширения его не затирает). **JSON банк** открывает этот файл в редакторе;
+- **Вставить в конец** — всегда после последнего `MATR` в **видимом** тексте PIN; номер = последний + 1. Подсказка: `Вставка в конец PIN → MATR N · файл`.
+
+Каталог PNNL бандлится в VSIX (`catalog.json.gz`); при наличии сети расширение сверяет SHA с GitHub и при обновлении кладёт slim-копию в `globalStorage`. Офлайн работает бандл.
+
+### Вода / пар
+
+Команда **MCU-NR: Вода / пар**. IAPWS-IF97, диаграмма ρ–T, расчёт dens H и O. Подхватывает температуру и плотность из `MATR` в позиции курсора; можно подставить вычисленные ядерные концентрации обратно в материал.
+
+### Генератор тел
+
+Команда **MCU-NR: Генератор тел**. Типы `BODY` (в т.ч. ELL, WED, UCX/Y/Z, SLA, SLB, REC, TRC, HEXG) и `TRANSF`.
+
+- имя: латиница, буква + до 5 букв/цифр, либо `*`; `U` и `T` запрещены (UserGuide); при вставке свободное имя scope;
+- параметры с подсказками EQU и описаниями групп (UserGuide §9.1.3);
+- превью: **три сечения** через центр черновика (XY / XZ / YZ), заливка черновика и контуры ближайших тел (не вся сцена);
+- навигация вида на каждом сечении: колесо — зум, ЛКМ-drag — сдвиг, двойной клик — вписать.
+
+
 ---
 
 ## Сверка библиотек MDBNR
@@ -202,7 +238,7 @@ flowchart LR
    - или из командной строки:
 
      ```bat
-     code --install-extension release\mcuhelper-vscode-0.10.0.vsix
+     code --install-extension release\mcuhelper-vscode-0.12.0.vsix
      ```
 
 ### Из исходников (разработка)
@@ -224,6 +260,7 @@ npm run build
 3. В Activity Bar нажмите иконку **MCU-NR** — откроется боковая панель с каталогом и навигацией.
 4. Наведите курсор на карту или нуклид — появится hover с описанием и данными (для нуклидов суммарного изотопа — ещё и причина пометки).
 5. Для запуска расчёта: вкладка **Запуск** → **Настроить пути** → **Debug** / **Run**.
+6. Состав `MATR` — **Конструктор материалов** на вкладке «Материалы»; геометрия — **Генератор тел** на вкладке «Тела».
 
 **Примеры файлов** в репозитории:
 
@@ -246,6 +283,7 @@ npm run build
 | Команда | Описание |
 |---------|----------|
 | MCU-NR: Debug (INPUT) | Проверка входа; открывает LST из temp-run; переход к первой ошибке |
+| MCU-NR: Validate (INPUT) | INPUT солвера; число диагностик из LST в уведомлении (LST не открывает) |
 | MCU-NR: Проверить варианты (INPUT) | Batch INPUT для нескольких `.mcu`/`.mcunr`; сводка в Output (ok/fail/warnings/LST) |
 | MCU-NR: Run (CALCULATION) | Полный расчёт; копирует/открывает FIN, иначе LST из temp-run |
 | MCU-NR: Continue (CALCULATION) | Продолжение расчёта |
@@ -278,8 +316,12 @@ npm run build
 | Команда | Описание |
 |---------|----------|
 | MCU-NR: Конструктор регистрации | Webview: собрать PTYPE…END и вставить в RGS |
+| MCU-NR: Конструктор материалов | Справочник PNNL + AW.LIB → MATR в конец PIN |
+| MCU-NR: Вода / пар | IAPWS-IF97 ρ–T → dens H и O; контекст из MATR под курсором |
+| MCU-NR: Генератор тел | Тип BODY/TRANSF, три сечения и ближайшие тела |
 | MCU-NR: Граф #include | QuickPick зависимостей include |
 | MCU-NR: Сравнить FIN/LST | Сводка Δ метрик + CSV в буфер |
+| MCU-NR: Сечения геометрии | Панель сечений существующей геометрии |
 | MCU-NR: 3D геометрия | Панель геометрии сразу в режиме 3D |
 | MCU-NR: Экспорт диагностик | Вывод Problems в Output |
 | MCU-NR: Отчёт сверки библиотек (Output) | Полный отчёт AW.LIB / PARAMETE.THR (T½) vs IAEA в канал «MCU-NR Helper» |
@@ -329,12 +371,20 @@ npm install
 npm run build
 ```
 
-Скрипт `build` компилирует все пакеты и копирует бандл LSP в `extension/server/server.js` (нужно для VSIX и Extension Development Host).
+Скрипт `build` компилирует все пакеты и копирует бандл LSP в `extension/server/server.js` (нужно для VSIX и Extension Development Host). Также копируются vendor-модули language/geometry (в т.ч. `materialsCompendium.js`, `bodyGenerator.js`, `meshPreview.js`).
 
 ### Упаковка VSIX
 
 ```bat
 package-vsix.bat
+```
+
+Без аргументов — меню: увеличить версию или пересобрать как есть. CLI: `nobump` / `-n` без bump; `bump` / `-b` с bump. Готовые `.vsix` — каталог `release/`.
+
+Обновить slim-каталог PNNL (словарь `names.ru.json` не трогает):
+
+```bash
+npm run refresh-materials-compendium
 ```
 
 ---
@@ -347,19 +397,21 @@ package-vsix.bat
 npm test
 ```
 
-Запускает ~660 тестов в пакетах `mcu-schema`, `mcu-language`, `mcu-geometry`, `mcu-lsp`, `extension`.
+Запускает 888 тестов (снимок 2026-08-14: schema 60, language 435, geometry 92, lsp 178, extension 123) в пакетах `mcu-schema`, `mcu-language`, `mcu-geometry`, `mcu-lsp`, `extension`. Актуальные цифры — в [docs/DEV.md](docs/DEV.md).
 
 ```bash
 npm run test:coverage
 npm run coverage:check
 ```
 
-Покрытие (c8): lines/statements ≥ 95%, branches ≥ 80%, functions ≥ 88%.
+`coverage:check` — регрессионные полы по пакетам (не цель 95% на весь репозиторий). Снимок и политика exclude — в [docs/DEV.md](docs/DEV.md).
 
 ### Документация
 
 | Ресурс | Описание |
 |--------|----------|
+| [docs/DEV.md](docs/DEV.md) | Руководство разработчика: сборка, тесты, покрытие c8 (актуальный снимок) |
+| [CHANGELOG_RU.md](CHANGELOG_RU.md) | Журнал изменений |
 | [mcuproject.ru](https://mcuproject.ru/rabout.html) | Официальный сайт семейства программ MCU |
 
 ---
@@ -368,6 +420,8 @@ npm run coverage:check
 
 - [Visual Studio Code — скачать](https://code.visualstudio.com/download) — редактор, в котором работает расширение
 - [О проекте MCU](https://mcuproject.ru/rabout.html) — Monte-Carlo Universal, Курчатовский институт
+- [pyne/materials-compendium](https://github.com/pyne/materials-compendium/tree/develop) — справочник материалов PNNL для конструктора MATR
+- [Materials Compendium docs](https://materials-compendium.readthedocs.io/en/latest/index.html)
 
 ---
 

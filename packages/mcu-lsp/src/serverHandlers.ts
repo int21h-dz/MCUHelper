@@ -1,9 +1,13 @@
 import * as fs from "fs";
+import * as http from "http";
 import * as path from "path";
 import type { TextDocument } from "vscode-languageserver-textdocument";
 import {
   analyzeDocument,
   getDocumentIndex,
+  getDocumentIndexForVersion,
+  getLastAnalyzeTimings,
+  buildSummaries,
   buildSemanticTokenSpans,
   semanticKindToIndex,
   listVisibleConstants,
@@ -134,6 +138,7 @@ export function toLspDiagnostic(d: DiagnosticMessage, documentUri?: string): Dia
 }
 
 const PROFILE_PARSE = process.env.MCUHELPER_PROFILE === "1";
+
 
 const MATR_BLOCK_STOP_LABELS = new Set(["MATR", "END", "FINISH", "DEF", "TEMPR", "PIN"]);
 
@@ -296,6 +301,44 @@ export function projectNavConstants(
   return out;
 }
 
+/**
+ * MATR в summaries: range/uri в координатах редактора
+ * (main после свёртки `#include`, либо файл include).
+ */
+export function projectNavMaterials(
+  index: DocumentIndex,
+  materials: DocumentIndex["summaries"]["materials"]
+): DocumentIndex["summaries"]["materials"] {
+  const out: DocumentIndex["summaries"]["materials"] = [];
+  for (const m of materials) {
+    const loc = rangeToEditorLocation(index, m.range);
+    if (!loc) continue;
+    const nuclides = m.nuclides.map((n) => {
+      const nloc = rangeToEditorLocation(index, n.range);
+      if (!nloc) return n;
+      return {
+        ...n,
+        range: {
+          ...n.range,
+          start: nloc.range.start,
+          end: nloc.range.end,
+        },
+      };
+    });
+    out.push({
+      ...m,
+      uri: loc.uri,
+      nuclides,
+      range: {
+        ...m.range,
+        start: loc.range.start,
+        end: loc.range.end,
+      },
+    });
+  }
+  return out;
+}
+
 /** `#include` для панели «Навигация» — директива в main + fragment. */
 export function projectNavIncludes(index: DocumentIndex): NavIncludePayload[] {
   const lineMap = index.ast.includeLineMap;
@@ -394,25 +437,30 @@ function clampFoldingRangesToDocument(ranges: FoldingRange[], lineCount: number)
 /** Единая точка получения индекса: version-cache в analyzeDocument + отпечаток include-файлов. */
 export function ensureDocumentIndex(doc: TextDocument): DocumentIndex {
   const uri = doc.uri;
-  // Быстрый путь до getText()/hash: тот же version уже в кэше (типичный hover на 16MB).
+  const t0 = performance.now();
+  // Same LSP version + нет #include → expanded≡source. Не getText/sha256 16MB (3l070626).
+  const cachedAny = getDocumentIndexForVersion(uri, doc.version);
+  if (cachedAny && (cachedAny.ast.includes?.length ?? 0) === 0) {
+    return cachedAny;
+  }
+
   const cachedExpanded = getDocumentIndex(uri, true);
   if (cachedExpanded && cachedExpanded.version === doc.version && cachedExpanded.includeFp === "") {
-    // Нет #include — expanded≡source, внешние файлы не влияют.
     return cachedExpanded;
   }
 
   const text = doc.getText();
-  // Без #include expanded≡source — один parse. С include — expand + fingerprint файлов.
-  // Только parseIncludeLine: CodeLens-маркеры `** [mcuhelper] ▼ #include` не считаются директивой.
   const expandInclude = textHasIncludeDirective(text);
-  const t0 = performance.now();
   const textLen = text.length;
   const baseDir = uriToBaseDir(uri);
   const includeTextOverrides = expandInclude ? currentIncludeTextOverrides() : undefined;
+  const haveCache = Boolean(getDocumentIndex(uri) ?? getDocumentIndex(uri, false));
+  const skipSummaries = doc.lineCount > SOURCE_REPARSE_LINE_THRESHOLD && haveCache;
   const index = analyzeDocument(uri, text, doc.version, {
     baseDir,
     expandInclude,
     includeTextOverrides,
+    skipSummaries,
   });
   const ms = performance.now() - t0;
 
@@ -492,8 +540,19 @@ function lookupParentUrisForInclude(
   return [...out];
 }
 
+/** Folding/outline: на колодах > этого порога не парсим 16MB раньше diagnostics. */
+export const SOURCE_REPARSE_LINE_THRESHOLD = 20_000;
+
 /** Индекс в координатах редактора (без expand) — folding/symbols, чтобы не мигала подсветка. */
 export function ensureSourceDocumentIndex(doc: TextDocument): DocumentIndex {
+  const current = getDocumentIndexForVersion(doc.uri, doc.version);
+  if (current) return current;
+  if (doc.lineCount > SOURCE_REPARSE_LINE_THRESHOLD) {
+    const stale = getDocumentIndex(doc.uri, false) ?? getDocumentIndex(doc.uri, true);
+    if (stale) {
+      return stale;
+    }
+  }
   const baseDir = uriToBaseDir(doc.uri);
   return analyzeDocument(doc.uri, doc.getText(), doc.version, { baseDir, expandInclude: false });
 }
@@ -696,6 +755,10 @@ function remapRelatedInformation(
   return out.length > 0 ? out : undefined;
 }
 
+let diagBundleCache:
+  | { key: string; bundle: McuDiagnosticsBundle }
+  | undefined;
+
 export function collectDiagnosticsBundle(
   doc: TextDocument,
   extraSolverDiags: Diagnostic[] = []
@@ -703,10 +766,17 @@ export function collectDiagnosticsBundle(
   // Единый разбор варианта: #include встраивается, семантика как у MCU после препроцессора.
   // Координаты редактора — через includeLineMap (main vs файл include).
   const index = ensureDocumentIndex(doc);
+  const solverFp =
+    extraSolverDiags.length > 0 ? `e${extraSolverDiags.length}` : getCachedSolverResult(index.hash) ? "s" : "0";
+  const cacheKey = `${doc.uri}|${doc.version}|${solverFp}`;
+  if (diagBundleCache?.key === cacheKey) {
+    return diagBundleCache.bundle;
+  }
   const lineMap = index.ast.includeLineMap;
   const lineCount = doc.lineCount;
   const out: Diagnostic[] = [];
   const includeGroups: McuIncludeDiagnosticGroup[] = [];
+  const astDiagCount = index.ast.diagnostics.length;
 
   for (const diagMsg of index.ast.diagnostics) {
     routeExpandedDiagnostic(toLspDiagnostic(diagMsg, doc.uri), lineMap, lineCount, out, includeGroups, doc.uri);
@@ -775,7 +845,9 @@ export function collectDiagnosticsBundle(
       ? a.range.start.line - b.range.start.line
       : a.range.start.character - b.range.start.character
   );
-  return { diagnostics: out, includeGroups: grouped };
+  const bundle = { diagnostics: out, includeGroups: grouped };
+  diagBundleCache = { key: cacheKey, bundle };
+  return bundle;
 }
 
 export interface McuDiagnosticPayload {
@@ -817,7 +889,7 @@ export function handleGetDiagnostics(
   const doc = getDoc(uri);
   if (!doc) return { diagnostics: [], includeGroups: [] };
   const bundle = collectDiagnosticsBundle(doc, extraSolverDiags);
-  return {
+  const mapped = {
     diagnostics: bundle.diagnostics.map((d) => ({
       severity: d.severity ?? DiagnosticSeverity.Error,
       message: d.message,
@@ -838,6 +910,7 @@ export function handleGetDiagnostics(
       })),
     })),
   };
+  return mapped;
 }
 
 export function buildSemanticTokenData(doc: TextDocument): number[] {
@@ -1079,10 +1152,17 @@ export function resolveDocumentIndex(
   return ensureDocumentIndex(doc);
 }
 
-const INDEX_NUCLIDE_SOFT_LIMIT = 20_000;
+/** Порог children в summaries: выше — только счётчики (без списка нуклидов). */
+export const INDEX_NUCLIDE_SOFT_LIMIT = 2_000;
+/**
+ * Порог decoration-марок в getIndex. Выше — пустой массив (не режем «первые N»:
+ * иначе full-core всё равно гоняет remap×N и раздувает IPC).
+ * 8k > типичный 958 (~3k SI), << full-core (~268k).
+ */
+export const INDEX_MARKS_HARD_LIMIT = 8_000;
 
-/** На full-core нуклиды в summaries раздувают JSON до 100+ МБ — для UI оставляем счётчики.
- * Нуклиды суммарного изотопа оставляем (серый UI / sidebar muted). */
+/** На full-core нуклиды в summaries раздувают JSON — для UI оставляем счётчики.
+ * Раньше оставляли только SI — на SIDEN/полном SI list это = почти все нуклиды (3l070626 ≈ 268k). */
 export function slimSummariesForIndex<T extends DocumentIndex["summaries"]>(summaries: T): T {
   const nuc = summaries.materials.reduce((n, m) => n + m.nuclides.length, 0);
   if (nuc <= INDEX_NUCLIDE_SOFT_LIMIT) return summaries;
@@ -1090,19 +1170,39 @@ export function slimSummariesForIndex<T extends DocumentIndex["summaries"]>(summ
     ...summaries,
     materials: summaries.materials.map((m) => ({
       ...m,
-      nuclides: m.nuclides.filter((n) => Boolean(n.sumIsotope)) as typeof m.nuclides,
+      nuclides: [] as typeof m.nuclides,
     })),
   };
 }
 
-function collectStableIsotopeMarks(index: DocumentIndex) {
+/** Если марок больше лимита — не отдаём ни одной (sidebar/IPC не должны тащить full-core SI). */
+export function capIndexMarksForPayload<T>(marks: readonly T[]): T[] {
+  if (marks.length > INDEX_MARKS_HARD_LIMIT) return [];
+  return marks.slice();
+}
+
+function collectStableIsotopeMarks(
+  index: DocumentIndex,
+  maxMarks?: number,
+  lineFrom?: number,
+  lineTo?: number
+) {
   const out: Array<{
     name: string;
     concentration: string;
     range: DocumentIndex["ast"]["materials"][number]["nuclides"][number]["range"];
   }> = [];
   for (const mat of index.ast.materials) {
+    if (
+      lineFrom != null &&
+      lineTo != null &&
+      !mat.nuclides.some((n) => n.range.start.line >= lineFrom && n.range.start.line <= lineTo)
+    ) {
+      continue;
+    }
     for (const n of mat.nuclides) {
+      if (lineFrom != null && n.range.start.line < lineFrom) continue;
+      if (lineTo != null && n.range.start.line > lineTo) continue;
       const thr = getParameteThrForMcuNuclide(n.name);
       if (!thr || thr.hasHalfLife) continue;
       out.push({
@@ -1110,20 +1210,168 @@ function collectStableIsotopeMarks(index: DocumentIndex) {
         concentration: n.density,
         range: n.range,
       });
+      if (maxMarks != null && out.length > maxMarks) return out;
     }
   }
   return out;
 }
 
+type EditorMark = {
+  name: string;
+  uri: string;
+  range: { start: { line: number; character: number }; end: { line: number; character: number } };
+  reasons?: string[];
+  inAwLib?: boolean;
+};
+
+function projectMarksToEditor(
+  index: DocumentIndex,
+  marks: ReadonlyArray<{
+    name: string;
+    range: DocumentIndex["ast"]["materials"][number]["nuclides"][number]["range"];
+    reasons?: string[];
+    inAwLib?: boolean;
+  }>
+): EditorMark[] {
+  const out: EditorMark[] = [];
+  for (const m of marks) {
+    const loc = rangeToEditorLocation(index, m.range);
+    if (!loc) continue;
+    out.push({
+      name: m.name,
+      uri: loc.uri,
+      reasons: m.reasons,
+      inAwLib: m.inAwLib,
+      range: {
+        start: { line: loc.range.start.line, character: loc.range.start.character },
+        end: { line: loc.range.end.line, character: loc.range.end.character },
+      },
+    });
+  }
+  return out;
+}
+
+export function collectEditorIsotopeMarks(
+  index: DocumentIndex,
+  visibleStart?: number,
+  visibleEnd?: number
+): { sumIsotopeMarks: EditorMark[]; stableIsotopeMarks: EditorMark[]; skipFullScan: boolean } {
+  const nucCount = index.summaries.materials.reduce((n, m) => n + (m.nuclideCount ?? 0), 0);
+  const hasViewport = visibleStart != null && visibleEnd != null && visibleEnd >= visibleStart;
+  const lineFrom = hasViewport ? Math.max(0, visibleStart - 20) : undefined;
+  const lineTo = hasViewport ? visibleEnd + 40 : undefined;
+  const skipFullScan = !hasViewport && nucCount > 100_000;
+  if (skipFullScan) {
+    return { sumIsotopeMarks: [], stableIsotopeMarks: [], skipFullScan: true };
+  }
+  const rawSum = collectSumIsotopeMarks(index.ast, {
+    maxMarks: INDEX_MARKS_HARD_LIMIT,
+    lineFrom,
+    lineTo,
+  });
+  const rawStable = collectStableIsotopeMarks(index, INDEX_MARKS_HARD_LIMIT, lineFrom, lineTo);
+  const sumIsotopeMarks = projectMarksToEditor(index, rawSum.slice(0, INDEX_MARKS_HARD_LIMIT));
+  const stableIsotopeMarks = projectMarksToEditor(index, rawStable.slice(0, INDEX_MARKS_HARD_LIMIT));
+  return {
+    sumIsotopeMarks,
+    stableIsotopeMarks,
+    skipFullScan: false,
+  };
+}
+
+/** Марки SI: на full-core не парсим 16MB — это очередь validate/линтера. */
+function resolveIndexForViewportMarks(
+  uri: string,
+  getDoc: (uri: string) => TextDocument | undefined
+): { index: DocumentIndex | undefined; usedStale: boolean; docVersion: number | null; cacheVersion: number | null; lineCount: number | null } {
+  const doc = getDoc(uri);
+  const cached = getDocumentIndex(uri);
+  if (!doc) {
+    return {
+      index: cached,
+      usedStale: false,
+      docVersion: null,
+      cacheVersion: cached?.version ?? null,
+      lineCount: null,
+    };
+  }
+  const current = getDocumentIndexForVersion(uri, doc.version);
+  if (current) {
+    return {
+      index: current,
+      usedStale: false,
+      docVersion: doc.version,
+      cacheVersion: current.version,
+      lineCount: doc.lineCount,
+    };
+  }
+  if (doc.lineCount > SOURCE_REPARSE_LINE_THRESHOLD && cached) {
+    return {
+      index: cached,
+      usedStale: true,
+      docVersion: doc.version,
+      cacheVersion: cached.version,
+      lineCount: doc.lineCount,
+    };
+  }
+  return {
+    index: ensureDocumentIndex(doc),
+    usedStale: false,
+    docVersion: doc.version,
+    cacheVersion: doc.version,
+    lineCount: doc.lineCount,
+  };
+}
+
+export function handleGetIsotopeMarks(
+  args: { uri: string; visibleStart?: number; visibleEnd?: number },
+  getDoc: (uri: string) => TextDocument | undefined
+): { sumIsotopeMarks: EditorMark[]; stableIsotopeMarks: EditorMark[] } | null {
+  const resolved = resolveIndexForViewportMarks(args.uri, getDoc);
+  if (!resolved.index) return null;
+  const marks = collectEditorIsotopeMarks(resolved.index, args.visibleStart, args.visibleEnd);
+  return { sumIsotopeMarks: marks.sumIsotopeMarks, stableIsotopeMarks: marks.stableIsotopeMarks };
+}
+
+const navStatementsByHash = new Map<string, NavStatementPayload[]>();
+
+function cachedProjectNavStatements(index: DocumentIndex): NavStatementPayload[] {
+  const hit = navStatementsByHash.get(index.hash);
+  if (hit) return hit;
+  const out = projectNavStatements(index);
+  navStatementsByHash.set(index.hash, out);
+  if (navStatementsByHash.size > 8) {
+    const oldest = navStatementsByHash.keys().next().value;
+    if (oldest != null) navStatementsByHash.delete(oldest);
+  }
+  return out;
+}
+
 export function handleGetIndex(
-  args: string | { uri: string; line?: number; character?: number },
+  args:
+    | string
+    | {
+        uri: string;
+        line?: number;
+        character?: number;
+        mode?: "full" | "constants";
+        visibleStart?: number;
+        visibleEnd?: number;
+      },
   getDoc: (uri: string) => TextDocument | undefined
 ) {
   const uri = typeof args === "string" ? args : args.uri;
   const line = typeof args === "object" ? args.line : undefined;
   const character = typeof args === "object" ? args.character : undefined;
+  const mode = typeof args === "object" ? args.mode ?? "full" : "full";
+  const visibleStart = typeof args === "object" ? args.visibleStart : undefined;
+  const visibleEnd = typeof args === "object" ? args.visibleEnd : undefined;
   const index = resolveDocumentIndex(uri, getDoc);
   if (!index) return null;
+  if (index.summariesSourceHash !== index.hash) {
+    index.summaries = buildSummaries(index.ast);
+    index.summariesSourceHash = index.hash;
+  }
 
   let summaries = { ...index.summaries };
   let editorContext: { line: number; character: number; scope: string } | undefined;
@@ -1136,26 +1384,41 @@ export function handleGetIndex(
     summaries.constants = listVisibleConstants(index.ast.constants, scope, expandedLine, char);
   }
   summaries.constants = projectNavConstants(index, summaries.constants);
-
-  /** Компактный список для decorations — не зависит от slim nuclides.
-   * При #include ranges в expanded-координатах → remap только на строки main, иначе decorations
-   * красят чужие строки и подсветка мерцает. */
-  const lineMap = index.ast.includeLineMap;
-  const sumIsotopeMarks = collectSumIsotopeMarks(index.ast).flatMap((m) => {
-    const range = remapRangeToMainDocument(m.range, lineMap);
-    if (!range) return [];
-    return [{ name: m.name, concentration: m.concentration, range, reasons: m.reasons }];
-  });
-  const stableIsotopeMarks = collectStableIsotopeMarks(index).flatMap((m) => {
-    const range = remapRangeToMainDocument(m.range, lineMap);
-    if (!range) return [];
-    return [{ name: m.name, concentration: m.concentration, range }];
-  });
-
+  if (mode === "constants") {
+    return {
+      summaries: {
+        ...summaries,
+        materials: [],
+        zones: [],
+        objects: [],
+        bodies: [],
+        nets: [],
+        lattices: [],
+      },
+      fragments: [],
+      statements: [],
+      includes: [],
+      includeGraph: [],
+      hash: index.hash,
+      editorContext,
+      sumIsotopeMarks: [],
+      stableIsotopeMarks: [],
+    };
+  }
+  /** Slim до projectNavMaterials: иначе full-core гоняет remap по всем нуклидам, потом выкидывает. */
   summaries = slimSummariesForIndex(summaries);
-  const statements = projectNavStatements(index);
+  summaries.materials = projectNavMaterials(index, summaries.materials);
+
+  const nucCount = summaries.materials.reduce((n, m) => n + (m.nuclideCount ?? 0), 0);
+  const viewportMarks = collectEditorIsotopeMarks(index, visibleStart, visibleEnd);
+  const sumIsotopeMarks = viewportMarks.sumIsotopeMarks;
+  const stableIsotopeMarks = viewportMarks.stableIsotopeMarks;
+  const skipMarksScan = viewportMarks.skipFullScan;
+  const statementsCached = navStatementsByHash.has(index.hash);
+  const statements = cachedProjectNavStatements(index);
   const includes = projectNavIncludes(index);
   const includeGraph = projectIncludeGraph(index);
+  const lineMap = index.ast.includeLineMap;
   const fragments = index.ast.fragments.map((f) => remapFragmentSpanForEditor(f, lineMap));
 
   return {

@@ -18,8 +18,13 @@ const NEGATIVE_CACHE_TTL_MS = 60 * 60 * 1000;
 /** Смена формата hover — инвалидирует старый markdown на диске. */
 const CACHE_FORMAT = "v4";
 const FETCH_TIMEOUT_MS = 8000;
-const CACHE_FILE = path.join(os.homedir(), ".mcuhelper", "iaea-nds-cache.json");
-const NATURAL_ABUNDANCE_FILE = path.join(os.homedir(), ".mcuhelper", "natural-abundance-index.json");
+const DEFAULT_CACHE_FILE = path.join(os.homedir(), ".mcuhelper", "iaea-nds-cache.json");
+const DEFAULT_ABUNDANCE_FILE = path.join(os.homedir(), ".mcuhelper", "natural-abundance-index.json");
+let cacheFilePath = DEFAULT_CACHE_FILE;
+let naturalAbundanceFilePath = DEFAULT_ABUNDANCE_FILE;
+let persistDelayMs = 2000;
+let abundancePersistDelayMs = 500;
+let fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis);
 const PREFERRED_LIBS = ["ENDF/B-VIII.1", "ENDF/B-VIII.0", "ENDF/B-VII.1", "JEFF-3.3"];
 const THERMAL_EV = 0.0253;
 const FAST_ENERGIES_EV = [1e6, 14e6] as const;
@@ -118,7 +123,7 @@ async function fetchJson<T>(url: string, timeoutMs = FETCH_TIMEOUT_MS): Promise<
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(url, {
+    const res = await fetchImpl(url, {
       headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
       signal: ctrl.signal,
     });
@@ -242,7 +247,7 @@ async function fetchThermalSigmaBarn(penSectId: number, energyEv = THERMAL_EV): 
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch(`${API_BASE}/e4sig?PenSectID=${penSectId}&json`, {
+    const res = await fetchImpl(`${API_BASE}/e4sig?PenSectID=${penSectId}&json`, {
       headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
       signal: ctrl.signal,
     });
@@ -479,13 +484,13 @@ function scheduleNaturalAbundancePersist(): void {
   naturalAbundancePersistTimer = setTimeout(() => {
     naturalAbundancePersistTimer = null;
     void persistNaturalAbundanceIndex();
-  }, 500);
+  }, abundancePersistDelayMs);
 }
 
 async function persistNaturalAbundanceIndex(): Promise<void> {
   if (!naturalAbundanceIndex) return;
   try {
-    await fs.mkdir(path.dirname(NATURAL_ABUNDANCE_FILE), { recursive: true });
+    await fs.mkdir(path.dirname(naturalAbundanceFilePath), { recursive: true });
     const elements: Record<string, IsotopeAbundance[]> = {};
     for (const [key, list] of naturalAbundanceIndex) {
       elements[key] = list;
@@ -494,7 +499,7 @@ async function persistNaturalAbundanceIndex(): Promise<void> {
       expires: naturalAbundanceExpiry,
       elements,
     };
-    await fs.writeFile(NATURAL_ABUNDANCE_FILE, JSON.stringify(payload), "utf8");
+    await fs.writeFile(naturalAbundanceFilePath, JSON.stringify(payload), "utf8");
   } catch {
     // ignore disk errors
   }
@@ -502,7 +507,7 @@ async function persistNaturalAbundanceIndex(): Promise<void> {
 
 async function loadNaturalAbundanceFromDisk(): Promise<{ map: Map<string, IsotopeAbundance[]>; expires: number } | null> {
   try {
-    const text = await fs.readFile(NATURAL_ABUNDANCE_FILE, "utf8");
+    const text = await fs.readFile(naturalAbundanceFilePath, "utf8");
     const data = JSON.parse(text) as NaturalAbundanceDiskFile;
     if (!data.elements || data.expires <= Date.now()) return null;
     const map = new Map<string, IsotopeAbundance[]>();
@@ -537,7 +542,7 @@ async function runNaturalAbundanceUpgrade(): Promise<void> {
   const timer = setTimeout(() => ctrl.abort(), 12_000);
   let csv: string | null = null;
   try {
-    const res = await fetch(`${LIVECHART_BASE}?fields=ground_states&nuclides=all`, {
+    const res = await fetchImpl(`${LIVECHART_BASE}?fields=ground_states&nuclides=all`, {
       headers: { "User-Agent": USER_AGENT, Accept: "text/csv" },
       signal: ctrl.signal,
     });
@@ -683,7 +688,7 @@ async function loadDiskCache(): Promise<void> {
   if (diskCacheLoaded) return;
   diskCacheLoaded = true;
   try {
-    const text = await fs.readFile(CACHE_FILE, "utf8");
+    const text = await fs.readFile(cacheFilePath, "utf8");
     const data = JSON.parse(text) as Record<string, CacheEntry>;
     const now = Date.now();
     for (const [key, entry] of Object.entries(data)) {
@@ -698,18 +703,18 @@ function schedulePersist(): void {
   if (persistTimer) clearTimeout(persistTimer);
   persistTimer = setTimeout(() => {
     void persistDiskCache();
-  }, 2000);
+  }, persistDelayMs);
 }
 
 async function persistDiskCache(): Promise<void> {
   try {
-    await fs.mkdir(path.dirname(CACHE_FILE), { recursive: true });
+    await fs.mkdir(path.dirname(cacheFilePath), { recursive: true });
     const now = Date.now();
     const snapshot: Record<string, CacheEntry> = {};
     for (const [key, entry] of cache) {
       if (entry.expires > now) snapshot[key] = entry;
     }
-    await fs.writeFile(CACHE_FILE, JSON.stringify(snapshot), "utf8");
+    await fs.writeFile(cacheFilePath, JSON.stringify(snapshot), "utf8");
   } catch {
     // запись кэша необязательна
   }
@@ -823,4 +828,33 @@ export async function enrichNuclideHoverWithIaea(nuclideName: string): Promise<s
   });
   inFlight.set(key, job);
   return job;
+}
+
+/** Сброс кэша/путей/fetch — только для тестов, чтобы не писать в ~/.mcuhelper и не трогать global fetch. */
+export function resetIaeaNdsStateForTest(options?: {
+  cacheFile?: string;
+  abundanceFile?: string;
+  fetchImpl?: typeof fetch;
+  persistDelayMs?: number;
+  abundancePersistDelayMs?: number;
+}): void {
+  cache.clear();
+  inFlight.clear();
+  naturalAbundanceIndex = null;
+  naturalAbundanceExpiry = 0;
+  naturalAbundanceUpgradePromise = null;
+  diskCacheLoaded = false;
+  if (naturalAbundancePersistTimer) {
+    clearTimeout(naturalAbundancePersistTimer);
+    naturalAbundancePersistTimer = null;
+  }
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
+  cacheFilePath = options?.cacheFile ?? DEFAULT_CACHE_FILE;
+  naturalAbundanceFilePath = options?.abundanceFile ?? DEFAULT_ABUNDANCE_FILE;
+  fetchImpl = options?.fetchImpl ?? globalThis.fetch.bind(globalThis);
+  persistDelayMs = options?.persistDelayMs ?? 2000;
+  abundancePersistDelayMs = options?.abundancePersistDelayMs ?? 500;
 }

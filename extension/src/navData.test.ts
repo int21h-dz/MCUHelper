@@ -45,6 +45,10 @@ function richPayload(): IndexPayload {
           group: "fuel",
           temperature: 300,
           nuclideCount: 2,
+          usedNuclideCount: 2,
+          sumIsotopeCount: 0,
+          sumIsotopeUsedCount: 0,
+          sumIsotopeMissingAwLibCount: 0,
           nuclidesPreview: "U235, H",
           massDensityGcm3: 10.5,
           volumeCm3: 100,
@@ -58,6 +62,10 @@ function richPayload(): IndexPayload {
         {
           number: 2,
           nuclideCount: 0,
+          usedNuclideCount: 0,
+          sumIsotopeCount: 0,
+          sumIsotopeUsedCount: 0,
+          sumIsotopeMissingAwLibCount: 0,
           nuclidesPreview: "",
           massDensityGcm3: 0.001,
           volumeCm3: 1e-5,
@@ -158,19 +166,67 @@ describe("navData", () => {
     assert.ok(tree[0]!.label.includes("fuel"));
     assert.ok(tree[0]!.badges?.length);
     assert.strictEqual(tree[0]!.children?.length, 2);
-    assert.ok(tree[1]!.description?.includes("нукл."));
+    assert.ok(tree[0]!.description?.includes("2 нукл."));
   });
 
   it("materials tree marks sum-isotope nuclides as muted", () => {
     const payload = richPayload();
     payload.summaries.materials[0]!.nuclides[0]!.sumIsotope = {
       reasons: ["входит в суммарный изотоп (указан в SI)"],
+      inAwLib: true,
     };
+    payload.summaries.materials[0]!.sumIsotopeCount = 1;
+    payload.summaries.materials[0]!.sumIsotopeUsedCount = 1;
     const tree = buildMaterialsTree(payload, "file:///t.mcu");
     const n0 = tree[0]!.children![0]!;
     assert.strictEqual(n0.muted, true);
+    assert.strictEqual(n0.label, "Σ U235");
     assert.ok(n0.tooltip?.includes("суммарный"));
     assert.strictEqual(tree[0]!.children![1]!.muted, false);
+  });
+
+  it("materials tree separates SI counted and missing AW groups", () => {
+    const payload = richPayload();
+    payload.summaries.materials[0]!.sumIsotopeCount = 3;
+    payload.summaries.materials[0]!.sumIsotopeUsedCount = 2;
+    payload.summaries.materials[0]!.sumIsotopeMissingAwLibCount = 1;
+    const tree = buildMaterialsTree(payload, "file:///t.mcu");
+    const desc = tree[0]!.description ?? "";
+    assert.ok(desc.includes("в SI: 3"), desc);
+    assert.ok(desc.includes("нет в AW: 1"), desc);
+    assert.ok(!desc.includes("ρ:"), desc);
+  });
+
+  it("materials tree highlights sum-isotope nuclides missing in AW.LIB", () => {
+    const payload = richPayload();
+    payload.summaries.materials[0]!.nuclides[0]!.sumIsotope = {
+      reasons: ["входит в суммарный изотоп (указан в SI)"],
+      inAwLib: false,
+    };
+    const tree = buildMaterialsTree(payload, "file:///t.mcu");
+    const n0 = tree[0]!.children![0]!;
+    assert.strictEqual(n0.warning, true);
+    assert.strictEqual(n0.muted, false);
+    assert.strictEqual(n0.label, "Σ! U235");
+    assert.ok(n0.description?.includes("нет в AW.LIB"), n0.description);
+  });
+
+  it("materials tree falls back to legacy summary when new counters are absent", () => {
+    const payload = richPayload();
+    const legacy = payload.summaries.materials[0] as typeof payload.summaries.materials[0] & {
+      usedNuclideCount?: number;
+      sumIsotopeUsedCount?: number;
+      sumIsotopeMissingAwLibCount?: number;
+    };
+    legacy.sumIsotopeCount = 2;
+    delete legacy.usedNuclideCount;
+    delete legacy.sumIsotopeUsedCount;
+    delete legacy.sumIsotopeMissingAwLibCount;
+    const tree = buildMaterialsTree(payload, "file:///t.mcu");
+    const desc = tree[0]!.description ?? "";
+    assert.ok(desc.includes("2 нукл."), desc);
+    assert.ok(desc.includes("в SI: 2"), desc);
+    assert.ok(!desc.includes("Исп. 0"), desc);
   });
 
   it("materials tree adds SI action for suggested nuclides", () => {

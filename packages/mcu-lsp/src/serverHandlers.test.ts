@@ -5,7 +5,7 @@ import * as os from "os";
 import * as path from "path";
 import { pathToFileURL } from "url";
 import { TextDocument } from "vscode-languageserver-textdocument";
-import { analyzeDocument, clearAwLibTable, clearParameteThrTable, parseAwLib, parseParameteThr, setAwLibTable, setParameteThrTable, sameIncludeFileUri } from "@mcuhelper/mcu-language";
+import { analyzeDocument, clearAwLibTable, clearParameteThrTable, parseAwLib, parseParameteThr, setAwLibTable, setParameteThrTable, sameIncludeFileUri, resetDocumentParseCount, getDocumentParseCount } from "@mcuhelper/mcu-language";
 import { setAwMassMismatchesForTest } from "./awLibVerify";
 import { setCachedSolverResult } from "./solver";
 import {
@@ -17,6 +17,7 @@ import {
   collectDiagnosticsBundle,
   handleGetDiagnostics,
   handleGetIndex,
+  handleGetIsotopeMarks,
   handleGetIncludeGraph,
   handleGetSlice,
   handleValidateInput,
@@ -24,11 +25,14 @@ import {
   resolveDocumentIndex,
   resolveHoverDocumentIndex,
   ensureSourceDocumentIndex,
+  ensureDocumentIndex,
   resolveContinueFinalSession,
   hasVariantRunArtifacts,
   uriToBaseDir,
   toLspDiagnostic,
   slimSummariesForIndex,
+  capIndexMarksForPayload,
+  INDEX_MARKS_HARD_LIMIT,
 } from "./serverHandlers";
 
 const fixtures = path.join(__dirname, "../../../test/fixtures");
@@ -175,6 +179,18 @@ describe("serverHandlers extended", () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("ensureDocumentIndex reuses source cache on no-include file without second parse", () => {
+    resetDocumentParseCount();
+    const text = ["PIN", "MATR 1", "U235 1e-2", "FINISH"].join("\n");
+    const uri = "file:///no-include-cache.mcu";
+    const doc = TextDocument.create(uri, "mcunr", 1, text);
+    ensureDocumentIndex(doc);
+    const n = getDocumentParseCount();
+    assert.ok(n >= 1);
+    ensureDocumentIndex(doc);
+    assert.strictEqual(getDocumentParseCount(), n);
   });
 
   it("ensureDocumentIndex uses expanded AST after source-only cache (no false matr-gap)", () => {
@@ -494,6 +510,28 @@ FINISH ALL`;
     assert.ok(result!.summaries.materials.some((m) => m.nuclides.some((n) => n.name === "U235")));
   });
 
+  it("handleGetIndex constants mode omits zones/bodies/statements", () => {
+    const text = `PIN 0 0
+EQU A = 1
+MATR 1
+U235 1.0E-3
+END
+FINISH ALL`;
+    const uri = "file:///const-mode-index.mcu";
+    const doc = TextDocument.create(uri, "mcunr", 1, text);
+    const getDoc = (u: string) => (u === uri ? doc : undefined);
+    const full = handleGetIndex(uri, getDoc);
+    const slim = handleGetIndex({ uri, line: 2, character: 0, mode: "constants" }, getDoc);
+    assert.ok(full);
+    assert.ok(slim);
+    assert.ok((full!.statements?.length ?? 0) > 0);
+    assert.strictEqual(slim!.statements?.length ?? 0, 0);
+    assert.strictEqual(slim!.summaries.zones.length, 0);
+    assert.strictEqual(slim!.summaries.bodies.length, 0);
+    assert.strictEqual(slim!.summaries.materials.length, 0);
+    assert.ok(slim!.summaries.constants.some((c) => c.name === "A"));
+  });
+
   it("handleGetIndex projects #include into navigation payload", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-nav-inc-"));
     try {
@@ -532,6 +570,10 @@ FINISH ALL`;
       const matr = result!.statements?.find((s) => s.label.toUpperCase() === "MATR");
       assert.ok(matr);
       assert.strictEqual(matr!.range.start.line, 2, "MATR stays on main line");
+      const matSum = result!.summaries.materials.find((m) => m.number === 1);
+      assert.ok(matSum);
+      assert.strictEqual(matSum!.range.start.line, 2, "MATR summary range is editor line, not expanded");
+      assert.ok(matSum!.uri === uri || matSum!.uri?.includes("main.mcu"));
 
       const pinFrag = result!.fragments?.find((f) => f.id === "physical");
       assert.ok(pinFrag);
@@ -650,11 +692,14 @@ FINISH ALL`;
     }
   });
 
-  it("slimSummariesForIndex drops ordinary nuclides above soft limit but keeps sum-isotope", () => {
+  it("slimSummariesForIndex drops all nuclide children above soft limit (including SI)", () => {
     const materials = Array.from({ length: 100 }, (_, i) => ({
       number: i + 1,
       nuclideCount: 300,
-      sumIsotopeCount: 1,
+      usedNuclideCount: 300,
+      sumIsotopeCount: 300,
+      sumIsotopeUsedCount: 300,
+      sumIsotopeMissingAwLibCount: 0,
       nuclidesPreview: "U235",
       massDensityGcm3: null as number | null,
       volumeCm3: null as number | null,
@@ -664,7 +709,7 @@ FINISH ALL`;
         name: `N${j}`,
         concentration: "1",
         range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 }, offset: 0, endOffset: 1 },
-        ...(j === 0 ? { sumIsotope: { reasons: ["входит в суммарный изотоп (указан в SI)"] } } : {}),
+        sumIsotope: { reasons: ["входит в суммарный изотоп (указан в SI)"] },
       })),
       range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 }, offset: 0, endOffset: 1 },
     }));
@@ -677,9 +722,16 @@ FINISH ALL`;
       nets: [],
       lattices: [],
     });
-    assert.strictEqual(slim.materials[0]!.nuclides.length, 1);
-    assert.ok(slim.materials[0]!.nuclides[0]!.sumIsotope);
+    assert.strictEqual(slim.materials[0]!.nuclides.length, 0);
     assert.strictEqual(slim.materials[0]!.nuclideCount, 300);
+    assert.strictEqual(slim.materials[0]!.sumIsotopeCount, 300);
+  });
+
+  it("capIndexMarksForPayload empties when over hard limit", () => {
+    const under = Array.from({ length: INDEX_MARKS_HARD_LIMIT }, (_, i) => ({ i }));
+    const over = Array.from({ length: INDEX_MARKS_HARD_LIMIT + 1 }, (_, i) => ({ i }));
+    assert.strictEqual(capIndexMarksForPayload(under).length, INDEX_MARKS_HARD_LIMIT);
+    assert.strictEqual(capIndexMarksForPayload(over).length, 0);
   });
 
   it("handleGetIndex always returns sumIsotopeMarks", () => {
@@ -691,6 +743,76 @@ FINISH ALL`;
     assert.ok(result);
     assert.ok(Array.isArray(result!.sumIsotopeMarks));
     assert.ok(result!.sumIsotopeMarks!.some((m) => m.name.toUpperCase() === "FP1"));
+    const fp = result!.sumIsotopeMarks!.find((m) => m.name.toUpperCase() === "FP1")!;
+    assert.ok(!("concentration" in fp && fp.concentration), "marks payload stays slim");
+    assert.ok(fp.reasons && fp.reasons.length > 0, "reasons needed for decoration hover");
+  });
+
+  it("handleGetIndex with visible range still returns SI marks", () => {
+    const text = ["PIN", "SI FP1", "SIDEN 1e-5", "MATR 1", "U235 1e-2", "FP1 1e-8", "FINISH"].join("\n");
+    const uri = "file:///sum-marks-viewport.mcu";
+    const doc = TextDocument.create(uri, "mcunr", 1, text);
+    const getDoc = (u: string) => (u === uri ? doc : undefined);
+    const result = handleGetIndex({ uri, line: 4, character: 0, visibleStart: 3, visibleEnd: 5 }, getDoc);
+    assert.ok(result);
+    assert.ok(result!.sumIsotopeMarks!.some((m) => m.name.toUpperCase() === "FP1"));
+    const marks = handleGetIsotopeMarks({ uri, visibleStart: 3, visibleEnd: 5 }, getDoc);
+    assert.ok(marks);
+    assert.ok(marks!.sumIsotopeMarks.some((m) => m.name.toUpperCase() === "FP1"));
+  });
+
+  it("handleGetIndex remaps sumIsotopeMarks past #include onto visible MATR lines", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-si-inc-"));
+    try {
+      fs.writeFileSync(path.join(dir, "si.inc"), "SI FP1\nSIDEN 1e-6\n", "utf8");
+      const mainPath = path.join(dir, "main.mcu");
+      const text = ["PIN", "#include si.inc", "MATR 1", "U235 1e-2", "FP1 1e-8", "FINISH"].join("\n");
+      fs.writeFileSync(mainPath, text, "utf8");
+      const uri = pathToFileURL(mainPath).href;
+      const doc = TextDocument.create(uri, "mcunr", 1, text);
+      const getDoc = (u: string) => (u === uri ? doc : undefined);
+      const result = handleGetIndex(uri, getDoc);
+      assert.ok(result);
+      const fp = result!.sumIsotopeMarks!.find((m) => m.name.toUpperCase() === "FP1");
+      assert.ok(fp, "FP1 from main MATR stays in marks after include remap");
+      assert.strictEqual(fp!.range.start.line, 4);
+      assert.ok(!fp!.uri || fp!.uri === uri || fp!.uri.includes("main.mcu"));
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("handleGetIndex keeps sumIsotopeMarks on indented MATR nuclides", () => {
+    const text = ["PIN", "SI FP1", "MATR 1 T=300", " FP1 1e-8", " U235 1e-2", "FINISH"].join("\n");
+    const uri = "file:///si-indent.mcu";
+    const doc = TextDocument.create(uri, "mcunr", 1, text);
+    const getDoc = (u: string) => (u === uri ? doc : undefined);
+    const result = handleGetIndex(uri, getDoc);
+    assert.ok(result);
+    const fp = result!.sumIsotopeMarks!.find((m) => m.name.toUpperCase() === "FP1");
+    assert.ok(fp);
+    assert.strictEqual(fp!.range.start.line, 3, "gray SI must sit on FP1, not MATR header");
+  });
+
+  it("handleGetIndex keeps include-body SI marks with include uri", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-si-matinc-"));
+    try {
+      fs.writeFileSync(path.join(dir, "mats.inc"), "FP1 1e-8\nU235 1e-2\n", "utf8");
+      const mainPath = path.join(dir, "main.mcu");
+      const text = ["PIN", "SI FP1", "MATR 1 T=300", "#include mats.inc", "FINISH"].join("\n");
+      fs.writeFileSync(mainPath, text, "utf8");
+      const uri = pathToFileURL(mainPath).href;
+      const doc = TextDocument.create(uri, "mcunr", 1, text);
+      const getDoc = (u: string) => (u === uri ? doc : undefined);
+      const result = handleGetIndex(uri, getDoc);
+      assert.ok(result);
+      const fp = result!.sumIsotopeMarks!.find((m) => m.name.toUpperCase() === "FP1");
+      assert.ok(fp, "nuclide from include body must not be dropped from marks");
+      assert.ok(fp!.uri && /mats\.inc/i.test(fp!.uri), fp!.uri);
+      assert.strictEqual(fp!.range.start.line, 0);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("handleGetIndex returns stableIsotopeMarks without overriding sum-isotope priority", () => {

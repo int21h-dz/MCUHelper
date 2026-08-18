@@ -1,12 +1,13 @@
 import { awLibNameFromIaeaLabel } from "./awLib";
+import { formatMcuIsotopeName } from "./nuclideIaea";
 
-/** IAEA LiveChart label (U-235 / Cs-133) → имя MCU-NR (U235 / CS33 при AW.LIB). */
+/** IAEA LiveChart label (U-235 / Cs-133) → имя MCU-NR (U235 / CS33, SN112→SN12). */
 export function iaeaLabelToMcuNuclide(label: string): string {
   const fromLib = awLibNameFromIaeaLabel(label);
   if (fromLib) return fromLib;
   const m = label.trim().match(/^([A-Za-z]{1,2})-(\d+)$/);
   if (!m) return label.replace(/-/g, "").toUpperCase();
-  return m[1].toUpperCase() + m[2];
+  return formatMcuIsotopeName(m[1]!, parseInt(m[2]!, 10));
 }
 
 export interface NaturalIsotopeFraction {

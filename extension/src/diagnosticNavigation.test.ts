@@ -9,6 +9,8 @@ import {
   findDiagnosticIndex,
   includeReferencesPath,
   LEXER_DIAGNOSTIC_CODES,
+  MCUHELPER_DIAG_SOURCE,
+  belongsToMcuhelperSidebar,
   mapLspSeverityToVsCode,
   positionScore,
 } from "./diagnosticNavigation";
@@ -34,6 +36,13 @@ describe("diagnosticNavigation", () => {
   it("lexer codes include no-tabs and line-length", () => {
     assert.ok(LEXER_DIAGNOSTIC_CODES.has("no-tabs"));
     assert.ok(LEXER_DIAGNOSTIC_CODES.has("line-length"));
+  });
+
+  it("sidebar keeps overlay MATR conc (mcuhelper) and does not drop MCU-NR source", () => {
+    assert.equal(belongsToMcuhelperSidebar(MCUHELPER_DIAG_SOURCE), true);
+    assert.equal(belongsToMcuhelperSidebar(undefined), true);
+    assert.equal(belongsToMcuhelperSidebar("MCU-NR"), true);
+    assert.equal(belongsToMcuhelperSidebar("eslint"), false);
   });
 
   it("includeReferencesPath matches bare name and relative path", () => {

@@ -305,7 +305,7 @@ describe("getHoverContent", () => {
     assert.ok(!hover?.includes("<details>"), hover ?? "(null)");
   });
 
-  it("shows sum-isotope reason on SI-listed nuclide", () => {
+  it("does not duplicate SI reasons in LSP hover (decoration hover owns them)", () => {
     const text = ["PIN", "SI FP1", "MATR 1", "U235 1e-2", "FP1 1e-8", "FINISH"].join("\n");
     const { doc, index } = openText(text);
     const fp = index.ast.materials[0]!.nuclides.find((n) => n.name.toUpperCase() === "FP1")!;
@@ -315,27 +315,9 @@ describe("getHoverContent", () => {
       index,
       { enableIaeaNuclide: false }
     );
-    assert.ok(hover?.includes("суммарный изотоп"), hover ?? "(null)");
-    assert.ok(hover?.includes("SI"), hover ?? "(null)");
-    const sumIdx = hover!.indexOf("суммарный изотоп");
-    const rhoIdx = hover!.indexOf("Плотность материала");
-    if (rhoIdx >= 0) assert.ok(sumIdx > rhoIdx, "причина серости — после плотности");
-  });
-
-  it("keeps blank line between sum-isotope reason and following IAEA-like block", () => {
-    const text = ["PIN", "SI FP1", "MATR 1", "FP1 1e-8", "FINISH"].join("\n");
-    const { doc, index } = openText(text);
-    const fp = index.ast.materials[0]!.nuclides[0]!;
-    const local = getHoverContent(
-      doc,
-      { line: fp.range.start.line, character: 1 },
-      index,
-      { enableIaeaNuclide: false }
-    );
-    assert.ok(local);
-    // Имитация склейки как в getHoverContent при наличии IAEA
-    const joined = `${local}\n\n**[IAEA NDS - X]**\n`;
-    assert.ok(joined.includes("_\n\n**[IAEA"), joined);
+    assert.ok(hover);
+    assert.ok(!hover!.includes("входит в суммарный изотоп"), hover);
+    assert.ok(!hover!.includes("указан в SI"), hover);
   });
 
   it("returns nuclide local data", () => {

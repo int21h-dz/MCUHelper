@@ -366,6 +366,18 @@ describe("matr nuclide ranges", () => {
     assert.ok(hf5!.range.start.line > hf2!.range.start.line);
   });
 
+  it("assigns per-line ranges to indented MATR continuation nuclides", () => {
+    const text = ["PIN", "SI FP1", "MATR 1 T=300", " FP1 1e-8", " U235 1e-2", "FINISH"].join("\n");
+    const ast = parseDocument(text, { uri: "matr_indent.mcu" });
+    const mat = ast.materials[0]!;
+    const fp = mat.nuclides.find((n) => n.name.toUpperCase() === "FP1");
+    const u = mat.nuclides.find((n) => n.name.toUpperCase() === "U235");
+    assert.ok(fp && u, "indented nuclides parsed");
+    assert.strictEqual(fp!.range.start.line, 3);
+    assert.strictEqual(u!.range.start.line, 4);
+    assert.notStrictEqual(fp!.range.start.line, mat.range.start.line);
+  });
+
   it("reports invalid nuclide concentration typo", () => {
     const text = [
       "PIN 1",
@@ -545,7 +557,8 @@ describe("calculationControl", () => {
 describe("naturalIsotopes", () => {
   it("converts IAEA labels to MCU names", () => {
     assert.strictEqual(iaeaLabelToMcuNuclide("U-235"), "U235");
-    assert.strictEqual(iaeaLabelToMcuNuclide("Pu-239"), "PU239");
+    assert.strictEqual(iaeaLabelToMcuNuclide("Pu-239"), "PU39");
+    assert.strictEqual(iaeaLabelToMcuNuclide("Sn-112"), "SN12");
   });
 
   it("splits concentration by molar abundance", () => {

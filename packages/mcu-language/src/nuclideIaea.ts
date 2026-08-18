@@ -10,6 +10,23 @@ function formatElement(sym: string): string {
 }
 
 /**
+ * Символ + A → имя нуклида MCU.
+ * Склейка ровно из 5 знаков (2 буквы + 3 цифры массы) — сотни отбрасываются:
+ * SN112→SN12, CS133→CS33, PU239→PU39. U235 / H1 / O16 не трогаем.
+ */
+export function formatMcuIsotopeName(symbol: string, massNumber: number): string {
+  const sym = symbol.trim().toUpperCase();
+  if (!sym || !Number.isFinite(massNumber) || massNumber <= 0) return sym;
+  const a = Math.floor(massNumber);
+  const full = `${sym}${a}`;
+  if (full.length === 5) {
+    const digits = String(a);
+    return digits.length >= 3 ? `${sym}${digits.slice(1)}` : `${sym}${a % 100}`;
+  }
+  return full;
+}
+
+/**
  * MCU-NR (4-символьное имя) → IAEA Target (U-235, Th-230, He-3, Cs-133).
  * При загруженном AW.LIB — A из ZAID (CS33→Cs-133); иначе эвристика имени.
  * Без массового числа возвращает null.

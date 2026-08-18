@@ -64,6 +64,12 @@ copy /Y "packages\mcu-language\dist\bodyGenerator.js" "extension\vendor\mcu-lang
 copy /Y "packages\mcu-language\dist\expression.js" "extension\vendor\mcu-language\expression.js" >nul
 copy /Y "packages\mcu-language\dist\constants.js" "extension\vendor\mcu-language\constants.js" >nul
 copy /Y "packages\mcu-language\dist\resultSummary.js" "extension\vendor\mcu-language\resultSummary.js" >nul
+copy /Y "packages\mcu-language\dist\waterSteam.js" "extension\vendor\mcu-language\waterSteam.js" >nul
+copy /Y "packages\mcu-language\dist\materialsCompendium.js" "extension\vendor\mcu-language\materialsCompendium.js" >nul
+copy /Y "packages\mcu-language\dist\awLib.js" "extension\vendor\mcu-language\awLib.js" >nul
+copy /Y "packages\mcu-language\dist\naturalIsotopes.js" "extension\vendor\mcu-language\naturalIsotopes.js" >nul
+copy /Y "packages\mcu-language\dist\materialDensity.js" "extension\vendor\mcu-language\materialDensity.js" >nul
+copy /Y "packages\mcu-language\dist\nuclideIaea.js" "extension\vendor\mcu-language\nuclideIaea.js" >nul
 if errorlevel 1 goto :fail
 if not exist "extension\vendor\mcu-geometry" mkdir "extension\vendor\mcu-geometry"
 copy /Y "packages\mcu-geometry\dist\meshPreview.js" "extension\vendor\mcu-geometry\meshPreview.js" >nul

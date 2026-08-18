@@ -124,6 +124,7 @@ body {
 /* ── Toolbar внутри панели (Материалы → Вода/пар, Тела → Генератор) ── */
 .mcu-panel-toolbar {
   display: flex;
+  flex-direction: column;
   gap: 6px;
   padding: 8px 10px 0;
   flex: 0 0 auto;
@@ -654,4 +655,18 @@ body {
 .mcu-nav-card.mcu-muted .mcu-card-title {
   color: var(--vscode-descriptionForeground, #888);
   font-style: italic;
+}
+
+/* Нуклиды в суммарном изотопе, но без записи в AW.LIB */
+.mcu-nav-card.mcu-warning {
+  border-color: color-mix(in srgb, var(--vscode-editorWarning-foreground, #cca700) 45%, transparent);
+  background: color-mix(in srgb, var(--vscode-editorWarning-foreground, #cca700) 10%, var(--mcu-surface));
+}
+.mcu-nav-card.mcu-warning .mcu-card-label {
+  color: #1b1b1b;
+  background: color-mix(in srgb, var(--vscode-editorWarning-foreground, #cca700) 88%, #fff);
+}
+.mcu-nav-card.mcu-warning .mcu-card-title {
+  color: var(--vscode-editorWarning-foreground, #cca700);
+  font-style: normal;
 }

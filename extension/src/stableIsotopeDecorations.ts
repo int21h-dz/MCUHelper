@@ -19,7 +19,13 @@ export function createStableIsotopeDecorationType(): vscode.TextEditorDecoration
   return vscode.window.createTextEditorDecorationType(stableIsotopeDecorationOptions());
 }
 
-const lastStableDecorationSignatures = new Map<string, string>();
+function markRangeFallback(n: StableIsotopeDecoration, lineCount: number): vscode.Range | null {
+  const startLine = n.range.start.line;
+  if (startLine < 0 || startLine >= lineCount) return null;
+  const endLine = n.range.end.line >= startLine ? Math.min(n.range.end.line, lineCount - 1) : startLine;
+  const endChar = Math.max(n.range.end.character, n.range.start.character + 1);
+  return new vscode.Range(startLine, Math.max(0, n.range.start.character), endLine, endChar);
+}
 
 export function applyStableIsotopeDecorations(
   editor: vscode.TextEditor,
@@ -30,19 +36,14 @@ export function applyStableIsotopeDecorations(
   const lineCount = editor.document.lineCount;
   for (const n of nuclides) {
     if (n.range.start.line < 0 || n.range.start.line >= lineCount) continue;
-    const r = nuclideConcentrationEditorRange(editor.document, n.name, n.range);
+    const r =
+      nuclideConcentrationEditorRange(editor.document, n.name, n.range) ?? markRangeFallback(n, lineCount);
     if (!r) continue;
     opts.push({
       range: r,
       hoverMessage: new vscode.MarkdownString("Стабильный изотоп (`T1/2` не задан)."),
     });
   }
-  const signature = opts
-    .map((o) => `${o.range.start.line}:${o.range.start.character}-${o.range.end.line}:${o.range.end.character}`)
-    .join("|");
-  const key = editor.document.uri.toString();
-  if (lastStableDecorationSignatures.get(key) === signature) return;
-  lastStableDecorationSignatures.set(key, signature);
   editor.setDecorations(decorationType, opts);
 }
 
@@ -50,6 +51,5 @@ export function clearStableIsotopeDecorations(
   editor: vscode.TextEditor,
   decorationType: vscode.TextEditorDecorationType
 ): void {
-  lastStableDecorationSignatures.delete(editor.document.uri.toString());
   editor.setDecorations(decorationType, []);
 }

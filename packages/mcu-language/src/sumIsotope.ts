@@ -2,6 +2,7 @@ import type { ConstantNode, DocumentAst, MaterialNode, NuclideEntry, SourceRange
 import { buildScopedVars } from "./constantScope";
 import { resolveNuclideConcentration } from "./materialDensity";
 import { isSiSumIsotopeCardLine } from "./siCardVsNuclide";
+import { getAwLibEntry, getAwLibTable } from "./awLib";
 
 /** Режим списка суммарного изотопа (UserGuide §8.5). */
 export type SumIsotopeListMode = "si" | "sinot" | "none";
@@ -179,6 +180,20 @@ export function evaluateSumIsotopeMembership(
   return { inSum: reasons.length > 0, reasons, kinds };
 }
 
+/** Только факт membership — без строк причин. Нужен для счётчиков CodeLens на full-core. */
+export function isSumIsotopeMember(
+  nuclide: Pick<NuclideEntry, "name" | "density">,
+  state: SumIsotopeState,
+  vars: Map<string, number> = new Map()
+): boolean {
+  const nameU = nuclide.name.toUpperCase();
+  const blockedBySinot = state.listMode === "sinot" && listHit(nameU, state.list);
+  if (state.listMode === "si" && listHit(nameU, state.list)) return true;
+  if (blockedBySinot || state.siden == null) return false;
+  const dens = resolveNuclideConcentration(nuclide.density, vars);
+  return dens != null && dens < state.siden;
+}
+
 export interface SumIsotopeNuclideMark {
   materialNumber: number;
   name: string;
@@ -186,17 +201,32 @@ export interface SumIsotopeNuclideMark {
   range: SourceRange;
   reasons: string[];
   kinds: SumIsotopeReasonKind[];
+  inAwLib?: boolean;
 }
 
-/** Все нуклиды материалов, входящие в суммарный изотоп, с причинами. */
-export function collectSumIsotopeMarks(ast: DocumentAst): SumIsotopeNuclideMark[] {
+/** Все нуклиды материалов, входящие в суммарный изотоп, с причинами.
+ * `maxMarks`: остановиться после max+1 (caller может отбросить oversized payload). */
+export function collectSumIsotopeMarks(
+  ast: DocumentAst,
+  options?: { maxMarks?: number; lineFrom?: number; lineTo?: number }
+): SumIsotopeNuclideMark[] {
+  const hasAwLib = Boolean(getAwLibTable()?.entryCount);
+  const max = options?.maxMarks;
+  const lineFrom = options?.lineFrom;
+  const lineTo = options?.lineTo;
+  const mats =
+    lineFrom != null && lineTo != null
+      ? ast.materials.filter((m) =>
+          m.nuclides.some((n) => n.range.start.line >= lineFrom! && n.range.start.line <= lineTo!)
+        )
+      : ast.materials;
   const states = buildSumIsotopeStatesByOffset(
     ast.statements,
-    ast.materials.map((m) => m.range.offset),
+    mats.map((m) => m.range.offset),
     ast.constants
   );
   const marks: SumIsotopeNuclideMark[] = [];
-  for (const mat of ast.materials) {
+  for (const mat of mats) {
     const state = states.get(mat.range.offset) ?? {
       listMode: "none" as const,
       list: new Set<string>(),
@@ -204,6 +234,8 @@ export function collectSumIsotopeMarks(ast: DocumentAst): SumIsotopeNuclideMark[
     };
     const vars = buildScopedVars(ast.constants, mat.range.offset, "global");
     for (const n of mat.nuclides) {
+      if (lineFrom != null && n.range.start.line < lineFrom) continue;
+      if (lineTo != null && n.range.start.line > lineTo) continue;
       const m = evaluateSumIsotopeMembership(n, state, vars);
       if (!m.inSum) continue;
       marks.push({
@@ -213,7 +245,9 @@ export function collectSumIsotopeMarks(ast: DocumentAst): SumIsotopeNuclideMark[
         range: n.range,
         reasons: m.reasons,
         kinds: m.kinds,
+        ...(hasAwLib ? { inAwLib: Boolean(getAwLibEntry(n.name)) } : {}),
       });
+      if (max != null && marks.length > max) return marks;
     }
   }
   return marks;

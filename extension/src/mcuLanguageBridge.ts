@@ -179,3 +179,122 @@ export function loadWaterSteamApi(): {
 } {
   return requireLanguage("waterSteam");
 }
+
+export type DensMode = "denswa" | "isotope";
+
+export type SlimIsotope = {
+  isotope: string;
+  zaid: string;
+  weightFraction: number;
+  atomFraction: number;
+  isotopicAtomDensity: number;
+};
+
+export type SlimElement = {
+  element: string;
+  zaid: string;
+  weightFraction: number;
+  atomFraction: number;
+  isotopes: SlimIsotope[];
+};
+
+export type SlimMaterial = {
+  name: string;
+  formula: string | null;
+  acronym: string | null;
+  density: number;
+  materialAtomDensity: number;
+  comment: string[];
+  source: string;
+  references: string[];
+  elements: SlimElement[];
+};
+
+export type SlimCatalog = {
+  siteVersion: string;
+  sourceSha?: string;
+  generatedAt?: string;
+  materialCount: number;
+  materials: SlimMaterial[];
+};
+
+export type DraftNuclide = {
+  name: string;
+  value: number;
+  impurity?: boolean;
+  inAwLib?: boolean;
+};
+
+export type MaterialDraft = {
+  sourceName?: string;
+  number: number;
+  temperature?: number | null;
+  densityGcm3: number;
+  mode: DensMode;
+  comment?: string;
+  nuclides: DraftNuclide[];
+  warnings: string[];
+};
+
+export type UserMaterialRecord = {
+  name: string;
+  density: number;
+  mode: DensMode;
+  temperature?: number | null;
+  comment?: string[];
+  formula?: string | null;
+  nuclides: Array<{ name: string; value: number; impurity?: boolean }>;
+  savedAt?: string;
+};
+
+export type UserCatalogFile = {
+  version: number;
+  materials: UserMaterialRecord[];
+};
+
+export function loadMaterialsCompendiumApi(): {
+  slimMaterialsCompendium: (
+    raw: unknown,
+    meta?: { sourceSha?: string; generatedAt?: string }
+  ) => SlimCatalog;
+  loadCatalogJson: (raw: unknown, meta?: { sourceSha?: string; generatedAt?: string }) => SlimCatalog;
+  loadNameTranslations: (map: Record<string, string>) => void;
+  displayName: (originalName: string) => string;
+  searchCatalog: (catalog: SlimCatalog, query: string) => SlimMaterial[];
+  draftFromCatalog: (mat: SlimMaterial, mode: DensMode, number?: number) => MaterialDraft;
+  emptyDraft: (number?: number) => MaterialDraft;
+  addImpurity: (draft: MaterialDraft, nuclideName: string, weightPercent: number) => MaterialDraft;
+  buildMatrCard: (draft: MaterialDraft) => { text: string; warnings: string[] };
+  findMatrInsert: (text: string) => { line: number; nextNumber: number };
+  findMatrBlockEndLine: (text: string, headerLine: number) => number;
+  pnnlNuclideToMcu: (raw: string) => { mcuName: string; inAwLib?: boolean };
+  formatMatrValue: (n: number) => string;
+  parseUserCatalog: (raw: unknown) => UserCatalogFile;
+  draftToUserMaterial: (draft: MaterialDraft, name: string) => UserMaterialRecord;
+  draftFromUserMaterial: (mat: UserMaterialRecord, number?: number) => MaterialDraft;
+  upsertUserMaterial: (file: UserCatalogFile, mat: UserMaterialRecord) => UserCatalogFile;
+  findUserMaterial: (file: UserCatalogFile, name: string) => UserMaterialRecord | undefined;
+  formatUserCatalogJson: (file: UserCatalogFile) => string;
+  draftFromVisibleMatr: (text: string, line: number) => MaterialDraft | null;
+  syncDraftMassDensity: (draft: MaterialDraft) => MaterialDraft;
+  setAwLibTableFromCatalog: (
+    items: Array<{ name: string; zaid: number; atomicWeight: number; isNatural: boolean }>
+  ) => void;
+} {
+  return requireLanguage("materialsCompendium");
+}
+
+export function loadCatalogJson(raw: unknown): SlimCatalog {
+  return loadMaterialsCompendiumApi().loadCatalogJson(raw);
+}
+
+export function loadNameTranslations(map: Record<string, string>): void {
+  loadMaterialsCompendiumApi().loadNameTranslations(map);
+}
+
+export function slimMaterialsCompendium(
+  raw: unknown,
+  meta?: { sourceSha?: string; generatedAt?: string }
+): SlimCatalog {
+  return loadMaterialsCompendiumApi().slimMaterialsCompendium(raw, meta);
+}

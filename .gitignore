@@ -15,12 +15,17 @@ coverage/
 
 # Debug sessions
 .cursor/debug-*.log
+debug-*.log
+**/debug-*.log
 
 # Proprietary / large reference docs (local only)
 docs/MCU-NR_Reference.md
 docs/MCU-NR_UserGuide_220519.txt
 MCU-NR_UserGuide_220519.pdf
 structure.md
+
+# User materials bank (lives in globalStorage; never ship)
+extension/media/materialsCompendium/userCatalog.json
 
 # Local solver regression / MCU binaries (not in repo)
 RUNTEST/

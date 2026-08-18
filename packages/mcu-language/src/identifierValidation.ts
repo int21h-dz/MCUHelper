@@ -41,20 +41,21 @@ function pushInvalidName(
 /** Длина/формат имён тел, зон, EQU/SET. */
 export function analyzeIdentifierNames(ast: DocumentAst): DiagnosticMessage[] {
   const diags: DiagnosticMessage[] = [];
+  const textByOffset = new Map<number, string>();
+  for (const s of ast.statements) {
+    textByOffset.set(s.range.offset, s.text);
+  }
 
   for (const b of ast.bodies) {
-    const stmt = ast.statements.find((s) => s.range.offset === b.range.offset)?.text;
-    pushInvalidName(diags, b.name, b.range, `Тело ${b.bodyType}`, stmt);
+    pushInvalidName(diags, b.name, b.range, `Тело ${b.bodyType}`, textByOffset.get(b.range.offset));
   }
 
   for (const z of ast.zones) {
-    const stmt = ast.statements.find((s) => s.range.offset === z.range.offset)?.text;
-    pushInvalidName(diags, z.name, z.range, "Зона", stmt);
+    pushInvalidName(diags, z.name, z.range, "Зона", textByOffset.get(z.range.offset));
   }
 
   for (const c of ast.constants) {
-    const stmt = ast.statements.find((s) => s.range.offset === c.range.offset)?.text;
-    pushInvalidName(diags, c.name, c.range, c.mutable ? "SET" : "EQU", stmt);
+    pushInvalidName(diags, c.name, c.range, c.mutable ? "SET" : "EQU", textByOffset.get(c.range.offset));
   }
 
   return diags;

@@ -11,6 +11,7 @@ import {
   awLibToIaeaTarget,
   awLibNameFromIaeaLabel,
   formatAtomicWeightAmu,
+  listAwLibCatalog,
 } from "./awLib";
 import { mcuNuclideAtomicWeight } from "./materialDensity";
 import { mcuNuclideToIaeaTarget } from "./nuclideIaea";
@@ -81,6 +82,17 @@ describe("formatAtomicWeightAmu", () => {
   it("formats integers and decimals", () => {
     assert.strictEqual(formatAtomicWeightAmu(235), "235");
     assert.ok(formatAtomicWeightAmu(132.905451).startsWith("132.905451"));
+  });
+});
+
+describe("listAwLibCatalog", () => {
+  it("returns sorted names from the current table", () => {
+    setAwLibTable(parseAwLib("U235  92235  235.0\nH  1000  1.008\n"));
+    const list = listAwLibCatalog();
+    assert.equal(list.length, 2);
+    assert.equal(list[0]!.name, "H");
+    assert.equal(list[1]!.name, "U235");
+    clearAwLibTable();
   });
 });
 

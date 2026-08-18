@@ -31,7 +31,19 @@ module.exports = {
     createTextEditorDecorationType: () => ({ dispose: () => undefined }),
   },
   Uri: {
-    parse: (s) => ({ toString: () => s, fsPath: s.replace("file://", "") }),
+    parse: (s) => {
+      let fsPath = s;
+      if (s.startsWith("file:///")) {
+        fsPath = decodeURIComponent(s.slice("file:///".length));
+        if (/^[A-Za-z]:/.test(fsPath)) fsPath = fsPath.replace(/\//g, "\\");
+      } else if (s.startsWith("file://")) {
+        fsPath = decodeURIComponent(s.slice("file://".length));
+      }
+      return {
+        toString: () => s,
+        fsPath,
+      };
+    },
   },
   DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
   Diagnostic: class Diagnostic {

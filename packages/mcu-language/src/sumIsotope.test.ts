@@ -4,6 +4,7 @@ import { parseDocument } from "./parser";
 import {
   collectSumIsotopeMarks,
   evaluateSumIsotopeMembership,
+  isSumIsotopeMember,
   resolveSumIsotopeStateAt,
   sumIsotopeForNuclide,
 } from "./sumIsotope";
@@ -88,11 +89,10 @@ describe("sumIsotope", () => {
   });
 
   it("empty state has no members", () => {
-    const m = evaluateSumIsotopeMembership(
-      { name: "U235", density: "1e-2" },
-      { listMode: "none", list: new Set(), siden: null }
-    );
+    const state = { listMode: "none" as const, list: new Set<string>(), siden: null };
+    const m = evaluateSumIsotopeMembership({ name: "U235", density: "1e-2" }, state);
     assert.strictEqual(m.inSum, false);
+    assert.strictEqual(isSumIsotopeMember({ name: "U235", density: "1e-2" }, state), false);
   });
 
   it("resolveSumIsotopeStateAt reads SIDEN with EQU", () => {
@@ -112,5 +112,32 @@ describe("sumIsotope", () => {
     assert.ok(m.inSum);
     assert.ok(m.reasons[0]!.includes("меньше"));
     assert.ok(!m.reasons[0]!.includes("<"), m.reasons[0]);
+  });
+
+  it("indented SI members keep the composition line, not the MATR header", () => {
+    const text = ["PIN", "SI FP1", "MATR 1 T=300", " FP1 1e-8", " U235 1e-2", "FINISH"].join("\n");
+    const ast = parseDocument(text, { uri: "si-indent.mcu" });
+    const marks = collectSumIsotopeMarks(ast);
+    const fp = marks.find((m) => m.name.toUpperCase() === "FP1");
+    assert.ok(fp);
+    assert.strictEqual(fp!.range.start.line, 3);
+  });
+
+  it("collectSumIsotopeMarks lineFrom/lineTo keeps only visible nuclides", () => {
+    const text = ["PIN", "SI U235 FP1", "MATR 1", "U235 1e-2", "MATR 2", "FP1 1e-8", "FINISH"].join("\n");
+    const ast = parseDocument(text, { uri: "si-viewport.mcu" });
+    const u235Line = ast.materials[0]!.nuclides.find((n) => n.name.toUpperCase() === "U235")!.range.start.line;
+    const marks = collectSumIsotopeMarks(ast, { lineFrom: u235Line, lineTo: u235Line });
+    assert.ok(marks.some((m) => m.name.toUpperCase() === "U235"));
+    assert.ok(!marks.some((m) => m.name.toUpperCase() === "FP1"));
+  });
+
+  it("collectSumIsotopeMarks maxMarks stops after limit+1", () => {
+    const lines = ["PIN", "SI U235 FP1 CS33", "MATR 1", "U235 1e-2", "FP1 1e-8", "CS33 1e-8", "FINISH"];
+    const ast = parseDocument(lines.join("\n"), { uri: "si-max.mcu" });
+    const capped = collectSumIsotopeMarks(ast, { maxMarks: 1 });
+    assert.strictEqual(capped.length, 2);
+    const all = collectSumIsotopeMarks(ast);
+    assert.ok(all.length >= 3);
   });
 });

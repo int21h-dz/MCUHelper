@@ -4,7 +4,7 @@
  */
 import type { DiagnosticMessage, DocumentAst, SourceRange } from "./ast";
 import { parseMaterialVolumes } from "./materialVolumes";
-import { buildZoneRegistrationMap } from "./zoneRegistration";
+import { buildZoneRegistrationMap, resolveZoneTail } from "./zoneRegistration";
 
 export type RegistrationListKind = "material" | "zone" | "object";
 
@@ -95,6 +95,21 @@ function kindLabelRu(kind: RegistrationListKind): string {
   return "объект";
 }
 
+function addPositiveIntsFromCells(cells: Iterable<string>, into: Set<number>): void {
+  for (const cell of cells) {
+    const n = Number(cell);
+    if (Number.isInteger(n) && n > 0) into.add(n);
+  }
+}
+
+/** Картограммы NET Pxxxx / Oxxxx (уже expandCartogramTokens в парсере). */
+function addFromNetMaps(maps: string[][][] | undefined, into: Set<number>): void {
+  if (!maps) return;
+  for (const layer of maps) {
+    for (const row of layer) addPositiveIntsFromCells(row, into);
+  }
+}
+
 function collectGeometryNumbers(ast: DocumentAst): {
   materials: Set<number>;
   zones: Set<number>;
@@ -103,10 +118,17 @@ function collectGeometryNumbers(ast: DocumentAst): {
   const materials = new Set(ast.materials.map((m) => m.number));
   const zones = new Set<number>();
   const objects = new Set<number>();
-  const zoneReg = buildZoneRegistrationMap(ast.zones);
-  for (const resolved of zoneReg.values()) {
+  // Все зоны, не Map по имени: в CELL/LCELL FUEL/CLAD повторяются с разными #O= / #Z=.
+  const cache = new Map<number, number>();
+  for (const z of ast.zones) {
+    const resolved = resolveZoneTail(z.tail, cache);
+    if (!resolved) continue;
     if (resolved.regNum > 0) zones.add(resolved.regNum);
     if (resolved.objNum > 0) objects.add(resolved.objNum);
+  }
+  for (const net of ast.nets) {
+    addFromNetMaps(net.regMaps, zones);
+    addFromNetMaps(net.objMaps, objects);
   }
   return { materials, zones, objects };
 }

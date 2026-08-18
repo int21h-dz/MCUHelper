@@ -14,12 +14,12 @@ import { maybeSetMcunrLanguage, scoreMcunrContent, isMcunrDocument } from "./con
 import { maybeFixDocumentEncoding, detectEncodingCommand } from "./encodingDetect";
 import { registerExpandNaturalIsotope, hoverMiddleware } from "./expandNaturalIsotope";
 import { registerAddToSumIsotope } from "./addToSumIsotope";
-import { createSidebarProviders, refreshDiagnosticsSidebar, refreshSidebarsCoalesced, setSidebarReadyHandler, setSumIsotopeDecorationHandler, type SidebarViewId, type SidebarViewProvider } from "./sidebarView";
+import { createSidebarProviders, refreshDiagnosticsSidebar, refreshSidebarsCoalesced, invalidateSidebarsOnEditorSwitch, abortSidebarRefreshQueue, applyOptimisticDiagnosticsOnEdit, getAppliedSidebarUri, mergeOptimisticFromLsp, commitOptimisticFromLsp, initOverlaySquiggles, setSidebarReadyHandler, paintCachedSidebarIndex, setSumIsotopeDecorationHandler, visibleLineSpan, clearOptimisticForDocument, type SidebarViewId, type SidebarViewProvider } from "./sidebarView";
 import { registerTemplateInsert } from "./templateInsert";
 import { buildCatalogPayload } from "./catalogBridge";
 import { registerDiagnosticNavigation, fetchMcuDiagnostics } from "./diagnosticNavigation";
 import { registerIncludePreview, setIncludeDocumentOpenedHandler } from "./includePreview";
-import { registerMatrCodeLens, updateMatrCodeLensIndex } from "./matrCodeLens";
+import { registerMatrCodeLens, updateMatrCodeLensIndex, sameDocumentUri } from "./matrCodeLens";
 import { clearLanguageDetectState, scheduleLanguageDetectOnEdit } from "./languageDetectScheduler";
 import { registerRunPanel, type RunPanelViewProvider } from "./runPanelView";
 import { runMcuInTerminal } from "./mcuTerminalRun";
@@ -29,14 +29,17 @@ import { resolvePostRunOpenTarget, shouldFocusDiagnosticsAfterRun } from "./runP
 import { runRegistrationBuilder } from "./registrationBuilderCommand";
 import { runBodyGenerator } from "./bodyGeneratorCommand";
 import { runWaterSteam } from "./waterSteamCommand";
+import { runMaterialsBuilder } from "./materialsBuilderCommand";
 import { registerWaterSteamFocusTracker } from "./waterSteamPanel";
+import { checkForExtensionUpdates } from "./updateCheck";
+import { checkMaterialsCompendiumUpdate } from "./materialsCompendiumStore";
 import { showIncludeGraph } from "./includeGraphCommand";
 import { compareResults } from "./compareResultsCommand";
 import { registerMcuCodeActions } from "./codeActions";
-import { checkForExtensionUpdates } from "./updateCheck";
 import {
   applySumIsotopeDecorations,
   clearSumIsotopeDecorations,
+  createMissingAwLibSumIsotopeDecorationType,
   createSumIsotopeDecorationType,
 } from "./sumIsotopeDecorations";
 import {
@@ -44,6 +47,15 @@ import {
   clearStableIsotopeDecorations,
   createStableIsotopeDecorationType,
 } from "./stableIsotopeDecorations";
+import { largeDocumentEditPlan, LARGE_DOC_LINE_THRESHOLD, TREE_PRIME_IDLE_MS, shouldScheduleTreePrime } from "./sidebarFreshness";
+import {
+  SIDEBAR_ACK_TIMEOUT_MS,
+  shouldAcceptActiveDocumentAck,
+  shouldFallbackRefreshAfterAckTimeout,
+  shouldHandshakeBeforeSidebarRefresh,
+  shouldNotifyActiveDocument,
+  type SidebarRefreshTrigger,
+} from "./sidebarAck";
 
 const REFRESH_DEBOUNCE_MS = 500;
 const SELECTION_REFRESH_DEBOUNCE_MS = 300;
@@ -51,8 +63,13 @@ const SELECTION_REFRESH_DEBOUNCE_MS = 300;
 const SELECTION_AFTER_EDIT_QUIET_MS = 600;
 
 let lastDocChangeAt = 0;
+let treePrimeTimer: ReturnType<typeof setTimeout> | undefined;
 /** Output «MCU-NR Helper» — отчёты сверки AW/THR. */
 let helperOutput: vscode.OutputChannel | undefined;
+
+/** Последний epoch с сервера: kind+version, чтобы не коммитить stale validate в overlay. */
+const lastDiagEpoch = new Map<string, { version: number | null; kind: string }>();
+
 
 /** esbuild-бандл: предпочитаем более свежий из extension/server и packages/mcu-lsp/dist. */
 function pickNewerServerModule(bundled: string, monorepo: string): string {
@@ -71,18 +88,74 @@ let geometryPanel: GeometryPanel;
 let defaultPhyPanel: DefaultPhyPanel;
 let refreshTimer: ReturnType<typeof setTimeout> | undefined;
 let selectionRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+let pendingSidebarAckUri: string | undefined;
+let sidebarAckTimer: ReturnType<typeof setTimeout> | undefined;
 let runStatusItem: vscode.StatusBarItem | undefined;
 let runPanel: RunPanelViewProvider | undefined;
 let sumIsotopeDecorationType: vscode.TextEditorDecorationType | undefined;
+let missingAwLibSumIsotopeDecorationType: vscode.TextEditorDecorationType | undefined;
 let stableIsotopeDecorationType: vscode.TextEditorDecorationType | undefined;
+let isotopeMarksTimer: ReturnType<typeof setTimeout> | undefined;
+
+type IsoMark = {
+  name: string;
+  uri?: string;
+  range: { start: { line: number; character: number }; end: { line: number; character: number } };
+  reasons?: string[];
+  inAwLib?: boolean;
+};
+
+function paintIsotopeMarks(editor: vscode.TextEditor, sumMarks: IsoMark[], stableMarks: IsoMark[]): void {
+  if (!sumIsotopeDecorationType || !missingAwLibSumIsotopeDecorationType || !stableIsotopeDecorationType) return;
+  const docUri = editor.document.uri.toString();
+  const markInEditor = (uri?: string) => !uri || sameDocumentUri(uri, docUri);
+  const nuclides = sumMarks.filter((n) => markInEditor(n.uri)).map((n) => ({
+    name: n.name,
+    range: n.range,
+    reasons: n.reasons,
+    inAwLib: n.inAwLib,
+  }));
+  const missingAwNuclides = nuclides.filter((n) => n.inAwLib === false);
+  const regularSumNuclides = nuclides.filter((n) => n.inAwLib !== false);
+  applySumIsotopeDecorations(editor, sumIsotopeDecorationType, regularSumNuclides);
+  applySumIsotopeDecorations(editor, missingAwLibSumIsotopeDecorationType, missingAwNuclides);
+  const sumKeys = new Set(nuclides.map((n) => `${n.range.start.line}:${n.name.toUpperCase()}`));
+  const stableNuclides = stableMarks
+    .filter((n) => markInEditor(n.uri) && !sumKeys.has(`${n.range.start.line}:${n.name.toUpperCase()}`))
+    .map((n) => ({ name: n.name, range: n.range }));
+  applyStableIsotopeDecorations(editor, stableIsotopeDecorationType, stableNuclides);
+}
+
+async function refreshViewportIsotopeMarks(editor: vscode.TextEditor): Promise<void> {
+  if (!client || !isMcunrDocument(editor.document)) return;
+  const vis = visibleLineSpan(editor);
+  try {
+    const marks = await client.sendRequest<{
+      sumIsotopeMarks: IsoMark[];
+      stableIsotopeMarks: IsoMark[];
+    } | null>("mcuhelper/getIsotopeMarks", {
+      uri: editor.document.uri.toString(),
+      visibleStart: vis.start,
+      visibleEnd: vis.end,
+    });
+    if (!marks) return;
+    paintIsotopeMarks(editor, marks.sumIsotopeMarks ?? [], marks.stableIsotopeMarks ?? []);
+  } catch {
+    /* LSP ещё не готов */
+  }
+}
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel("MCU-NR Helper");
   helperOutput = output;
   context.subscriptions.push(output);
   void checkForExtensionUpdates(context, output);
+  void checkMaterialsCompendiumUpdate(context, output);
+  initOverlaySquiggles(context);
   sumIsotopeDecorationType = createSumIsotopeDecorationType();
   context.subscriptions.push(sumIsotopeDecorationType);
+  missingAwLibSumIsotopeDecorationType = createMissingAwLibSumIsotopeDecorationType();
+  context.subscriptions.push(missingAwLibSumIsotopeDecorationType);
   stableIsotopeDecorationType = createStableIsotopeDecorationType();
   context.subscriptions.push(stableIsotopeDecorationType);
 
@@ -122,6 +195,23 @@ export function activate(context: vscode.ExtensionContext): void {
     },
     middleware: {
       ...hoverMiddleware(),
+      handleDiagnostics(uri, diagnostics, next) {
+        const key = uri.toString();
+        const live = vscode.workspace.textDocuments.find((d) => d.uri.toString() === key)?.version;
+        const data = (diagnostics[0] as { data?: { v?: number; k?: string } } | undefined)?.data;
+        const epoch = lastDiagEpoch.get(key);
+        const stamped = data?.v ?? epoch?.version;
+        const kind = data?.k ?? epoch?.kind;
+        const freshValidate = kind === "validate" && typeof stamped === "number" && live === stamped;
+        const shown = freshValidate
+          ? commitOptimisticFromLsp(key, diagnostics)
+          : mergeOptimisticFromLsp(key, diagnostics);
+        next(uri, []);
+        sidebarProviders?.get("mcuhelper.lexerErrors")?.applyLexerErrors({
+          immediate: true,
+          diagnostics: shown,
+        });
+      },
     },
   };
 
@@ -129,6 +219,7 @@ export function activate(context: vscode.ExtensionContext): void {
   client.onDidChangeState((e) => {
     output.appendLine(`LSP state: ${e.oldState} → ${e.newState} (Running=${State.Running})`);
     if (e.newState === State.Running) {
+      notifyActiveDocument("lsp-ready");
       scheduleRefresh();
       void warmupExtensionAfterLspReady(output);
     }
@@ -166,43 +257,32 @@ export function activate(context: vscode.ExtensionContext): void {
   setIncludeDocumentOpenedHandler(() => {
     if (sidebarProviders) refreshDiagnosticsSidebar(sidebarProviders);
   });
-  setSidebarReadyHandler(() => scheduleRefresh());
-  // Догоняющий refresh: ранний librariesSynced / State.Running могли прийти до providers.
-  scheduleRefresh("all");
+  setSidebarReadyHandler(() => {
+    if (sidebarProviders && paintCachedSidebarIndex(sidebarProviders)) return;
+    scheduleInitialSidebarRefresh();
+  });
+  scheduleInitialSidebarRefresh();
   setSumIsotopeDecorationHandler((editor, index) => {
     updateMatrCodeLensIndex(editor.document.uri.toString(), index);
-    if (!sumIsotopeDecorationType || !stableIsotopeDecorationType) return;
     if (!index) {
-      clearSumIsotopeDecorations(editor, sumIsotopeDecorationType);
-      clearStableIsotopeDecorations(editor, stableIsotopeDecorationType);
+      paintIsotopeMarks(editor, [], []);
       return;
     }
-    const fromMarks = index.sumIsotopeMarks;
-    const nuclides =
-      fromMarks && fromMarks.length > 0
-        ? fromMarks.map((n) => ({
+    let sum = index.sumIsotopeMarks ?? [];
+    if (sum.length === 0) {
+      const docUri = editor.document.uri.toString();
+      const markInEditor = (uri?: string) => !uri || sameDocumentUri(uri, docUri);
+      sum = index.summaries.materials.filter((m) => markInEditor(m.uri)).flatMap((m) =>
+        m.nuclides
+          .filter((n) => n.sumIsotope)
+          .map((n) => ({
             name: n.name,
             range: n.range,
-            reasons: n.reasons,
+            reasons: n.sumIsotope!.reasons,
           }))
-        : index.summaries.materials.flatMap((m) =>
-            m.nuclides
-              .filter((n) => n.sumIsotope)
-              .map((n) => ({
-                name: n.name,
-                range: n.range,
-                reasons: n.sumIsotope!.reasons,
-              }))
-          );
-    applySumIsotopeDecorations(editor, sumIsotopeDecorationType, nuclides);
-    const sumKeys = new Set(nuclides.map((n) => `${n.range.start.line}:${n.name.toUpperCase()}`));
-    const stableNuclides = (index.stableIsotopeMarks ?? [])
-      .filter((n) => !sumKeys.has(`${n.range.start.line}:${n.name.toUpperCase()}`))
-      .map((n) => ({
-        name: n.name,
-        range: n.range,
-      }));
-    applyStableIsotopeDecorations(editor, stableIsotopeDecorationType, stableNuclides);
+      );
+    }
+    paintIsotopeMarks(editor, sum, index.stableIsotopeMarks ?? []);
   });
   runPanel = registerRunPanel(context);
   runStatusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 30);
@@ -262,6 +342,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("mcuhelper.registrationBuilder", () => runRegistrationBuilder(context, client)),
     vscode.commands.registerCommand("mcuhelper.bodyGenerator", () => runBodyGenerator(context, client)),
     vscode.commands.registerCommand("mcuhelper.waterSteam", () => runWaterSteam(context, client)),
+    vscode.commands.registerCommand("mcuhelper.materialsBuilder", () => runMaterialsBuilder(context, client)),
     vscode.commands.registerCommand("mcuhelper.showIncludeGraph", () => showIncludeGraph(client)),
     vscode.commands.registerCommand("mcuhelper.compareResults", () => compareResults()),
     registerMcuCodeActions(),
@@ -274,14 +355,31 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand("mcuhelper.detectLanguage", () => detectLanguage(output)),
     vscode.commands.registerCommand("mcuhelper.detectEncoding", () => detectEncodingCommand(output)),
-    vscode.window.onDidChangeActiveTextEditor(() => {
+    vscode.window.onDidChangeActiveTextEditor((editor) => {
       updateRunUiVisibility();
-      scheduleRefresh("all");
+      if (!sidebarProviders) return;
+      if (!editor || editor.document.languageId !== "mcunr") {
+        clearSidebarAckWait();
+        return;
+      }
+      invalidateSidebarsOnEditorSwitch(sidebarProviders);
+      requestSidebarRefresh("editor-switch");
     }),
     vscode.window.onDidChangeTextEditorSelection(() => {
       if (Date.now() - lastDocChangeAt < SELECTION_AFTER_EDIT_QUIET_MS) return;
       if (refreshTimer) return;
+      const editor = vscode.window.activeTextEditor;
+      // Full-core: getIndex constants на каждый курсор блокирует LSP (validate+parse) и откладывает patch diags.
+      if (editor && editor.document.lineCount > LARGE_DOC_LINE_THRESHOLD) return;
       scheduleRefresh("constants");
+    }),
+    vscode.window.onDidChangeTextEditorVisibleRanges((e) => {
+      if (e.textEditor.document.languageId !== "mcunr") return;
+      if (isotopeMarksTimer) clearTimeout(isotopeMarksTimer);
+      isotopeMarksTimer = setTimeout(() => {
+        isotopeMarksTimer = undefined;
+        void refreshViewportIsotopeMarks(e.textEditor);
+      }, 120);
     })
   );
 
@@ -293,7 +391,13 @@ export function activate(context: vscode.ExtensionContext): void {
       await maybeFixDocumentEncoding(doc, output);
       const langChanged = await maybeSetMcunrLanguage(doc, output);
       // Только явный mcunr: isMcunrDocument(content) при language=ini раздувает refresh при автодетекте.
-      if (langChanged || doc.languageId === "mcunr") scheduleRefresh();
+      if (langChanged || doc.languageId === "mcunr") {
+        if (doc.lineCount > LARGE_DOC_LINE_THRESHOLD) {
+          if (sidebarProviders) refreshDiagnosticsSidebar(sidebarProviders);
+        } else {
+          scheduleRefresh();
+        }
+      }
     }),
     vscode.workspace.onDidSaveTextDocument(() => scheduleRefresh()),
     vscode.workspace.onDidChangeTextDocument((e) => {
@@ -305,19 +409,126 @@ export function activate(context: vscode.ExtensionContext): void {
           clearTimeout(selectionRefreshTimer);
           selectionRefreshTimer = undefined;
         }
+        const plan = largeDocumentEditPlan(e.document.lineCount);
+        if (plan.abortTreeRefresh) {
+          abortSidebarRefreshQueue();
+          if (refreshTimer) {
+            clearTimeout(refreshTimer);
+            refreshTimer = undefined;
+          }
+          if (selectionRefreshTimer) {
+            clearTimeout(selectionRefreshTimer);
+            selectionRefreshTimer = undefined;
+          }
+          if (plan.retryTreePrimeAfterIdle) {
+            scheduleIdleTreePrime(e.document.uri.toString(), e.document.lineCount);
+          }
+        }
+        if (plan.refreshDiagnosticsNow && sidebarProviders) {
+          applyOptimisticDiagnosticsOnEdit(
+            sidebarProviders,
+            e.document.uri.toString(),
+            e.contentChanges,
+            vscode.languages.getDiagnostics(e.document.uri),
+            e.document
+          );
+        }
+        if (plan.skipFullIndexRefresh) return;
         scheduleRefresh();
       }
     }),
     vscode.workspace.onDidCloseTextDocument((doc) => {
       clearLanguageDetectState(doc);
+      clearOptimisticForDocument(doc.uri.toString());
     }),
     vscode.languages.onDidChangeDiagnostics(() => {
       const editor = vscode.window.activeTextEditor;
       if (!editor || editor.document.languageId !== "mcunr") return;
       if (!sidebarProviders) return;
       refreshDiagnosticsSidebar(sidebarProviders);
+      const uri = editor.document.uri.toString();
+      if (shouldScheduleTreePrime(getAppliedSidebarUri(), uri, editor.document.lineCount)) {
+        scheduleRefresh("all");
+        return;
+      }
+      if (editor.document.lineCount > LARGE_DOC_LINE_THRESHOLD) return;
+      scheduleRefresh("all");
     })
   );
+}
+
+function scheduleInitialSidebarRefresh(): void {
+  const editor = vscode.window.activeTextEditor;
+  if (
+    editor?.document.languageId === "mcunr" &&
+    editor.document.lineCount > LARGE_DOC_LINE_THRESHOLD
+  ) {
+    // Дерево после первого validate — не параллельный getIndex (блокирует LSP 10–20 с).
+    if (sidebarProviders) refreshDiagnosticsSidebar(sidebarProviders);
+    return;
+  }
+  scheduleRefresh("all");
+}
+
+function clearSidebarAckWait(): void {
+  pendingSidebarAckUri = undefined;
+  if (sidebarAckTimer) {
+    clearTimeout(sidebarAckTimer);
+    sidebarAckTimer = undefined;
+  }
+}
+
+function notifyActiveDocument(trigger: SidebarRefreshTrigger): void {
+  if (!shouldNotifyActiveDocument(trigger) || !client) return;
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.languageId !== "mcunr") return;
+  void client.sendNotification("mcuhelper/activeDocument", {
+    uri: editor.document.uri.toString(),
+  });
+}
+
+function completeSidebarRefreshAfterAck(): void {
+  if (!sidebarProviders) return;
+  clearSidebarAckWait();
+  void refreshSidebarsCoalesced(sidebarProviders, "all");
+}
+
+function requestSidebarRefresh(trigger: SidebarRefreshTrigger): void {
+  if (!sidebarProviders) return;
+  const editor = vscode.window.activeTextEditor;
+  if (!client || !editor || editor.document.languageId !== "mcunr") {
+    clearSidebarAckWait();
+    void refreshSidebarsCoalesced(sidebarProviders, "all");
+    return;
+  }
+  if (!shouldHandshakeBeforeSidebarRefresh(trigger)) {
+    void refreshSidebarsCoalesced(sidebarProviders, "all");
+    return;
+  }
+  const uri = editor.document.uri.toString();
+  pendingSidebarAckUri = uri;
+  if (sidebarAckTimer) clearTimeout(sidebarAckTimer);
+  notifyActiveDocument(trigger);
+  sidebarAckTimer = setTimeout(() => {
+    sidebarAckTimer = undefined;
+    const liveUri = vscode.window.activeTextEditor?.document.uri.toString();
+    if (!shouldFallbackRefreshAfterAckTimeout({ pendingUri: pendingSidebarAckUri, liveUri })) {
+      return;
+    }
+    completeSidebarRefreshAfterAck();
+  }, SIDEBAR_ACK_TIMEOUT_MS);
+}
+
+function scheduleIdleTreePrime(uri: string, lineCount: number): void {
+  if (!shouldScheduleTreePrime(getAppliedSidebarUri(), uri, lineCount)) return;
+  if (treePrimeTimer) clearTimeout(treePrimeTimer);
+  treePrimeTimer = setTimeout(() => {
+    treePrimeTimer = undefined;
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.document.uri.toString() !== uri) return;
+    if (!shouldScheduleTreePrime(getAppliedSidebarUri(), uri, editor.document.lineCount)) return;
+    scheduleRefresh("all");
+  }, TREE_PRIME_IDLE_MS);
 }
 
 function scheduleRefresh(scope: "all" | "constants" = "all"): void {
@@ -340,7 +551,7 @@ function scheduleRefresh(scope: "all" | "constants" = "all"): void {
   refreshTimer = setTimeout(() => {
     refreshTimer = undefined;
     if (!sidebarProviders) return;
-    void refreshSidebarsCoalesced(sidebarProviders, "all");
+    requestSidebarRefresh("schedule-refresh");
   }, REFRESH_DEBOUNCE_MS);
 }
 
@@ -868,6 +1079,26 @@ function registerLspOutputNotifications(
       scheduleRefresh("all");
     }
   );
+  lsp.onNotification(
+    "mcuhelper/diagEpoch",
+    (msg: { uri: string; version: number | null; kind: string }) => {
+      lastDiagEpoch.set(msg.uri, { version: msg.version, kind: msg.kind });
+    }
+  );
+  lsp.onNotification("mcuhelper/activeDocumentAck", (msg: { uri?: string }) => {
+    const liveUri = vscode.window.activeTextEditor?.document.uri.toString();
+    if (
+      !sidebarProviders ||
+      !shouldAcceptActiveDocumentAck({
+        ackUri: msg.uri,
+        liveUri,
+        pendingUri: pendingSidebarAckUri,
+      })
+    ) {
+      return;
+    }
+    completeSidebarRefreshAfterAck();
+  });
   lsp.onNotification(
     "mcuhelper/parameteThrVerification",
     (msg: {

@@ -12,6 +12,8 @@ export interface NavTreeNode {
   label: string;
   description?: string;
   badges?: string[];
+  /** Выделить элемент предупреждающим стилем. */
+  warning?: boolean;
   /** Серый/приглушённый вид (суммарный изотоп и т.п.). */
   muted?: boolean;
   /** Подсказка при наведении (причина muted и др.). */
@@ -92,7 +94,10 @@ export interface IndexPayload {
       group?: string;
       temperature?: number;
       nuclideCount: number;
+      usedNuclideCount?: number;
       sumIsotopeCount?: number;
+      sumIsotopeUsedCount?: number;
+      sumIsotopeMissingAwLibCount?: number;
       nuclidesPreview: string;
       massDensityGcm3: number | null;
       volumeCm3: number | null;
@@ -102,9 +107,10 @@ export interface IndexPayload {
         name: string;
         concentration: string;
         range: SourceRange;
-        sumIsotope?: { reasons: string[] };
+        sumIsotope?: { reasons: string[]; inAwLib?: boolean };
       }>;
       range: SourceRange;
+      uri?: string;
     }>;
     zones: Array<{
       name: string;
@@ -162,14 +168,18 @@ export interface IndexPayload {
   /** Компактные метки суммарного изотопа для серых decorations (всегда, даже при slim). */
   sumIsotopeMarks?: Array<{
     name: string;
-    concentration: string;
-    range: SourceRange;
-    reasons: string[];
+    range: Pick<SourceRange, "start" | "end">;
+    uri?: string;
+    /** @deprecated не шлём в getIndex — причины в summaries / hover */
+    concentration?: string;
+    reasons?: string[];
+    inAwLib?: boolean;
   }>;
   stableIsotopeMarks?: Array<{
     name: string;
-    concentration: string;
-    range: SourceRange;
+    range: Pick<SourceRange, "start" | "end">;
+    uri?: string;
+    concentration?: string;
   }>;
   hash?: string;
   editorContext?: {
@@ -225,6 +235,22 @@ function formatMaterialMass(massG: number | null | undefined): string {
   if (massG == null || massG <= 0) return "";
   if (massG >= 1000) return `m≈${(massG / 1000).toPrecision(3)} кг`;
   return `m≈${massG.toPrecision(3)} г`;
+}
+
+/** Счётчики состава для CodeLens / sidebar: всего, в SI, нет в AW. */
+export function formatMaterialNuclideCounts(m: {
+  nuclideCount: number;
+  sumIsotopeCount?: number;
+  sumIsotopeUsedCount?: number;
+  sumIsotopeMissingAwLibCount?: number;
+}): string[] {
+  const parts = [m.nuclideCount === 1 ? "1 нукл." : `${m.nuclideCount} нукл.`];
+  const siFromSplit = (m.sumIsotopeUsedCount ?? 0) + (m.sumIsotopeMissingAwLibCount ?? 0);
+  const siTotal = (m.sumIsotopeCount ?? 0) > 0 ? m.sumIsotopeCount! : siFromSplit;
+  if (siTotal > 0) parts.push(`в SI: ${siTotal}`);
+  const missingAw = m.sumIsotopeMissingAwLibCount ?? 0;
+  if (missingAw > 0) parts.push(`нет в AW: ${missingAw}`);
+  return parts;
 }
 
 function formatActivitySidebar(bqPerG: number): string {
@@ -467,8 +493,7 @@ export function buildMaterialsTree(
     const rho = formatMaterialDensity(m.massDensityGcm3);
     const vol = formatBodyVolume(m.volumeCm3);
     const mass = formatMaterialMass(m.massG);
-    const parts = [`${m.nuclideCount} нукл.`];
-    if ((m.sumIsotopeCount ?? 0) > 0) parts.push(`${m.sumIsotopeCount} в SI`);
+    const parts = formatMaterialNuclideCounts(m);
     if (rho) parts.push(rho);
     if (m.volumeCm3 != null && vol) parts.push(vol);
     if (mass) parts.push(mass);
@@ -490,12 +515,21 @@ export function buildMaterialsTree(
       children: m.nuclides.map((n, i) => {
         const suggestKey = `${n.range.start.line}:${n.name.toUpperCase()}`;
         const suggest = Boolean(suggestSumIsotope?.has(suggestKey)) && !n.sumIsotope;
+        const sumMissingAw = n.sumIsotope?.inAwLib === false;
+        const sumInAw = Boolean(n.sumIsotope) && n.sumIsotope?.inAwLib !== false;
         const child: NavTreeNode = {
           id: `mat-${m.number}-n-${i}`,
-          label: n.name,
-          description: `${n.concentration} яд/см³`,
-          muted: Boolean(n.sumIsotope),
-          tooltip: n.sumIsotope?.reasons?.join("; "),
+          label: sumMissingAw ? `Σ! ${n.name}` : sumInAw ? `Σ ${n.name}` : n.name,
+          description: sumMissingAw
+            ? `нет в AW.LIB · ${n.concentration} яд/см³`
+            : sumInAw
+              ? `в суммарном изотопе · ${n.concentration} яд/см³`
+              : `${n.concentration} яд/см³`,
+          muted: sumInAw,
+          warning: sumMissingAw,
+          tooltip: sumMissingAw
+            ? ["нет в AW.LIB", ...(n.sumIsotope?.reasons ?? [])].join("; ")
+            : n.sumIsotope?.reasons?.join("; "),
           uri,
           range: n.range,
         };

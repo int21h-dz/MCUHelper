@@ -290,6 +290,11 @@
         "icon": "$(droplet)"
       },
       {
+        "command": "mcuhelper.materialsBuilder",
+        "title": "MCU-NR: Конструктор материалов",
+        "icon": "$(beaker)"
+      },
+      {
         "command": "mcuhelper.showIncludeGraph",
         "title": "MCU-NR: Граф #include",
         "icon": "$(type-hierarchy)"
@@ -484,6 +489,11 @@
           "command": "mcuhelper.waterSteam",
           "when": "view == mcuhelper.materials",
           "group": "navigation@1"
+        },
+        {
+          "command": "mcuhelper.materialsBuilder",
+          "when": "view == mcuhelper.materials",
+          "group": "navigation@2"
         },
         {
           "command": "mcuhelper.bodyGenerator",

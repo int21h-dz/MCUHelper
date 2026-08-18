@@ -85,6 +85,10 @@
     if (state.panel === "mcuhelper.materials") {
       return (
         '<div class="mcu-panel-toolbar">' +
+        '<button type="button" class="mcu-panel-tool-btn" data-action="run-command" data-command="mcuhelper.materialsBuilder" data-args="null" title="Конструктор материалов PNNL / AW.LIB → MATR">' +
+        I.getIcon("flask") +
+        "<span>Конструктор материалов</span>" +
+        "</button>" +
         '<button type="button" class="mcu-panel-tool-btn" data-action="run-command" data-command="mcuhelper.waterSteam" data-args="null" title="Параметры воды / пара (IF97) → dens H и O">' +
         I.getIcon("droplet") +
         "<span>Вода / пар</span>" +
@@ -197,6 +201,7 @@
       '<div class="mcu-card mcu-nav-card' +
       (clickable ? " leaf-clickable" : "") +
       (node.muted ? " mcu-muted" : "") +
+      (node.warning ? " mcu-warning" : "") +
       (actionBtn ? " mcu-nav-card-with-action" : "") +
       '" data-uri="' +
       esc(node.uri || "") +

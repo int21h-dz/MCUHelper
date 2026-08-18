@@ -8,6 +8,14 @@ import { ADD_TO_SUM_ISOTOPE_DIAG_CODES } from "./addToSumIsotope";
 /** Коды диагностик, которые выдаёт `lexDocument` в mcu-language. */
 export const LEXER_DIAGNOSTIC_CODES = new Set(["no-tabs", "line-length"]);
 
+/** Как у LSP `publishDiagnostics`. Иначе панель «Диагностика» выкидывает overlay-only ошибки. */
+export const MCUHELPER_DIAG_SOURCE = "mcuhelper";
+
+export function belongsToMcuhelperSidebar(source: string | undefined): boolean {
+  const s = source ?? MCUHELPER_DIAG_SOURCE;
+  return s === MCUHELPER_DIAG_SOURCE || s === "MCU-NR";
+}
+
 /** Сверка AW.LIB / PARAMETE.THR с IAEA — отдельная группа в sidebar. */
 export const ISOTOPE_MISMATCH_DIAGNOSTIC_CODES = new Set([
   "aw-mass-mismatch",
@@ -115,22 +123,38 @@ export async function fetchMcuDiagnostics(
     .sort(compareDiagnosticsByPosition);
 }
 
+let inFlightDiagFetch = new Map<
+  string,
+  { version: number; promise: Promise<{ diagnostics: vscode.Diagnostic[]; includeGroups: Array<{ path: string; uri: string; mainIncludeLine: number; diagnostics: vscode.Diagnostic[] }> }> }
+>();
+
 export async function fetchMcuDiagnosticResponse(
   client: LanguageClient,
   uri: vscode.Uri
 ): Promise<{ diagnostics: vscode.Diagnostic[]; includeGroups: Array<{ path: string; uri: string; mainIncludeLine: number; diagnostics: vscode.Diagnostic[] }> }> {
-  const response = await client.sendRequest<McuDiagnosticsResponse>("mcuhelper/getDiagnostics", {
-    uri: uri.toString(),
+  const key = uri.toString();
+  const version = vscode.workspace.textDocuments.find((d) => d.uri.toString() === key)?.version ?? -1;
+  const existing = inFlightDiagFetch.get(key);
+  if (existing && existing.version === version) return existing.promise;
+  const promise = (async () => {
+    const response = await client.sendRequest<McuDiagnosticsResponse>("mcuhelper/getDiagnostics", {
+      uri: key,
+    });
+    return {
+      diagnostics: (response?.diagnostics ?? []).map(payloadToDiagnostic).sort(compareDiagnosticsByPosition),
+      includeGroups: (response?.includeGroups ?? []).map((group) => ({
+        path: group.path,
+        uri: group.uri,
+        mainIncludeLine: group.mainIncludeLine,
+        diagnostics: group.diagnostics.map(payloadToDiagnostic).sort(compareDiagnosticsByPosition),
+      })),
+    };
+  })().finally(() => {
+    const cur = inFlightDiagFetch.get(key);
+    if (cur?.promise === promise) inFlightDiagFetch.delete(key);
   });
-  return {
-    diagnostics: (response?.diagnostics ?? []).map(payloadToDiagnostic).sort(compareDiagnosticsByPosition),
-    includeGroups: (response?.includeGroups ?? []).map((group) => ({
-      path: group.path,
-      uri: group.uri,
-      mainIncludeLine: group.mainIncludeLine,
-      diagnostics: group.diagnostics.map(payloadToDiagnostic).sort(compareDiagnosticsByPosition),
-    })),
-  };
+  inFlightDiagFetch.set(key, { version, promise });
+  return promise;
 }
 
 function severityLabel(severity: vscode.DiagnosticSeverity): string {
@@ -416,7 +440,8 @@ export async function applyDiagnosticsToSidebar(
   webview: vscode.Webview,
   panelId: string,
   document: vscode.TextDocument | undefined,
-  client: LanguageClient | undefined
+  client: LanguageClient | undefined,
+  overlay?: readonly vscode.Diagnostic[]
 ): Promise<void> {
   const generation = ++diagnosticsSidebarGeneration;
   const targetDoc = document ? resolveDiagnosticsTargetDocument(document) : undefined;
@@ -430,47 +455,27 @@ export async function applyDiagnosticsToSidebar(
     return;
   }
 
-  if (!client) {
-    if (generation !== diagnosticsSidebarGeneration) return;
-    webview.postMessage({
-      type: "empty",
-      panel: panelId,
-      message: "LSP ещё не готов — подождите немного",
-    });
-    return;
-  }
-
-  let response: { diagnostics: vscode.Diagnostic[]; includeGroups: Array<{ path: string; uri: string; mainIncludeLine: number; diagnostics: vscode.Diagnostic[] }> };
-  try {
-    response = await fetchMcuDiagnosticResponse(client, targetDoc.uri);
-  } catch {
-    if (generation !== diagnosticsSidebarGeneration) return;
-    webview.postMessage({
-      type: "empty",
-      panel: panelId,
-      message: "Не удалось получить диагностику из LSP",
-    });
-    return;
-  }
-
+  // Всегда локальные diags VS Code: RPC getDiagnostics на 958 ждал 33с за validate 3l
+  // и до ответа панель показывала дерево предыдущего файла.
   if (generation !== diagnosticsSidebarGeneration) return;
-
-  const diags = response.diagnostics.filter((d) => d.range.start.line < targetDoc.lineCount);
-  if (diags.length === 0 && response.includeGroups.every((g) => g.diagnostics.length === 0)) {
+  const raw = overlay ?? vscode.languages.getDiagnostics(targetDoc.uri);
+  const diags = raw
+    .filter((d) => belongsToMcuhelperSidebar(d.source))
+    .filter((d) => d.range.start.line < targetDoc.lineCount)
+    .sort(compareDiagnosticsByPosition);
+  if (diags.length === 0) {
     webview.postMessage({
       type: "empty",
       panel: panelId,
-      message: "Диагностики не найдены — вариант чист",
+      message: client ? "Диагностики не найдены — вариант чист" : "LSP ещё не готов — подождите немного",
     });
     return;
   }
-
   const uri = targetDoc.uri.toString();
-  const nodes = buildDiagnosticTreeWithIncludes(uri, diags, response.includeGroups);
   webview.postMessage({
     type: "tree",
     panel: panelId,
-    nodes,
+    nodes: buildDiagnosticTreeWithIncludes(uri, diags, []),
   });
 }
 

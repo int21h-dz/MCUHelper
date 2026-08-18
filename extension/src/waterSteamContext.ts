@@ -60,7 +60,10 @@ function rememberFocus(editor: vscode.TextEditor): void {
 }
 
 /** Подписка: сохранять курсор в mcunr до клика по sidebar/webview. */
+let focusTrackerRegistered = false;
 export function registerWaterSteamFocusTracker(context: vscode.ExtensionContext): void {
+  if (focusTrackerRegistered) return;
+  focusTrackerRegistered = true;
   const ed = vscode.window.activeTextEditor;
   if (ed) rememberFocus(ed);
 

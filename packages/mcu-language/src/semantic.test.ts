@@ -560,4 +560,43 @@ stop
       clearAwLibTable();
     }
   });
+
+  it("material summary splits used nuclides and SI groups by AW.LIB presence", () => {
+    setAwLibTable(
+      parseAwLib(`
+U235  92235 235.0439299
+XE35  54135 134.907227
+`)
+    );
+    try {
+      const text = `PIN
+SI U235 FP1
+MATR 1
+U235 1.0E-2
+XE35 1.0E-3
+FP1 1.0E-8
+XYZZY BAD
+FINISH`;
+      const ast = parseDocument(text, { uri: "sum-groups.mcu" });
+      const m = buildSummaries(ast).materials[0]!;
+      assert.strictEqual(m.nuclideCount, 4);
+      assert.strictEqual(m.usedNuclideCount, 3);
+      assert.strictEqual(m.sumIsotopeCount, 2);
+      assert.strictEqual(m.sumIsotopeUsedCount, 1);
+      assert.strictEqual(m.sumIsotopeMissingAwLibCount, 1);
+    } finally {
+      clearAwLibTable();
+    }
+  });
+
+  it("material summary still counts SI when nuclide rows are slimmed", () => {
+    const lines = ["PIN", "SI FP1", "SIDEN 1e-20", "MATR 1"];
+    for (let i = 0; i < 2001; i++) lines.push(`N${i} 1.0E-2`);
+    lines.push("FP1 1.0E-8", "FINISH");
+    const ast = parseDocument(lines.join("\n"), { uri: "slim-si.mcu" });
+    const m = buildSummaries(ast).materials[0]!;
+    assert.ok(m.nuclideCount > 2000);
+    assert.strictEqual(m.nuclides.length, 0);
+    assert.strictEqual(m.sumIsotopeCount, 1);
+  });
 });

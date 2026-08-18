@@ -1,16 +1,63 @@
 import * as vscode from "vscode";
-import type { IndexPayload } from "./navData";
+import { formatMaterialNuclideCounts, type IndexPayload } from "./navData";
 
 export type MatrLensMaterial = IndexPayload["summaries"]["materials"][number];
 
+export function sameDocumentUri(a: string, b: string): boolean {
+  if (a === b) return true;
+  try {
+    const ua = vscode.Uri.parse(a);
+    const ub = vscode.Uri.parse(b);
+    if (ua.toString() === ub.toString()) return true;
+    // Windows: Z: vs z%3A, слэши, регистр — toString() часто расходится, fsPath стабильнее.
+    const fa = ua.fsPath.replace(/\\/g, "/").toLowerCase();
+    const fb = ub.fsPath.replace(/\\/g, "/").toLowerCase();
+    return fa.length > 0 && fa === fb;
+  } catch {
+    return false;
+  }
+}
+
+/** Куда ставить CodeLens: range в координатах редактора, иначе MATR-заголовок в этом файле. */
+export function planMatrCodeLenses(
+  documentUri: string,
+  lineCount: number,
+  lineAt: (line: number) => string,
+  materials: ReadonlyArray<MatrLensMaterial>
+): Array<{ line: number; material: MatrLensMaterial }> {
+  const byDoc = materials.filter((m) => !m.uri || sameDocumentUri(m.uri, documentUri));
+  const used = new Set<number>();
+  const out: Array<{ line: number; material: MatrLensMaterial }> = [];
+
+  for (let i = 0; i < byDoc.length; i++) {
+    const m = byDoc[i]!;
+    const line = m.range.start.line;
+    if (line < 0 || line >= lineCount) continue;
+    const text = lineAt(line);
+    if (!/^\s*MATR\b/i.test(text)) continue;
+    const num = parseInt(text.trim().match(/^MATR\s+(\d+)/i)?.[1] ?? "", 10);
+    if (Number.isFinite(num) && num !== m.number) continue;
+    out.push({ line, material: m });
+    used.add(i);
+  }
+
+  for (let line = 0; line < lineCount; line++) {
+    if (out.some((p) => p.line === line)) continue;
+    const mm = lineAt(line).trim().match(/^MATR\s+(\d+)/i);
+    if (!mm) continue;
+    const num = parseInt(mm[1]!, 10);
+    const idx = byDoc.findIndex((m, i) => m.number === num && !used.has(i));
+    if (idx < 0) continue;
+    used.add(idx);
+    out.push({ line, material: byDoc[idx]! });
+  }
+
+  return out.sort((a, b) => a.line - b.line);
+}
+
 /** Компактная подпись CodeLens над MATR (как ▸ у #include). */
 export function formatMatrCodeLensTitle(m: MatrLensMaterial): string {
-  const parts: string[] = [];
-  const n = m.nuclideCount;
-  parts.push(n === 1 ? "1 нукл." : `${n} нукл.`);
-
-  const si = m.sumIsotopeCount ?? 0;
-  if (si > 0) parts.push(`${si} в SI`);
+  const parts = formatMaterialNuclideCounts(m);
 
   const rho = m.massDensityGcm3;
   if (rho != null && Number.isFinite(rho) && rho > 0) {
@@ -79,14 +126,15 @@ export function buildMatrCodeLenses(
   if (document.languageId !== "mcunr") return [];
   const lenses: vscode.CodeLens[] = [];
   const lineCount = document.lineCount;
+  const placements = planMatrCodeLenses(
+    documentUri,
+    lineCount,
+    (line) => document.lineAt(line).text,
+    materials
+  );
 
-  for (const m of materials) {
-    const line = m.range.start.line;
-    if (line < 0 || line >= lineCount) continue;
+  for (const { line, material: m } of placements) {
     const lineText = document.lineAt(line).text;
-    // Не ставим lens на чужие строки, если range уехал после include-remap.
-    if (!/^\s*MATR\b/i.test(lineText)) continue;
-
     const range = new vscode.Range(line, 0, line, lineText.length);
     const title = formatMatrCodeLensTitle(m);
     if (!title) continue;
@@ -101,8 +149,8 @@ export function buildMatrCodeLenses(
         arguments: [
           documentUri,
           {
-            start: { line: m.range.start.line, character: m.range.start.character },
-            end: { line: m.range.end.line, character: m.range.end.character },
+            start: { line, character: 0 },
+            end: { line, character: lineText.length },
           },
         ],
       })

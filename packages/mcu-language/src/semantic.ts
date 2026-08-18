@@ -20,11 +20,13 @@ import { analyzeMatrCardParams } from "./matrCardValidation";
 import { analyzeNuclideParameterCounts } from "./nuclideParamValidation";
 import { analyzePositiveQuantities } from "./positiveQuantities";
 import { analyzeUndefinedVariables } from "./variableRefs";
-import { computeMaterialMassDensityGcm3 } from "./materialDensity";
+import { analyzeMaterialMassDensity } from "./materialDensity";
 import { analyzeMaterialActivity } from "./materialActivity";
+import { getAwLibEntry, getAwLibTable } from "./awLib";
 import {
   buildSumIsotopeStatesByOffset,
   evaluateSumIsotopeMembership,
+  isSumIsotopeMember,
 } from "./sumIsotope";
 import { materialVolumeCm3, parseMaterialVolumes } from "./materialVolumes";
 import { buildZoneRegistrationMap } from "./zoneRegistration";
@@ -153,13 +155,18 @@ export function analyzeSemantics(ast: DocumentAst): DiagnosticMessage[] {
           siden: null,
         };
         const matVars = buildScopedVars(ast.constants, m.range.offset, "global");
-        const memberships = m.nuclides.map((n) =>
-          evaluateSumIsotopeMembership(n, sumState, matVars)
-        );
-        if (memberships.every((x) => x.inSum)) {
-          const kinds = [...new Set(memberships.flatMap((x) => x.kinds))].map((k) =>
-            k.toUpperCase()
-          );
+        let allInSum = true;
+        const kindSet = new Set<string>();
+        for (const n of m.nuclides) {
+          const x = evaluateSumIsotopeMembership(n, sumState, matVars);
+          if (!x.inSum) {
+            allInSum = false;
+            break;
+          }
+          for (const k of x.kinds) kindSet.add(k);
+        }
+        if (allInSum) {
+          const kinds = [...kindSet].map((k) => k.toUpperCase());
           diags.push({
             severity: "error",
             message: `MATR ${m.number}: материал пуст — все нуклиды в суммарном изотопе (${kinds.join("/")})`,
@@ -367,15 +374,20 @@ export function buildSummaries(ast: DocumentAst): {
   nets: NetSummary[];
   lattices: LatticeSummary[];
 } {
+  const hasAwLib = Boolean(getAwLibTable()?.entryCount);
   const volumes = parseMaterialVolumes(ast);
   const sumStates = buildSumIsotopeStatesByOffset(
     ast.statements,
     ast.materials.map((m) => m.range.offset),
     ast.constants
   );
+  /** Полный список нуклидов в summaries раздувает JSON/память на full-core; счётчики оставляем. */
+  const totalNuc = ast.materials.reduce((n, m) => n + m.nuclides.length, 0);
+  const keepNuclideRows = totalNuc <= 2_000;
   const materials: MaterialSummary[] = ast.materials.map((m) => {
     const vars = buildScopedVars(ast.constants, m.range.offset, "global");
-    const massDensityGcm3 = computeMaterialMassDensityGcm3(m, vars);
+    const density = analyzeMaterialMassDensity(m, vars);
+    const massDensityGcm3 = density.rho;
     const volumeCm3 = materialVolumeCm3(volumes, m.number);
     const massG =
       volumeCm3 != null && massDensityGcm3 != null && massDensityGcm3 > 0
@@ -386,16 +398,42 @@ export function buildSummaries(ast: DocumentAst): {
       list: new Set<string>(),
       siden: null,
     };
-    const nuclides = m.nuclides.map((n) => {
-      const sum = evaluateSumIsotopeMembership(n, sumState, vars);
-      return {
-        name: n.name,
-        concentration: n.density,
-        range: n.range,
-        ...(sum.inSum ? { sumIsotope: { reasons: sum.reasons } } : {}),
-      };
-    });
-    const sumIsotopeCount = nuclides.filter((n) => n.sumIsotope).length;
+    let usedNuclideCount = density.usedCount;
+    let sumIsotopeCount = 0;
+    let sumIsotopeUsedCount = 0;
+    let sumIsotopeMissingAwLibCount = 0;
+    const nuclides = keepNuclideRows
+      ? m.nuclides.map((n) => {
+          const sum = evaluateSumIsotopeMembership(n, sumState, vars);
+          const inAwLib = hasAwLib ? Boolean(getAwLibEntry(n.name)) : undefined;
+          if (sum.inSum) {
+            sumIsotopeCount++;
+            if (hasAwLib) {
+              if (inAwLib) sumIsotopeUsedCount++;
+              else sumIsotopeMissingAwLibCount++;
+            }
+          }
+          return {
+            name: n.name,
+            concentration: n.density,
+            range: n.range,
+            ...(sum.inSum ? { sumIsotope: { reasons: sum.reasons, ...(hasAwLib ? { inAwLib } : {}) } } : {}),
+          };
+        })
+      : [];
+    if (!keepNuclideRows) {
+      const needScan = sumState.listMode === "si" || sumState.siden != null;
+      if (needScan) {
+        for (const n of m.nuclides) {
+          if (!isSumIsotopeMember(n, sumState, vars)) continue;
+          sumIsotopeCount++;
+          if (hasAwLib) {
+            if (getAwLibEntry(n.name)) sumIsotopeUsedCount++;
+            else sumIsotopeMissingAwLibCount++;
+          }
+        }
+      }
+    }
     const activity = analyzeMaterialActivity(m, vars);
     const activityBqPerG =
       activity.totalBqPerCm3 != null && massDensityGcm3 != null && massDensityGcm3 > 0
@@ -406,7 +444,10 @@ export function buildSummaries(ast: DocumentAst): {
       group: m.group,
       temperature: m.temperature,
       nuclideCount: m.nuclides.length,
+      usedNuclideCount,
       sumIsotopeCount,
+      sumIsotopeUsedCount,
+      sumIsotopeMissingAwLibCount,
       nuclidesPreview: m.nuclides.map((n) => n.name).slice(0, 5).join(", ") + (m.nuclides.length > 5 ? "…" : ""),
       massDensityGcm3,
       volumeCm3,

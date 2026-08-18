@@ -10,6 +10,8 @@ import {
   FoldingRangeParams,
   DocumentLinkParams,
   TextDocumentSyncKind,
+  type Diagnostic,
+  type TextDocumentContentChangeEvent,
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { fileURLToPath } from "url";
@@ -32,7 +34,7 @@ import {
   verifyParameteThrAgainstIaea,
 } from "./parameteThrVerify";
 import { getLiveChartGroundStates, scheduleLiveChartCacheRefresh } from "./iaeaLiveChartCache";
-import { getAwLibTable, getParameteThrTable } from "@mcuhelper/mcu-language";
+import { getAwLibTable, getParameteThrTable, listAwLibCatalog } from "@mcuhelper/mcu-language";
 import { warmupLanguageServer } from "./warmup";
 import { setCachedSolverResult } from "./solver";
 import {
@@ -46,6 +48,7 @@ import {
   ensureSourceDocumentIndex,
   resolveHoverDocumentIndex,
   handleGetIndex,
+  handleGetIsotopeMarks,
   handleGetIncludeGraph,
   handleGetGeometry,
   handleQueryPoint,
@@ -53,15 +56,25 @@ import {
   handleValidateInput,
   handleRunMcuStep,
   handleGetDiagnostics,
+  dbgLsp,
   syncSettingsFromInitialize,
   applyServerSettings,
   setIncludeTextOverridesProvider,
   buildIncludeTextOverridesFromDocs,
   type McuServerSettings,
 } from "./serverHandlers";
+import { DiagnosticPublishPipeline, LARGE_DOC_LINE_THRESHOLD, shouldSkipBackgroundValidate, shouldChainValidateAgain, shouldScheduleValidateOnDidChange, shouldRescheduleAfterStale, shouldValidateOnActiveDocumentChange, decideStaleValidate } from "./diagnosticPipeline";
 
 const connection = createConnection(ProposedFeatures.all);
-const documents = new TextDocuments(TextDocument);
+const pendingContentChanges = new Map<string, TextDocumentContentChangeEvent[]>();
+const diagPipeline = new DiagnosticPublishPipeline<Diagnostic>();
+const documents = new TextDocuments({
+  create: (uri, languageId, version, content) => TextDocument.create(uri, languageId, version, content),
+  update: (document, changes, version) => {
+    pendingContentChanges.set(document.uri, changes.slice());
+    return TextDocument.update(document, changes, version);
+  },
+});
 
 setIncludeTextOverridesProvider(() => buildIncludeTextOverridesFromDocs(documents.all()));
 
@@ -276,8 +289,14 @@ async function readWorkspaceSettings(): Promise<void> {
 }
 
 const DIAGNOSTIC_DEBOUNCE_MS = 250;
+/** Full-core: дать нескольким правкам пройти через optimistic patch, пока LSP свободен. */
+const DIAGNOSTIC_DEBOUNCE_LARGE_MS = 4500;
+/** Активный URI из клиента — не гонять 8с validate 3l, когда уже открыт 958. */
+let activeDocumentUri: string | undefined;
 
 const diagnosticTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const validateInFlight = new Map<string, Promise<void>>();
+const validateAgain = new Set<string>();
 
 function clearDiagnosticTimer(uri: string): void {
   const t = diagnosticTimers.get(uri);
@@ -285,6 +304,48 @@ function clearDiagnosticTimer(uri: string): void {
     clearTimeout(t);
     diagnosticTimers.delete(uri);
   }
+}
+
+function diagnosticDebounceMs(doc: TextDocument): number {
+  return doc.lineCount > LARGE_DOC_LINE_THRESHOLD ? DIAGNOSTIC_DEBOUNCE_LARGE_MS : DIAGNOSTIC_DEBOUNCE_MS;
+}
+
+/** Один yield: 16 тиков в логах давали 15–25с и успевали запустить ещё parse 3l. */
+async function yieldIncomingLspOnce(): Promise<void> {
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+}
+
+type DiagPublishKind = "patch" | "validate";
+
+function publishDiagnostics(uri: string, diagnostics: Diagnostic[], kind: DiagPublishKind): void {
+  const version = documents.get(uri)?.version;
+  connection.sendNotification("mcuhelper/diagEpoch", { uri, version: version ?? null, kind });
+  const stamped =
+    version == null
+      ? diagnostics
+      : diagnostics.map((d) => ({
+          ...d,
+          data: {
+            ...(d.data && typeof d.data === "object" ? (d.data as Record<string, unknown>) : {}),
+            v: version,
+            k: kind,
+          },
+        }));
+  connection.sendDiagnostics({ uri, diagnostics: stamped, version });
+}
+
+/** Сразу убрать squiggle только с изменённых строк; остальные не трогаем. */
+function publishPatchedDiagnostics(uri: string, changes: readonly TextDocumentContentChangeEvent[]): void {
+  const prev = diagPipeline.getPublished(uri);
+  const next = diagPipeline.onIncrementalEdit(uri, changes);
+  if (!next) return;
+  publishDiagnostics(uri, next, "patch");
+}
+
+/** Смержить bundle с накопленным патчем и отдать один массив — без вспышки 8→7. */
+function mergePatchedAfterValidate(uri: string, bundleDiags: Diagnostic[]): Diagnostic[] {
+  const next = diagPipeline.afterValidate(uri, bundleDiags);
+  return next;
 }
 
 function scheduleValidateTextDocument(doc: TextDocument): void {
@@ -296,22 +357,77 @@ function scheduleValidateTextDocument(doc: TextDocument): void {
       diagnosticTimers.delete(uri);
       const current = documents.get(uri);
       if (!current) return;
+      if (shouldSkipBackgroundValidate(uri, activeDocumentUri, current.lineCount)) {
+        return;
+      }
       void validateTextDocument(current);
-    }, DIAGNOSTIC_DEBOUNCE_MS)
+    }, diagnosticDebounceMs(doc))
   );
 }
 
 async function validateTextDocument(doc: TextDocument): Promise<void> {
   const uri = doc.uri;
+  const existing = validateInFlight.get(uri);
+  if (existing) {
+    const current = documents.get(uri) ?? doc;
+    if (!shouldChainValidateAgain(current.lineCount)) {
+      return existing;
+    }
+    validateAgain.add(uri);
+    return existing;
+  }
+  const run = (async () => {
+    try {
+      do {
+        validateAgain.delete(uri);
+        const current = documents.get(uri) ?? doc;
+        if (shouldSkipBackgroundValidate(uri, activeDocumentUri, current.lineCount)) break;
+        await validateTextDocumentOnce(current);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      } while (validateAgain.has(uri) && documents.get(uri));
+    } finally {
+      validateInFlight.delete(uri);
+    }
+  })();
+  validateInFlight.set(uri, run);
+  return run;
+}
+
+async function validateTextDocumentOnce(doc: TextDocument): Promise<void> {
+  const uri = doc.uri;
+  if (doc.lineCount > LARGE_DOC_LINE_THRESHOLD) {
+    await yieldIncomingLspOnce();
+  }
+  const current = documents.get(uri) ?? doc;
+  if (shouldSkipBackgroundValidate(uri, activeDocumentUri, current.lineCount)) {
+    return;
+  }
   // Уступаем очередь hover/completion — иначе тяжёлые diagnostics блокируют LSP на минуты.
   await new Promise<void>((resolve) => setImmediate(resolve));
+  const analyzing = documents.get(uri) ?? current;
+  const versionAtStart = analyzing.version;
   const extra = solverDiagnostics.get(uri) ?? [];
-  const bundle = collectDiagnosticsBundle(doc, extra);
-  connection.sendDiagnostics({ uri, diagnostics: bundle.diagnostics });
+  const bundle = collectDiagnosticsBundle(analyzing, extra);
+  await yieldIncomingLspOnce();
+  const liveVersion = documents.get(uri)?.version;
+  if (liveVersion != null && decideStaleValidate(versionAtStart, liveVersion) === "schedule-debounce") {
+    const current = documents.get(uri);
+    if (
+      current &&
+      shouldRescheduleAfterStale(current.lineCount) &&
+      !diagnosticTimers.has(uri) &&
+      !shouldSkipBackgroundValidate(uri, activeDocumentUri, current.lineCount)
+    ) {
+      scheduleValidateTextDocument(current);
+    }
+    return;
+  }
+  const toSend = mergePatchedAfterValidate(uri, bundle.diagnostics);
+  publishDiagnostics(uri, toSend, "validate");
 
   // Всегда регистрируем parent↔include из AST (даже без diagnostics в include),
   // чтобы правка/save include инвалидировала parent.
-  const index = ensureDocumentIndex(doc);
+  const index = ensureDocumentIndex(analyzing);
   for (const inc of index.ast.includes) {
     if (!inc.uri) continue;
     let parents = parentUrisByInclude.get(inc.uri);
@@ -382,8 +498,14 @@ function refreshParentDocuments(includeUri: string): void {
 }
 
 documents.onDidChangeContent((change) => {
-  scheduleValidateTextDocument(change.document);
-  refreshParentDocuments(change.document.uri);
+  const uri = change.document.uri;
+  const changes = pendingContentChanges.get(uri) ?? [];
+  pendingContentChanges.delete(uri);
+  publishPatchedDiagnostics(uri, changes);
+  if (shouldScheduleValidateOnDidChange(uri, activeDocumentUri, change.document.lineCount)) {
+    scheduleValidateTextDocument(change.document);
+  }
+  refreshParentDocuments(uri);
 });
 
 documents.onDidOpen((event) => {
@@ -396,7 +518,9 @@ documents.onDidOpen((event) => {
 documents.onDidClose((event) => {
   const uri = event.document.uri;
   clearDiagnosticTimer(uri);
-  clearDocument(uri);
+  diagPipeline.clear(uri);
+  pendingContentChanges.delete(uri);
+  // Не clearDocument: повторный parse 16MB+ (3l070626) — минуты. Кэш по version/hash.
   const includeUris = publishedIncludeUrisByParent.get(uri);
   if (includeUris) {
     for (const includeUri of includeUris) {
@@ -506,7 +630,26 @@ connection.onDocumentLinks((params: DocumentLinkParams) => {
   return buildDocumentLinks(index, params.textDocument.uri);
 });
 
-connection.onRequest("mcuhelper/getIndex", (args) => handleGetIndex(args, getDoc));
+connection.onRequest("mcuhelper/getIndex", async (args) => {
+  const uri = typeof args === "string" ? args : args?.uri ?? "";
+  // Пока validate/edit в очереди — не занимать поток тяжёлым getIndex.
+  for (let i = 0; i < 8; i++) {
+    const hot =
+      (uri && validateInFlight.has(uri)) ||
+      (uri && diagnosticTimers.has(uri)) ||
+      (uri && pendingContentChanges.has(uri));
+    if (!hot) break;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const result = handleGetIndex(args, getDoc);
+  return result;
+});
+
+connection.onRequest("mcuhelper/getIsotopeMarks", (args: { uri: string; visibleStart?: number; visibleEnd?: number }) => {
+  const result = handleGetIsotopeMarks(args, getDoc);
+  return result;
+});
 
 connection.onRequest("mcuhelper/getIncludeGraph", (args: string | { uri: string }) =>
   handleGetIncludeGraph(args, getDoc)
@@ -516,6 +659,8 @@ connection.onRequest("mcuhelper/getNaturalIsotopeLines", async (args: { element:
   return getNaturalIsotopeLines(args.element, args.concentration);
 });
 
+connection.onRequest("mcuhelper/getAwLibCatalog", () => listAwLibCatalog());
+
 connection.onRequest("mcuhelper/getGeometry", (args: string | { uri: string; line?: number; character?: number }) =>
   handleGetGeometry(args, getDoc)
 );
@@ -523,6 +668,28 @@ connection.onRequest("mcuhelper/getGeometry", (args: string | { uri: string; lin
 connection.onRequest("mcuhelper/queryPoint", (args) => handleQueryPoint(args, getDoc));
 
 connection.onRequest("mcuhelper/getSlice", (args) => handleGetSlice(args, getDoc));
+
+connection.onNotification("mcuhelper/activeDocument", (args: { uri?: string }) => {
+  const nextUri = args?.uri;
+  const shouldValidate = shouldValidateOnActiveDocumentChange(activeDocumentUri, nextUri);
+  activeDocumentUri = nextUri;
+  connection.sendNotification("mcuhelper/activeDocumentAck", {
+    uri: activeDocumentUri,
+  });
+  for (const uri of [...validateAgain]) {
+    if (uri !== activeDocumentUri) validateAgain.delete(uri);
+  }
+  for (const [uri, t] of diagnosticTimers) {
+    if (uri === activeDocumentUri) continue;
+    clearTimeout(t);
+    diagnosticTimers.delete(uri);
+  }
+  if (!shouldValidate) return;
+  const focused = activeDocumentUri ? documents.get(activeDocumentUri) : undefined;
+  if (focused) {
+    void validateTextDocument(focused);
+  }
+});
 
 connection.onRequest("mcuhelper/getDiagnostics", (args: { uri: string }) => {
   const extra = solverDiagnostics.get(args.uri) ?? [];

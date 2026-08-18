@@ -1,12 +1,14 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 import {
+  decorationRangesSignature,
   isSumIsotopeCardLine,
   nuclideCompositionEditorRange,
   nuclideConcentrationEditorRange,
   nuclideNameEditorRange,
+  sumIsotopeHoverMessage,
 } from "./sumIsotopeDecorations";
-
+import * as vscode from "vscode";
 describe("sumIsotopeDecorations", () => {
   it("finds nuclide name on composition line", () => {
     const doc = {
@@ -78,5 +80,52 @@ describe("sumIsotopeDecorations", () => {
     });
     assert.ok(r);
     assert.strictEqual(r!.start.character, 0);
+  });
+
+  it("finds nuclide on a later line when range still starts at MATR header", () => {
+    const lines = ["MATR 1 T=300", " FP1 1e-8", " U235 1e-2"];
+    const doc = {
+      lineCount: lines.length,
+      lineAt: (arg: number | { line: number }) => {
+        const i = typeof arg === "number" ? arg : arg.line;
+        return { text: lines[i]! };
+      },
+    };
+    const r = nuclideCompositionEditorRange(doc as never, "FP1", {
+      start: { line: 0, character: 0 },
+      end: { line: 2, character: 10 },
+    });
+    assert.ok(r);
+    assert.strictEqual(r!.start.line, 1);
+    assert.strictEqual(r!.start.character, 1);
+  });
+
+  it("sum-isotope hover is structured list, not a semicolon-joined line", () => {
+    const md = sumIsotopeHoverMessage({
+      name: "GE72",
+      range: { start: { line: 0, character: 0 }, end: { line: 0, character: 8 } },
+      inAwLib: false,
+      reasons: [
+        "входит в суммарный изотоп (указан в SI)",
+        "входит в суммарный изотоп (SIDEN: плотность 5.8647E-12 меньше 1.0000e-10)",
+      ],
+    });
+    const text = md.value;
+    assert.ok(text.includes("Нуклид включён в суммарный изотоп."));
+    assert.ok(text.includes("Записи в `AW.LIB` нет"));
+    assert.ok(text.includes("- входит в суммарный изотоп (указан в SI)"));
+    assert.ok(!text.includes("указан в SI); входит"), text);
+  });
+
+  it("decorationRangesSignature is compact and stable", () => {
+    const a = [
+      { range: new vscode.Range(1, 0, 1, 8) },
+      { range: new vscode.Range(2, 0, 2, 9) },
+    ];
+    const s1 = decorationRangesSignature(a);
+    const s2 = decorationRangesSignature(a);
+    assert.strictEqual(s1, s2);
+    assert.ok(s1.length < 80, s1);
+    assert.ok(s1.startsWith("2:"));
   });
 });
