@@ -107,6 +107,7 @@ export interface IndexPayload {
         name: string;
         concentration: string;
         range: SourceRange;
+        uri?: string;
         sumIsotope?: { reasons: string[]; inAwLib?: boolean };
       }>;
       range: SourceRange;
@@ -119,6 +120,7 @@ export interface IndexPayload {
       regNum?: number;
       objNum?: number;
       range: SourceRange;
+      uri?: string;
     }>;
     objects: Array<{
       objectNum: number;
@@ -144,6 +146,7 @@ export interface IndexPayload {
       transf?: boolean;
       protoName?: string;
       range: SourceRange;
+      uri?: string;
     }>;
     nets: Array<{
       name: string;
@@ -153,16 +156,18 @@ export interface IndexPayload {
       layers?: number;
       typeMapRowCount: number;
       cartogram: Array<{ row: number; label: string; prototypes: string[] }>;
-      carrierZones: Array<{ name: string; range: SourceRange }>;
-      prototypes: Array<{ name: string; range?: SourceRange }>;
+      carrierZones: Array<{ name: string; range: SourceRange; uri?: string }>;
+      prototypes: Array<{ name: string; range?: SourceRange; uri?: string }>;
       range: SourceRange;
+      uri?: string;
     }>;
     lattices: Array<{
       latticeType: string;
       zoneNames: string[];
-      elements: Array<{ name: string; range?: SourceRange }>;
+      elements: Array<{ name: string; range?: SourceRange; uri?: string }>;
       positionsPreview: string;
       range: SourceRange;
+      uri?: string;
     }>;
   };
   /** Компактные метки суммарного изотопа для серых decorations (всегда, даже при slim). */
@@ -251,6 +256,47 @@ export function formatMaterialNuclideCounts(m: {
   const missingAw = m.sumIsotopeMissingAwLibCount ?? 0;
   if (missingAw > 0) parts.push(`нет в AW: ${missingAw}`);
   return parts;
+}
+
+function normalizeNavFileUri(uri: string): string {
+  try {
+    return decodeURIComponent(uri).replace(/\\/g, "/").toLowerCase();
+  } catch {
+    return uri.replace(/\\/g, "/").toLowerCase();
+  }
+}
+
+export function sameNavFileUri(a?: string | null, b?: string | null): boolean {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  return normalizeNavFileUri(a) === normalizeNavFileUri(b);
+}
+
+/**
+ * Клик в сайдбаре: символ в текущем файле → его строка;
+ * спрятан в `#include` → директива include в варианте (не начало файла и не expanded-строка).
+ */
+export function sidebarClickTarget(
+  index: IndexPayload,
+  mainUri: string,
+  itemUri: string | undefined,
+  itemRange: SourceRange | undefined
+): { uri: string; range?: SourceRange } {
+  if (itemUri && !sameNavFileUri(itemUri, mainUri)) {
+    const inc = (index.includes ?? []).find((i) => i.uri && sameNavFileUri(i.uri, itemUri));
+    if (inc?.range) return { uri: mainUri, range: inc.range };
+    const g = (index.includeGraph ?? []).find((n) => n.uri && sameNavFileUri(n.uri, itemUri));
+    if (g) {
+      return {
+        uri: mainUri,
+        range: {
+          start: { line: g.mainLine, character: 0 },
+          end: { line: g.mainLine, character: 0 },
+        },
+      };
+    }
+  }
+  return { uri: itemUri ?? mainUri, range: itemRange };
 }
 
 function formatActivitySidebar(bqPerG: number): string {
@@ -505,18 +551,20 @@ export function buildMaterialsTree(
     const titleParts: string[] = [];
     if (m.group) titleParts.push(`[${m.group}]`);
     if (m.temperature != null) titleParts.push(`T=${m.temperature}`);
+    const click = sidebarClickTarget(index, uri, m.uri, m.range);
     return {
       id: `mat-${m.number}`,
       label: titleParts.length > 0 ? titleParts.join(" ") : `MATR ${m.number}`,
       description: parts.join(" · "),
       badges: badges.length ? badges : undefined,
-      uri,
-      range: m.range,
+      uri: click.uri,
+      range: click.range,
       children: m.nuclides.map((n, i) => {
         const suggestKey = `${n.range.start.line}:${n.name.toUpperCase()}`;
         const suggest = Boolean(suggestSumIsotope?.has(suggestKey)) && !n.sumIsotope;
         const sumMissingAw = n.sumIsotope?.inAwLib === false;
         const sumInAw = Boolean(n.sumIsotope) && n.sumIsotope?.inAwLib !== false;
+        const nClick = sidebarClickTarget(index, uri, n.uri ?? m.uri, n.range);
         const child: NavTreeNode = {
           id: `mat-${m.number}-n-${i}`,
           label: sumMissingAw ? `Σ! ${n.name}` : sumInAw ? `Σ ${n.name}` : n.name,
@@ -530,8 +578,8 @@ export function buildMaterialsTree(
           tooltip: sumMissingAw
             ? ["нет в AW.LIB", ...(n.sumIsotope?.reasons ?? [])].join("; ")
             : n.sumIsotope?.reasons?.join("; "),
-          uri,
-          range: n.range,
+          uri: nClick.uri,
+          range: nClick.range,
         };
         if (suggest) {
           child.action = {
@@ -540,7 +588,7 @@ export function buildMaterialsTree(
             title: "Добавить в суммарный изотоп",
             command: "mcuhelper.addToSumIsotope",
             args: {
-              uri,
+              uri: n.uri ?? m.uri ?? uri,
               line: n.range.start.line,
               nuclideName: n.name,
             },
@@ -553,13 +601,16 @@ export function buildMaterialsTree(
 }
 
 export function buildZonesTree(index: IndexPayload, uri: string): NavTreeNode[] {
-  return index.summaries.zones.map((z) => ({
-    id: `zone-${z.name}`,
-    label: z.name,
-    description: `M${z.materialNum ?? "?"} Z${z.regNum ?? "?"} O${z.objNum ?? "?"} — ${z.expression}`,
-    uri,
-    range: z.range,
-  }));
+  return index.summaries.zones.map((z) => {
+    const click = sidebarClickTarget(index, uri, z.uri, z.range);
+    return {
+      id: `zone-${z.name}`,
+      label: z.name,
+      description: `M${z.materialNum ?? "?"} Z${z.regNum ?? "?"} O${z.objNum ?? "?"} — ${z.expression}`,
+      uri: click.uri,
+      range: click.range,
+    };
+  });
 }
 
 export function buildObjectsTree(index: IndexPayload, uri: string): NavTreeNode[] {
@@ -581,23 +632,24 @@ export function buildObjectsTree(index: IndexPayload, uri: string): NavTreeNode[
   return index.summaries.objects.map((o) => {
     const children = o.zoneNames.map((zn, i) => {
       const zone = zoneForObject(zn, o.objectNum);
+      const click = zone ? sidebarClickTarget(index, uri, zone.uri, zone.range) : { uri: undefined, range: undefined };
       return {
         id: `obj-${o.objectNum}-z-${i}`,
         label: zn,
         description: `мат. ${o.materialNums.join(",")}`,
-        uri: zone ? uri : undefined,
-        range: zone?.range,
+        uri: click.uri,
+        range: click.range,
       };
     });
 
-    const firstClickableRange = children.find((c) => c.uri && c.range)?.range;
+    const firstClickable = children.find((c) => c.uri && c.range);
 
     return {
       id: `obj-${o.objectNum}`,
       label: `Object ${o.objectNum}`,
       description: `Зоны: ${o.zoneNames.join(", ")}`,
-      uri,
-      range: firstClickableRange,
+      uri: firstClickable?.uri ?? uri,
+      range: firstClickable?.range,
       children,
     };
   });
@@ -647,119 +699,144 @@ export function buildBodiesTree(index: IndexPayload, uri: string): NavTreeNode[]
       id: `scope-${scope}`,
       label: formatBodyScope(scope),
       description: `${bodies.length} тел`,
-      children: bodies.map((b) => ({
-        id: `body-${b.name}-${scope}`,
-        label: b.name,
-        description: formatBodyDescription(b),
-        uri,
-        range: b.range,
-      })),
+      children: bodies.map((b) => {
+        const click = sidebarClickTarget(index, uri, b.uri, b.range);
+        return {
+          id: `body-${b.name}-${scope}`,
+          label: b.name,
+          description: formatBodyDescription(b),
+          uri: click.uri,
+          range: click.range,
+        };
+      }),
     }));
 }
 
 export function buildNetsTree(index: IndexPayload, uri: string): NavTreeNode[] {
-  return (index.summaries.nets ?? []).map((net) => ({
-    id: `net-${net.name}`,
-    label: net.name,
-    description: formatNetGrid(net),
-    uri,
-    range: net.range,
-    children: [
-      ...(net.cartogram.length > 0
-        ? [
-            {
-              id: `net-${net.name}-cart`,
-              label: "Картограмма",
-              description: `${net.typeMapRowCount} строк`,
-              children: net.cartogram.map((row, i) => ({
-                id: `net-${net.name}-cart-${i}`,
-                label: row.label,
-                description: row.prototypes.join(" "),
-              })),
-            },
-          ]
-        : []),
-      ...(net.prototypes.length > 0
-        ? [
-            {
-              id: `net-${net.name}-proto`,
-              label: "Прототипы CELL",
-              description: `${net.prototypes.length} шт.`,
-              children: net.prototypes.map((p, i) => ({
-                id: `net-${net.name}-proto-${i}`,
-                label: p.name,
-                description: "CELL",
-                uri: p.range ? uri : undefined,
-                range: p.range,
-              })),
-            },
-          ]
-        : []),
-      ...(net.carrierZones.length > 0
-        ? [
-            {
-              id: `net-${net.name}-cz`,
-              label: "Зоны-носители",
-              description: net.carrierZones.map((z) => z.name).join(", "),
-              children: net.carrierZones.map((z, i) => ({
-                id: `net-${net.name}-cz-${i}`,
-                label: z.name,
-                description: "(NET)",
-                uri,
-                range: z.range,
-              })),
-            },
-          ]
-        : []),
-    ].filter((g) => g.children && g.children.length > 0),
-  }));
+  return (index.summaries.nets ?? []).map((net) => {
+    const click = sidebarClickTarget(index, uri, net.uri, net.range);
+    return {
+      id: `net-${net.name}`,
+      label: net.name,
+      description: formatNetGrid(net),
+      uri: click.uri,
+      range: click.range,
+      children: [
+        ...(net.cartogram.length > 0
+          ? [
+              {
+                id: `net-${net.name}-cart`,
+                label: "Картограмма",
+                description: `${net.typeMapRowCount} строк`,
+                children: net.cartogram.map((row, i) => ({
+                  id: `net-${net.name}-cart-${i}`,
+                  label: row.label,
+                  description: row.prototypes.join(" "),
+                })),
+              },
+            ]
+          : []),
+        ...(net.prototypes.length > 0
+          ? [
+              {
+                id: `net-${net.name}-proto`,
+                label: "Прототипы CELL",
+                description: `${net.prototypes.length} шт.`,
+                children: net.prototypes.map((p, i) => {
+                  const pClick = p.range
+                    ? sidebarClickTarget(index, uri, p.uri, p.range)
+                    : { uri: undefined as string | undefined, range: undefined };
+                  return {
+                    id: `net-${net.name}-proto-${i}`,
+                    label: p.name,
+                    description: "CELL",
+                    uri: pClick.uri,
+                    range: pClick.range,
+                  };
+                }),
+              },
+            ]
+          : []),
+        ...(net.carrierZones.length > 0
+          ? [
+              {
+                id: `net-${net.name}-cz`,
+                label: "Зоны-носители",
+                description: net.carrierZones.map((z) => z.name).join(", "),
+                children: net.carrierZones.map((z, i) => {
+                  const zClick = sidebarClickTarget(index, uri, z.uri, z.range);
+                  return {
+                    id: `net-${net.name}-cz-${i}`,
+                    label: z.name,
+                    description: "(NET)",
+                    uri: zClick.uri,
+                    range: zClick.range,
+                  };
+                }),
+              },
+            ]
+          : []),
+      ].filter((g) => g.children && g.children.length > 0),
+    };
+  });
 }
 
 export function buildLatticesTree(index: IndexPayload, uri: string): NavTreeNode[] {
-  return (index.summaries.lattices ?? []).map((lat, li) => ({
-    id: `latt-${li}`,
-    label: `LATT ${lat.latticeType}`,
-    description: `→ ${lat.zoneNames.join(", ") || "?"}`,
-    uri,
-    range: lat.range,
-    children: [
-      ...(lat.zoneNames.length > 0
-        ? [
-            {
-              id: `latt-${li}-zones`,
-              label: "Зоны-носители",
-              description: lat.zoneNames.join(", "),
-              children: lat.zoneNames.map((zn, i) => {
-                const zone = index.summaries.zones.find((z) => z.name === zn);
-                return {
-                  id: `latt-${li}-zn-${i}`,
-                  label: zn,
-                  description: zone?.expression ?? "",
-                  uri: zone ? uri : undefined,
-                  range: zone?.range,
-                };
-              }),
-            },
-          ]
-        : []),
-      ...(lat.elements.length > 0
-        ? [
-            {
-              id: `latt-${li}-listel`,
-              label: "LISTEL",
-              description: lat.positionsPreview || `${lat.elements.length} эл.`,
-              children: lat.elements.map((el, i) => ({
-                id: `latt-${li}-el-${i}`,
-                label: `${i + 1}. ${el.name}`,
-                description: "LCELL",
-                uri: el.range ? uri : undefined,
-                range: el.range,
-              })),
-            },
-          ]
-        : []),
-    ].filter((g) => g.children && g.children.length > 0),
-  }));
+  return (index.summaries.lattices ?? []).map((lat, li) => {
+    const click = sidebarClickTarget(index, uri, lat.uri, lat.range);
+    return {
+      id: `latt-${li}`,
+      label: `LATT ${lat.latticeType}`,
+      description: `→ ${lat.zoneNames.join(", ") || "?"}`,
+      uri: click.uri,
+      range: click.range,
+      children: [
+        ...(lat.zoneNames.length > 0
+          ? [
+              {
+                id: `latt-${li}-zones`,
+                label: "Зоны-носители",
+                description: lat.zoneNames.join(", "),
+                children: lat.zoneNames.map((zn, i) => {
+                  const zone = index.summaries.zones.find((z) => z.name === zn);
+                  const zClick = zone
+                    ? sidebarClickTarget(index, uri, zone.uri, zone.range)
+                    : { uri: undefined as string | undefined, range: undefined };
+                  return {
+                    id: `latt-${li}-zn-${i}`,
+                    label: zn,
+                    description: zone?.expression ?? "",
+                    uri: zClick.uri,
+                    range: zClick.range,
+                  };
+                }),
+              },
+            ]
+          : []),
+        ...(lat.elements.length > 0
+          ? [
+              {
+                id: `latt-${li}-listel`,
+                label: "LISTEL",
+                description: lat.positionsPreview || `${lat.elements.length} эл.`,
+                children: lat.elements.map((el, i) => {
+                  const elClick = el.range
+                    ? sidebarClickTarget(index, uri, el.uri, el.range)
+                    : { uri: undefined as string | undefined, range: undefined };
+                  return {
+                    id: `latt-${li}-el-${i}`,
+                    label: `${i + 1}. ${el.name}`,
+                    description: "LCELL",
+                    uri: elClick.uri,
+                    range: elClick.range,
+                  };
+                }),
+              },
+            ]
+          : []),
+      ].filter((g) => g.children && g.children.length > 0),
+    };
+  });
 }
 
 export function buildNavTree(

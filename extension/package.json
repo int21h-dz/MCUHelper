@@ -444,13 +444,8 @@
         },
         {
           "type": "webview",
-          "id": "mcuhelper.nets",
-          "name": "Сети"
-        },
-        {
-          "type": "webview",
-          "id": "mcuhelper.lattices",
-          "name": "Решётки"
+          "id": "mcuhelper.objects",
+          "name": "Объекты"
         },
         {
           "type": "webview",
@@ -459,8 +454,13 @@
         },
         {
           "type": "webview",
-          "id": "mcuhelper.objects",
-          "name": "Объекты"
+          "id": "mcuhelper.nets",
+          "name": "Сети"
+        },
+        {
+          "type": "webview",
+          "id": "mcuhelper.lattices",
+          "name": "Решётки"
         }
       ]
     },

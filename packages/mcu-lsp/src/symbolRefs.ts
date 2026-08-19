@@ -134,7 +134,55 @@ export function rangeToEditorLocation(index: DocumentIndex, range: SourceRange):
       range: { start: range.start, end: range.end },
     };
   }
+  // Include без URI файла: всё равно есть строка `#include` в main.
+  if (entry?.source === "include") {
+    const mainLine = entry.mainIncludeLine ?? entry.mainLine;
+    return {
+      uri: index.uri,
+      range: {
+        start: { line: mainLine, character: 0 },
+        end: { line: mainLine, character: range.end.character },
+      },
+    };
+  }
   return null;
+}
+
+/** Подставить uri/range в координатах редактора (main или файл `#include`). */
+export function applyEditorLocation<T extends { range: SourceRange }>(
+  index: DocumentIndex,
+  item: T
+): (T & { uri: string }) | null {
+  const loc = rangeToEditorLocation(index, item.range);
+  if (!loc) return null;
+  return {
+    ...item,
+    uri: loc.uri,
+    range: {
+      ...item.range,
+      start: loc.range.start,
+      end: loc.range.end,
+    },
+  };
+}
+
+/** Как applyEditorLocation, но range может отсутствовать (прототип CELL / LISTEL). */
+export function applyOptionalEditorLocation<T extends { range?: SourceRange }>(
+  index: DocumentIndex,
+  item: T
+): T & { uri?: string } {
+  if (!item.range) return item;
+  const loc = rangeToEditorLocation(index, item.range);
+  if (!loc) return { ...item, range: undefined };
+  return {
+    ...item,
+    uri: loc.uri,
+    range: {
+      ...item.range,
+      start: loc.range.start,
+      end: loc.range.end,
+    },
+  };
 }
 
 function expandedLineForEditor(index: DocumentIndex, editorLine: number): number {

@@ -203,6 +203,7 @@ export interface MaterialSummary {
         name: string;
         concentration: string;
         range: SourceRange;
+        uri?: string;
         /** Нуклид входит в суммарный изотоп (SI/SINOT/SIDEN, UserGuide §8.5). */
         sumIsotope?: {
             reasons: string[];
@@ -211,6 +212,7 @@ export interface MaterialSummary {
         };
     }>;
     range: SourceRange;
+    uri?: string;
 }
 export interface ZoneSummary {
     name: string;
@@ -219,6 +221,7 @@ export interface ZoneSummary {
     regNum?: number;
     objNum?: number;
     range: SourceRange;
+    uri?: string;
 }
 export interface ObjectSummary {
     objectNum: number;
@@ -245,6 +248,7 @@ export interface BodySummary {
     transf?: boolean;
     protoName?: string;
     range: SourceRange;
+    uri?: string;
 }
 export interface NetCartogramRowSummary {
     row: number;
@@ -262,12 +266,15 @@ export interface NetSummary {
     carrierZones: Array<{
         name: string;
         range: SourceRange;
+        uri?: string;
     }>;
     prototypes: Array<{
         name: string;
         range?: SourceRange;
+        uri?: string;
     }>;
     range: SourceRange;
+    uri?: string;
 }
 export interface LatticeSummary {
     latticeType: string;
@@ -275,7 +282,9 @@ export interface LatticeSummary {
     elements: Array<{
         name: string;
         range?: SourceRange;
+        uri?: string;
     }>;
     positionsPreview: string;
     range: SourceRange;
+    uri?: string;
 }

@@ -238,6 +238,8 @@ export interface MaterialSummary {
     name: string;
     concentration: string;
     range: SourceRange;
+    /** URI файла нуклида (main или `#include`), если отличается от MATR. */
+    uri?: string;
     /** Нуклид входит в суммарный изотоп (SI/SINOT/SIDEN, UserGuide §8.5). */
     sumIsotope?: {
       reasons: string[];
@@ -257,6 +259,8 @@ export interface ZoneSummary {
   regNum?: number;
   objNum?: number;
   range: SourceRange;
+  /** URI файла зоны (main или `#include`). */
+  uri?: string;
 }
 
 export interface ObjectSummary {
@@ -287,6 +291,8 @@ export interface BodySummary {
   protoName?: string;
   transfMode?: string;
   range: SourceRange;
+  /** URI файла тела (main или `#include`). */
+  uri?: string;
 }
 
 export interface NetCartogramRowSummary {
@@ -303,15 +309,19 @@ export interface NetSummary {
   layers?: number;
   typeMapRowCount: number;
   cartogram: NetCartogramRowSummary[];
-  carrierZones: Array<{ name: string; range: SourceRange }>;
-  prototypes: Array<{ name: string; range?: SourceRange }>;
+  carrierZones: Array<{ name: string; range: SourceRange; uri?: string }>;
+  prototypes: Array<{ name: string; range?: SourceRange; uri?: string }>;
   range: SourceRange;
+  /** URI файла NET (main или `#include`). */
+  uri?: string;
 }
 
 export interface LatticeSummary {
   latticeType: string;
   zoneNames: string[];
-  elements: Array<{ name: string; range?: SourceRange }>;
+  elements: Array<{ name: string; range?: SourceRange; uri?: string }>;
   positionsPreview: string;
   range: SourceRange;
+  /** URI файла LATT (main или `#include`). */
+  uri?: string;
 }

@@ -113,12 +113,12 @@
       hint: "Клик — переход к определению · кнопка «Вода / пар» — IF97 dens H/O",
       searchPh: "Фильтр материалов…",
     },
-    "mcuhelper.zones": {
-      title: "Зоны",
-      icon: "zone",
-      accent: "#4a9eff",
-      hint: "Клик — переход к зоне",
-      searchPh: "Фильтр зон…",
+    "mcuhelper.constants": {
+      title: "Константы",
+      icon: "constant",
+      accent: "#fbbf24",
+      hint: "Константы в области курсора (global / LCELL / CELL)",
+      searchPh: "Фильтр констант…",
     },
     "mcuhelper.bodies": {
       title: "Тела",
@@ -127,12 +127,19 @@
       hint: "Клик — переход к телу · «Генератор тел» — конструктор · «Превью тела» — сечения под курсором",
       searchPh: "Фильтр тел…",
     },
-    "mcuhelper.constants": {
-      title: "Константы",
-      icon: "constant",
-      accent: "#fbbf24",
-      hint: "Константы в области курсора (global / LCELL / CELL)",
-      searchPh: "Фильтр констант…",
+    "mcuhelper.objects": {
+      title: "Объекты",
+      icon: "object",
+      accent: "#2dd4bf",
+      hint: "Клик — переход к объекту регистрации",
+      searchPh: "Фильтр объектов…",
+    },
+    "mcuhelper.zones": {
+      title: "Зоны",
+      icon: "zone",
+      accent: "#4a9eff",
+      hint: "Клик — переход к зоне",
+      searchPh: "Фильтр зон…",
     },
     "mcuhelper.nets": {
       title: "Сети",
@@ -147,13 +154,6 @@
       accent: "#a78bfa",
       hint: "Клик — переход к LATT",
       searchPh: "Фильтр решёток…",
-    },
-    "mcuhelper.objects": {
-      title: "Объекты",
-      icon: "object",
-      accent: "#2dd4bf",
-      hint: "Клик — переход к объекту регистрации",
-      searchPh: "Фильтр объектов…",
     },
   };
 

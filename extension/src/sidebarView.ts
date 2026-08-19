@@ -41,20 +41,20 @@ export type SidebarViewId =
   | "mcuhelper.materials"
   | "mcuhelper.constants"
   | "mcuhelper.bodies"
-  | "mcuhelper.nets"
-  | "mcuhelper.lattices"
+  | "mcuhelper.objects"
   | "mcuhelper.zones"
-  | "mcuhelper.objects";
+  | "mcuhelper.nets"
+  | "mcuhelper.lattices";
 
 const NAV_VIEW_MAP: Record<string, NavViewId> = {
   "mcuhelper.fragments": "fragments",
   "mcuhelper.materials": "materials",
   "mcuhelper.constants": "constants",
   "mcuhelper.bodies": "bodies",
+  "mcuhelper.objects": "objects",
+  "mcuhelper.zones": "zones",
   "mcuhelper.nets": "nets",
   "mcuhelper.lattices": "lattices",
-  "mcuhelper.zones": "zones",
-  "mcuhelper.objects": "objects",
 };
 
 let sidebarReadyHandler: (() => void) | undefined;
@@ -362,10 +362,10 @@ export function createSidebarProviders(
     "mcuhelper.materials",
     "mcuhelper.constants",
     "mcuhelper.bodies",
+    "mcuhelper.objects",
+    "mcuhelper.zones",
     "mcuhelper.nets",
     "mcuhelper.lattices",
-    "mcuhelper.zones",
-    "mcuhelper.objects",
   ];
   const map = new Map<SidebarViewId, SidebarViewProvider>();
   for (const id of ids) {
@@ -393,10 +393,10 @@ const NAV_PANELS: SidebarViewId[] = [
   "mcuhelper.materials",
   "mcuhelper.constants",
   "mcuhelper.bodies",
+  "mcuhelper.objects",
+  "mcuhelper.zones",
   "mcuhelper.nets",
   "mcuhelper.lattices",
-  "mcuhelper.zones",
-  "mcuhelper.objects",
 ];
 
 export type SidebarRefreshScope = "all" | "constants";

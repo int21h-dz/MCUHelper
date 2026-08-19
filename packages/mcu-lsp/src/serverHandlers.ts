@@ -31,6 +31,7 @@ import {
   type IncludeLineMapEntry,
   type IncludeTextOverrides,
   type IncludeGraphNode,
+  type SourceRange,
 } from "@mcuhelper/mcu-language";
 import { fileURLToPath } from "url";
 import { isGeoBodyLabel } from "@mcuhelper/mcu-schema";
@@ -55,7 +56,7 @@ import {
   type SolverResult,
   type McuMode,
 } from "./solver";
-import { rangeToEditorLocation } from "./symbolRefs";
+import { applyEditorLocation, applyOptionalEditorLocation, rangeToEditorLocation } from "./symbolRefs";
 
 export interface McuServerSettings {
   mcuNrPath: string;
@@ -311,13 +312,14 @@ export function projectNavMaterials(
 ): DocumentIndex["summaries"]["materials"] {
   const out: DocumentIndex["summaries"]["materials"] = [];
   for (const m of materials) {
-    const loc = rangeToEditorLocation(index, m.range);
-    if (!loc) continue;
+    const mapped = applyEditorLocation(index, m);
+    if (!mapped) continue;
     const nuclides = m.nuclides.map((n) => {
       const nloc = rangeToEditorLocation(index, n.range);
       if (!nloc) return n;
       return {
         ...n,
+        uri: nloc.uri,
         range: {
           ...n.range,
           start: nloc.range.start,
@@ -325,15 +327,68 @@ export function projectNavMaterials(
         },
       };
     });
+    out.push({ ...mapped, nuclides });
+  }
+  return out;
+}
+
+function projectRangedList<T extends { range: SourceRange }>(
+  index: DocumentIndex,
+  items: readonly T[]
+): Array<T & { uri?: string }> {
+  const out: Array<T & { uri?: string }> = [];
+  for (const item of items) {
+    out.push(applyEditorLocation(index, item) ?? item);
+  }
+  return out;
+}
+
+/** Зоны: range/uri в координатах редактора (main или `#include`). */
+export function projectNavZones(
+  index: DocumentIndex,
+  zones: DocumentIndex["summaries"]["zones"]
+): DocumentIndex["summaries"]["zones"] {
+  return projectRangedList(index, zones);
+}
+
+/** Тела: range/uri в координатах редактора (main или `#include`). */
+export function projectNavBodies(
+  index: DocumentIndex,
+  bodies: DocumentIndex["summaries"]["bodies"]
+): DocumentIndex["summaries"]["bodies"] {
+  return projectRangedList(index, bodies);
+}
+
+/** NET: карточка и вложенные прототипы/носители — editor coords. */
+export function projectNavNets(
+  index: DocumentIndex,
+  nets: DocumentIndex["summaries"]["nets"]
+): DocumentIndex["summaries"]["nets"] {
+  const out: DocumentIndex["summaries"]["nets"] = [];
+  for (const net of nets) {
+    const mapped = applyEditorLocation(index, net);
+    const base = mapped ?? net;
     out.push({
-      ...m,
-      uri: loc.uri,
-      nuclides,
-      range: {
-        ...m.range,
-        start: loc.range.start,
-        end: loc.range.end,
-      },
+      ...base,
+      carrierZones: net.carrierZones.map((z) => applyEditorLocation(index, z) ?? z),
+      prototypes: net.prototypes.map((p) => applyOptionalEditorLocation(index, p)),
+    });
+  }
+  return out;
+}
+
+/** LATT: карточка и LISTEL — editor coords. */
+export function projectNavLattices(
+  index: DocumentIndex,
+  lattices: DocumentIndex["summaries"]["lattices"]
+): DocumentIndex["summaries"]["lattices"] {
+  const out: DocumentIndex["summaries"]["lattices"] = [];
+  for (const lat of lattices) {
+    const mapped = applyEditorLocation(index, lat);
+    const base = mapped ?? lat;
+    out.push({
+      ...base,
+      elements: lat.elements.map((el) => applyOptionalEditorLocation(index, el)),
     });
   }
   return out;
@@ -1408,6 +1463,10 @@ export function handleGetIndex(
   /** Slim до projectNavMaterials: иначе full-core гоняет remap по всем нуклидам, потом выкидывает. */
   summaries = slimSummariesForIndex(summaries);
   summaries.materials = projectNavMaterials(index, summaries.materials);
+  summaries.zones = projectNavZones(index, summaries.zones);
+  summaries.bodies = projectNavBodies(index, summaries.bodies);
+  summaries.nets = projectNavNets(index, summaries.nets);
+  summaries.lattices = projectNavLattices(index, summaries.lattices);
 
   const nucCount = summaries.materials.reduce((n, m) => n + (m.nuclideCount ?? 0), 0);
   const viewportMarks = collectEditorIsotopeMarks(index, visibleStart, visibleEnd);

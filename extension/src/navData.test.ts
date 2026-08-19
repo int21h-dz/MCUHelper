@@ -240,6 +240,77 @@ describe("navData", () => {
     assert.equal((child.action!.args as { nuclideName: string }).nuclideName, n.name);
   });
 
+  it("materials hidden in include jump to #include in main, not file start", () => {
+    const payload = richPayload();
+    payload.includes = [
+      {
+        path: "mats.inc",
+        uri: "file:///inc/mats.inc",
+        exists: true,
+        fragment: "physical",
+        range: { start: { line: 4, character: 9 }, end: { line: 4, character: 17 } },
+      },
+    ];
+    const mat = payload.summaries.materials[0]!;
+    mat.uri = "file:///inc/mats.inc";
+    mat.range = { start: { line: 0, character: 0 }, end: { line: 0, character: 6 } };
+    mat.nuclides[0]!.uri = "file:///inc/mats.inc";
+    mat.nuclides[0]!.range = { start: { line: 1, character: 0 }, end: { line: 1, character: 4 } };
+    const tree = buildMaterialsTree(payload, "file:///t.mcu");
+    assert.strictEqual(tree[0]!.uri, "file:///t.mcu");
+    assert.strictEqual(tree[0]!.range?.start.line, 4);
+    assert.strictEqual(tree[0]!.children![0]!.uri, "file:///t.mcu");
+    assert.strictEqual(tree[0]!.children![0]!.range?.start.line, 4);
+  });
+
+  it("materials SI action still targets include file line", () => {
+    const payload = richPayload();
+    const n = payload.summaries.materials[0]!.nuclides[1]!;
+    n.uri = "file:///inc/mats.inc";
+    n.range = { start: { line: 7, character: 0 }, end: { line: 7, character: 4 } };
+    payload.summaries.materials[0]!.uri = "file:///inc/mats.inc";
+    payload.includes = [
+      {
+        path: "mats.inc",
+        uri: "file:///inc/mats.inc",
+        exists: true,
+        fragment: "physical",
+        range: { start: { line: 2, character: 9 }, end: { line: 2, character: 17 } },
+      },
+    ];
+    const key = `${n.range.start.line}:${n.name.toUpperCase()}`;
+    const tree = buildMaterialsTree(payload, "file:///t.mcu", new Set([key]));
+    const child = tree[0]!.children![1]!;
+    assert.strictEqual(child.range?.start.line, 2);
+    const args = child.action!.args as { uri: string; line: number };
+    assert.strictEqual(args.uri, "file:///inc/mats.inc");
+    assert.strictEqual(args.line, 7);
+  });
+
+  it("zones and objects hidden in include jump to #include", () => {
+    const payload = richPayload();
+    payload.includes = [
+      {
+        path: "geo.inc",
+        uri: "file:///inc/geo.inc",
+        exists: true,
+        fragment: "geometry",
+        range: { start: { line: 8, character: 9 }, end: { line: 8, character: 16 } },
+      },
+    ];
+    payload.summaries.zones[0]!.uri = "file:///inc/geo.inc";
+    payload.summaries.zones[0]!.range = { start: { line: 0, character: 0 }, end: { line: 0, character: 4 } };
+    payload.summaries.zones[0]!.objNum = 3;
+    payload.summaries.objects = [{ objectNum: 3, zoneNames: ["FUEL"], materialNums: [1] }];
+    const zones = buildZonesTree(payload, "file:///t.mcu");
+    assert.strictEqual(zones[0]!.uri, "file:///t.mcu");
+    assert.strictEqual(zones[0]!.range?.start.line, 8);
+    const objects = buildObjectsTree(payload, "file:///t.mcu");
+    assert.strictEqual(objects[0]!.uri, "file:///t.mcu");
+    assert.strictEqual(objects[0]!.range?.start.line, 8);
+    assert.strictEqual(objects[0]!.children![0]!.range?.start.line, 8);
+  });
+
   it("fragments tree formats ranges and labels", () => {
     const tree = buildFragmentsTree(richPayload(), "file:///t.mcu");
     assert.strictEqual(tree.length, 2);

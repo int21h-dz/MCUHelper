@@ -623,6 +623,65 @@ FINISH ALL`;
     }
   });
 
+  it("handleGetIndex remaps body/zone ranges past collapsed #include", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-geo-inc-"));
+    try {
+      fs.writeFileSync(path.join(dir, "pad.inc"), "* a\n* b\n* c\n* d\n", "utf8");
+      const mainPath = path.join(dir, "main.mcu");
+      const text = [
+        "HEAD 1 0",
+        "#include pad.inc",
+        "RCZ BO3D 0 0 0 1 2",
+        "Z1 BO3D /1:1",
+        "END",
+        "FINISH",
+      ].join("\n");
+      fs.writeFileSync(mainPath, text, "utf8");
+      const uri = pathToFileURL(mainPath).href;
+      const doc = TextDocument.create(uri, "mcunr", 1, text);
+      const result = handleGetIndex(uri, (u) => (u === uri ? doc : undefined));
+      assert.ok(result);
+      const body = result!.summaries.bodies.find((b) => b.name.toUpperCase() === "BO3D");
+      const zone = result!.summaries.zones.find((z) => z.name.toUpperCase() === "Z1");
+      assert.ok(body);
+      assert.ok(zone);
+      assert.strictEqual(body!.range.start.line, 2, "body must be main line 2, not expanded");
+      assert.strictEqual(zone!.range.start.line, 3, "zone must be main line 3, not expanded");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("handleGetIndex projects MATR and zone inside include to include uri", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-hidden-inc-"));
+    try {
+      fs.writeFileSync(path.join(dir, "mats.inc"), "MATR 1\nU235 1e-3\n", "utf8");
+      fs.writeFileSync(path.join(dir, "geo.inc"), "RCZ H1 0 0 0 1 1\nZH H1 /1:1\n", "utf8");
+      const mainPath = path.join(dir, "main.mcu");
+      const text = ["PIN", "#include mats.inc", "FINISH", "HEAD", "#include geo.inc", "END", "FINISH"].join("\n");
+      fs.writeFileSync(mainPath, text, "utf8");
+      const uri = pathToFileURL(mainPath).href;
+      const matsUri = pathToFileURL(path.join(dir, "mats.inc")).href;
+      const geoUri = pathToFileURL(path.join(dir, "geo.inc")).href;
+      const doc = TextDocument.create(uri, "mcunr", 1, text);
+      const result = handleGetIndex(uri, (u) => (u === uri ? doc : undefined));
+      assert.ok(result);
+      const mat = result!.summaries.materials.find((m) => m.number === 1);
+      assert.ok(mat);
+      assert.ok(sameIncludeFileUri(mat!.uri, matsUri), String(mat!.uri));
+      assert.strictEqual(mat!.range.start.line, 0);
+      const u235 = mat!.nuclides.find((n) => n.name.toUpperCase() === "U235");
+      assert.ok(u235);
+      assert.ok(sameIncludeFileUri(u235!.uri, matsUri), String(u235!.uri));
+      const zone = result!.summaries.zones.find((z) => z.name.toUpperCase() === "ZH");
+      assert.ok(zone);
+      assert.ok(sameIncludeFileUri(zone!.uri, geoUri), String(zone!.uri));
+      assert.strictEqual(zone!.range.start.line, 1);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("handleGetIndex remaps constants around several #include of different sizes", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-const-multi-"));
     try {
