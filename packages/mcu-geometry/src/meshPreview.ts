@@ -1201,6 +1201,8 @@ export interface DraftBodyPreviewInput {
   scenePrimitives: PrimitiveSolid[];
   sceneBbox?: BoundingBox;
   nearby?: NearbyBodiesOptions;
+  /** Положение секущих плоскостей (иначе — центр focus-bbox). */
+  slicePositions?: Partial<{ x: number; y: number; z: number }>;
   /** UserGuide §9.1.3.22: черновик TRANSF — прототип из сцены + M|R A B f. */
   transf?: {
     protoName: string;
@@ -1216,10 +1218,13 @@ export interface DraftBodyPreviewResult {
   focusName: string;
   neighborNames: string[];
   nearest?: { name: string; gap: number };
+  /** Кадр превью (focus + соседи). */
   bbox: BoundingBox | null;
+  /** BBox самого черновика — диапазон слайдеров секущих. */
+  focusBbox: BoundingBox | null;
   unsupported: boolean;
   warnings: string[];
-  /** Три сечения через центр черновика: XY / XZ / YZ. */
+  /** Три сечения XY / XZ / YZ (через slicePositions или центр focus). */
   slices: BodySliceView[];
 }
 
@@ -1778,14 +1783,21 @@ function boundsOfPolys(
   };
 }
 
-/** XY / XZ / YZ через центр focus. */
+/** XY / XZ / YZ через slicePositions или центр focus. */
 export function buildBodySlices(
   meshes: MeshDescriptor[],
   focusName: string,
   focusBbox: BoundingBox,
-  frameBbox: BoundingBox
+  frameBbox: BoundingBox,
+  slicePositions?: Partial<{ x: number; y: number; z: number }>
 ): BodySliceView[] {
   const c = bboxCenterSize(focusBbox).center;
+  const clampAxis = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+  const pos = {
+    x: clampAxis(slicePositions?.x ?? c.x, focusBbox.min.x, focusBbox.max.x),
+    y: clampAxis(slicePositions?.y ?? c.y, focusBbox.min.y, focusBbox.max.y),
+    z: clampAxis(slicePositions?.z ?? c.z, focusBbox.min.z, focusBbox.max.z),
+  };
   const specs: Array<{
     axis: BodySliceAxis;
     title: string;
@@ -1793,9 +1805,9 @@ export function buildBodySlices(
     vLabel: string;
     position: number;
   }> = [
-    { axis: "z", title: `XY  Z=${fmtSlicePos(c.z)}`, uLabel: "X", vLabel: "Y", position: c.z },
-    { axis: "y", title: `XZ  Y=${fmtSlicePos(c.y)}`, uLabel: "X", vLabel: "Z", position: c.y },
-    { axis: "x", title: `YZ  X=${fmtSlicePos(c.x)}`, uLabel: "Y", vLabel: "Z", position: c.x },
+    { axis: "z", title: `XY  Z=${fmtSlicePos(pos.z)}`, uLabel: "X", vLabel: "Y", position: pos.z },
+    { axis: "y", title: `XZ  Y=${fmtSlicePos(pos.y)}`, uLabel: "X", vLabel: "Z", position: pos.y },
+    { axis: "x", title: `YZ  X=${fmtSlicePos(pos.x)}`, uLabel: "Y", vLabel: "Z", position: pos.x },
   ];
   return specs.map((s) => {
     const polylines: SlicePolyline[] = [];
@@ -1829,6 +1841,7 @@ export function buildDraftBodyPreview(input: DraftBodyPreviewInput): DraftBodyPr
         neighborNames: [],
         nearest: undefined,
         bbox: null,
+        focusBbox: null,
         unsupported: true,
         warnings: ["TRANSF: нет прототипа и M|R A B f (UserGuide §9.1.3.22)"],
         slices: [],
@@ -1842,6 +1855,7 @@ export function buildDraftBodyPreview(input: DraftBodyPreviewInput): DraftBodyPr
         neighborNames: [],
         nearest: undefined,
         bbox: null,
+        focusBbox: null,
         unsupported: true,
         warnings: [`TRANSF: тип «${spec.mode}» — ожидается M или R`],
         slices: [],
@@ -1856,6 +1870,7 @@ export function buildDraftBodyPreview(input: DraftBodyPreviewInput): DraftBodyPr
         neighborNames: [],
         nearest: undefined,
         bbox: null,
+        focusBbox: null,
         unsupported: true,
         warnings: [
           `TRANSF: прототип «${spec.protoName}» не найден в текущей секции тел (должен быть описан раньше, UserGuide §9.1.3.22)`,
@@ -1870,6 +1885,7 @@ export function buildDraftBodyPreview(input: DraftBodyPreviewInput): DraftBodyPr
         neighborNames: [],
         nearest: undefined,
         bbox: null,
+        focusBbox: null,
         unsupported: true,
         warnings: [
           `TRANSF: ${proto.type} не может быть прототипом (не RPP, SBOX, SHEX, PLX, PLY, UCX, UCY)`,
@@ -1885,6 +1901,7 @@ export function buildDraftBodyPreview(input: DraftBodyPreviewInput): DraftBodyPr
         neighborNames: [],
         nearest: undefined,
         bbox: null,
+        focusBbox: null,
         unsupported: true,
         warnings: [`TRANSF: не удалось преобразовать прототип ${proto.type} ${proto.name}`],
         slices: [],
@@ -1902,6 +1919,7 @@ export function buildDraftBodyPreview(input: DraftBodyPreviewInput): DraftBodyPr
       neighborNames: [],
       nearest: undefined,
       bbox: null,
+      focusBbox: null,
       unsupported: isMeshPreviewUnsupported(t) || !isMeshPreviewSupported(t),
       warnings: ["Недостаточно параметров для bbox/превью"],
       slices: [],
@@ -1984,8 +2002,9 @@ export function buildDraftBodyPreview(input: DraftBodyPreviewInput): DraftBodyPr
     neighborNames: neighbors.map((n) => n.name),
     nearest,
     bbox: previewBbox,
+    focusBbox: bbox,
     unsupported: isMeshPreviewUnsupported(t),
     warnings,
-    slices: buildBodySlices(meshes, name, bbox, previewBbox),
+    slices: buildBodySlices(meshes, name, bbox, previewBbox, input.slicePositions),
   };
 }

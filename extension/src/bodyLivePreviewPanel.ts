@@ -3,6 +3,11 @@ import * as vscode from "vscode";
 import type { LanguageClient } from "vscode-languageclient/node";
 import { isMcunrDocument } from "./contentDetect";
 import { loadBodyGeneratorApi, loadZoneStatementApi } from "./mcuLanguageBridge";
+import {
+  loadSliceVisibility,
+  parseSliceVisibilityMessage,
+  saveSliceVisibility,
+} from "./sliceViewVisibility";
 
 type VisibleConstant = {
   name: string;
@@ -40,11 +45,14 @@ type MeshPreviewApi = {
     scenePrimitives: NonNullable<GeometrySceneLike["primitives"]>;
     sceneBbox?: GeometrySceneLike["bbox"];
     nearby?: { maxCount?: number; maxGapFactor?: number; excludeName?: string };
+    slicePositions?: Partial<{ x: number; y: number; z: number }>;
     transf?: { protoName: string; mode: string; A: number; B: number; f: number };
   }) => {
     slices?: unknown[];
     neighborNames?: string[];
     nearest?: { name: string; gap: number };
+    bbox?: GeometrySceneLike["bbox"] | null;
+    focusBbox?: GeometrySceneLike["bbox"] | null;
     warnings: string[];
     unsupported: boolean;
   };
@@ -105,6 +113,15 @@ export class BodyLivePreviewPanel {
   private constCache: { uri: string; line: number; constants: VisibleConstant[] } | undefined;
   private manualSlicePositions: Partial<{ x: number; y: number; z: number }> | undefined;
   private lastZoneContext: { uri: vscode.Uri; startLine: number; character: number; text: string } | undefined;
+  private lastBodyDraft:
+    | {
+        text: string;
+        docLabel: string;
+        title: string;
+        warningsBase: string[];
+        input: Parameters<MeshPreviewApi["buildDraftBodyPreview"]>[0];
+      }
+    | undefined;
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -192,8 +209,12 @@ export class BodyLivePreviewPanel {
         if (this.manualSliceTimer) clearTimeout(this.manualSliceTimer);
         this.manualSliceTimer = setTimeout(() => {
           this.manualSliceTimer = undefined;
-          void this.refreshZonePreviewWithManualPlanes();
+          void this.refreshPreviewWithManualPlanes();
         }, 150);
+      }
+      if (msg?.type === "sliceVisibilityChanged") {
+        const visibility = parseSliceVisibilityMessage(msg);
+        if (visibility) void saveSliceVisibility(this.context, visibility);
       }
     });
     this.panel.onDidDispose(() => {
@@ -202,10 +223,41 @@ export class BodyLivePreviewPanel {
       this.lastFocusKey = "";
       this.manualSlicePositions = undefined;
       this.lastZoneContext = undefined;
+      this.lastBodyDraft = undefined;
       if (this.manualSliceTimer) clearTimeout(this.manualSliceTimer);
       this.manualSliceTimer = undefined;
     });
     return true;
+  }
+
+  private async refreshPreviewWithManualPlanes(): Promise<void> {
+    if (this.lastZoneContext) {
+      await this.refreshZonePreviewWithManualPlanes();
+      return;
+    }
+    await this.refreshBodyPreviewWithManualPlanes();
+  }
+
+  private async refreshBodyPreviewWithManualPlanes(): Promise<void> {
+    if (!this.panel || !this.meshApi || !this.lastBodyDraft) return;
+    const gen = ++this.generation;
+    const draft = this.lastBodyDraft;
+    const draftPreview = this.meshApi.buildDraftBodyPreview({
+      ...draft.input,
+      slicePositions: this.manualSlicePositions,
+    });
+    if (gen !== this.generation || !this.panel) return;
+    const warnings = [...draft.warningsBase, ...(draftPreview.warnings ?? [])];
+    this.panel.title = draft.title;
+    void this.panel.webview.postMessage({
+      type: "preview",
+      text: draft.text,
+      warnings,
+      draftPreview,
+      autoName: null,
+      docLabel: draft.docLabel,
+      resetView: false,
+    });
   }
 
   private async refreshZonePreviewWithManualPlanes(): Promise<void> {
@@ -299,6 +351,7 @@ export class BodyLivePreviewPanel {
 
     const uri = editor.document.uri;
     if (!parsed) {
+      this.lastBodyDraft = undefined;
       this.lastZoneContext = { uri, startLine, character: editor.selection.active.character, text: collected!.text };
       const postZonePreview = (
         zonePreview: LiveZonePreviewLike | null,
@@ -345,6 +398,7 @@ export class BodyLivePreviewPanel {
     }
 
     const warnings: string[] = [];
+    this.lastZoneContext = undefined;
     const constants = await this.fetchConstants(uri, startLine, editor.selection.active.character);
     if (gen !== this.generation || !this.panel) return;
     const vars = api.constantsToVarMap(constants);
@@ -363,13 +417,14 @@ export class BodyLivePreviewPanel {
       ? Boolean(transf?.ok)
       : resolved.nums.length > 0 && resolved.nums.every(Number.isFinite);
     if (this.meshApi && finite && isTransf && transf) {
-      draftPreview = this.meshApi.buildDraftBodyPreview({
-        bodyType: "TRANSF",
+      const input = {
+        bodyType: "TRANSF" as const,
         name: parsed.name,
         params: [transf.A, transf.B, transf.f],
         scenePrimitives: scene?.primitives ?? [],
         sceneBbox: scene?.bbox,
         nearby: { maxCount: 12, maxGapFactor: 4, excludeName: parsed.name },
+        slicePositions: this.manualSlicePositions,
         transf: {
           protoName: transf.protoName,
           mode: transf.mode,
@@ -377,20 +432,40 @@ export class BodyLivePreviewPanel {
           B: transf.B,
           f: transf.f,
         },
-      });
+      };
+      draftPreview = this.meshApi.buildDraftBodyPreview(input);
       warnings.push(...(draftPreview.warnings ?? []));
+      this.lastBodyDraft = {
+        text: collected!.text,
+        docLabel: `${vscode.workspace.asRelativePath(uri)}:${startLine + 1} · ${parsed.bodyType} ${parsed.name}`,
+        title: `MCU-NR: ${parsed.bodyType} ${parsed.name}`,
+        warningsBase: [...(isTransf ? transf?.warnings ?? [] : resolved.warnings)],
+        input: { ...input, slicePositions: undefined },
+      };
     } else if (this.meshApi && finite && !isTransf) {
-      draftPreview = this.meshApi.buildDraftBodyPreview({
+      const input = {
         bodyType: parsed.bodyType,
         name: parsed.name,
         params: resolved.nums,
         scenePrimitives: scene?.primitives ?? [],
         sceneBbox: scene?.bbox,
         nearby: { maxCount: 12, maxGapFactor: 4, excludeName: parsed.name },
-      });
+        slicePositions: this.manualSlicePositions,
+      };
+      draftPreview = this.meshApi.buildDraftBodyPreview(input);
       warnings.push(...(draftPreview.warnings ?? []));
+      this.lastBodyDraft = {
+        text: collected!.text,
+        docLabel: `${vscode.workspace.asRelativePath(uri)}:${startLine + 1} · ${parsed.bodyType} ${parsed.name}`,
+        title: `MCU-NR: ${parsed.bodyType} ${parsed.name}`,
+        warningsBase: [...resolved.warnings],
+        input: { ...input, slicePositions: undefined },
+      };
     } else if (!finite) {
+      this.lastBodyDraft = undefined;
       warnings.push("Не все параметры вычислены — сечение появится, когда строка станет полной.");
+    } else {
+      this.lastBodyDraft = undefined;
     }
 
     const docLabel = `${vscode.workspace.asRelativePath(uri)}:${startLine + 1} · ${parsed.bodyType} ${parsed.name}`;
@@ -505,10 +580,13 @@ export class BodyLivePreviewPanel {
       `style-src ${webview.cspSource}`,
       `script-src ${webview.cspSource}`,
     ].join("; ");
-    const boot = JSON.stringify({ mode: "live", types: [], form: null, constants: [] }).replace(
-      /</g,
-      "\\u003c"
-    );
+    const boot = JSON.stringify({
+      mode: "live",
+      types: [],
+      form: null,
+      constants: [],
+      sliceVisibility: loadSliceVisibility(this.context),
+    }).replace(/</g, "\\u003c");
 
     return `<!DOCTYPE html>
 <html lang="ru">
@@ -536,20 +614,33 @@ export class BodyLivePreviewPanel {
         </div>
         <p class="bg-hint bg-slice-hint" id="idleHint"></p>
         <p class="bg-nearest" id="nearestInfo">ближайшее: —</p>
-        <div class="bg-slice-controls" id="sliceControls"></div>
-        <div class="bg-slices">
-          <figure class="bg-slice">
-            <figcaption id="capXY">XY</figcaption>
-            <div class="bg-slice-view"><canvas id="sliceXY"></canvas></div>
-          </figure>
-          <figure class="bg-slice">
-            <figcaption id="capXZ">XZ</figcaption>
-            <div class="bg-slice-view"><canvas id="sliceXZ"></canvas></div>
-          </figure>
-          <figure class="bg-slice">
-            <figcaption id="capYZ">YZ</figcaption>
-            <div class="bg-slice-view"><canvas id="sliceYZ"></canvas></div>
-          </figure>
+        <div class="bg-slice-vis" id="sliceVisBar" role="toolbar" aria-label="Видимость сечений">
+          <button type="button" class="bg-slice-vis-btn" data-slot="xy" title="Показать/скрыть XY">XY</button>
+          <button type="button" class="bg-slice-vis-btn" data-slot="xz" title="Показать/скрыть XZ">XZ</button>
+          <button type="button" class="bg-slice-vis-btn" data-slot="yz" title="Показать/скрыть YZ">YZ</button>
+        </div>
+        <div class="bg-slices" id="slicesRoot">
+          <section class="bg-slice-panel" data-slot="xy" data-axis="z">
+            <div class="bg-slice-control-host" id="sliceControlZ"></div>
+            <figure class="bg-slice">
+              <figcaption id="capXY">XY</figcaption>
+              <div class="bg-slice-view"><canvas id="sliceXY"></canvas></div>
+            </figure>
+          </section>
+          <section class="bg-slice-panel" data-slot="xz" data-axis="y">
+            <div class="bg-slice-control-host" id="sliceControlY"></div>
+            <figure class="bg-slice">
+              <figcaption id="capXZ">XZ</figcaption>
+              <div class="bg-slice-view"><canvas id="sliceXZ"></canvas></div>
+            </figure>
+          </section>
+          <section class="bg-slice-panel" data-slot="yz" data-axis="x">
+            <div class="bg-slice-control-host" id="sliceControlX"></div>
+            <figure class="bg-slice">
+              <figcaption id="capYZ">YZ</figcaption>
+              <div class="bg-slice-view"><canvas id="sliceYZ"></canvas></div>
+            </figure>
+          </section>
         </div>
         <ul class="bg-warnings" id="warnings"></ul>
         <pre id="preview" class="bg-code"></pre>

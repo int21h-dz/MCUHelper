@@ -178,6 +178,21 @@ describe("meshPreview", () => {
     assert.ok(prev.bbox!.max.x < 15);
   });
 
+  it("buildDraftBodyPreview honors slicePositions", () => {
+    const prev = buildDraftBodyPreview({
+      bodyType: "RPP",
+      name: "box",
+      params: [-1, 1, -2, 2, -3, 3],
+      scenePrimitives: [],
+      slicePositions: { x: 0.5, y: -1, z: 2 },
+    });
+    assert.ok(prev.focusBbox);
+    const byAxis = Object.fromEntries(prev.slices.map((s) => [s.axis, s.position]));
+    assert.strictEqual(byAxis.x, 0.5);
+    assert.strictEqual(byAxis.y, -1);
+    assert.strictEqual(byAxis.z, 2);
+  });
+
   it("buildDraftBodyPreview colors draft and neighbors", () => {
     const neighbor = prim("RPP", "box1", [-2, -1, -2, -1, 0, 1], {
       min: { x: -2, y: -2, z: 0 },

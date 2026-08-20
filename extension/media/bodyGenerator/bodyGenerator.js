@@ -38,7 +38,18 @@ const els = {
   capXZ: document.getElementById("capXZ"),
   capYZ: document.getElementById("capYZ"),
   idleHint: document.getElementById("idleHint"),
-  sliceControls: document.getElementById("sliceControls"),
+  sliceVisBar: document.getElementById("sliceVisBar"),
+  slicesRoot: document.getElementById("slicesRoot"),
+  sliceControlZ: document.getElementById("sliceControlZ"),
+  sliceControlY: document.getElementById("sliceControlY"),
+  sliceControlX: document.getElementById("sliceControlX"),
+};
+
+const SLICE_SLOTS = ["xy", "xz", "yz"];
+const CONTROL_HOST_BY_AXIS = {
+  z: () => els.sliceControlZ,
+  y: () => els.sliceControlY,
+  x: () => els.sliceControlX,
 };
 
 let types = [];
@@ -47,6 +58,7 @@ let currentFields = [];
 let slices = [];
 let currentPreviewKind = "body";
 let liveSlicePlanes = null;
+let sliceVisibility = { xy: true, xz: true, yz: true };
 
 const ZOOM_MIN = 0.25;
 const ZOOM_MAX = 40;
@@ -64,6 +76,65 @@ function clamp(n, a, b) {
 
 function fmtPlaneValue(n) {
   return Number.isFinite(n) ? Number(n).toFixed(3) : "—";
+}
+
+function postSlicePlanesChanged() {
+  if (!liveSlicePlanes) return;
+  vscode.postMessage({
+    type: "slicePlanesChanged",
+    positions: {
+      x: liveSlicePlanes.x.value,
+      y: liveSlicePlanes.y.value,
+      z: liveSlicePlanes.z.value,
+    },
+  });
+  requestSliceDraw();
+}
+
+function syncPlaneControlUi(axis, opts) {
+  if (!liveSlicePlanes || !liveSlicePlanes[axis]) return;
+  const plane = liveSlicePlanes[axis];
+  const root = document.querySelector(`.bg-slice-control[data-axis="${axis}"]`);
+  if (!root) return;
+  const range = root.querySelector('input[type="range"]');
+  const num = root.querySelector("input.bg-slice-value");
+  const source = opts && opts.source;
+  if (range && source !== "range" && document.activeElement !== range) {
+    range.min = String(plane.min);
+    range.max = String(plane.max);
+    range.value = String(plane.value);
+  }
+  if (num && source !== "number" && document.activeElement !== num) {
+    num.min = String(plane.min);
+    num.max = String(plane.max);
+    num.value = fmtPlaneValue(plane.value);
+  } else if (num && source === "number") {
+    num.value = fmtPlaneValue(plane.value);
+  }
+}
+
+function setPlaneValue(axis, rawValue, opts) {
+  if (!liveSlicePlanes || !liveSlicePlanes[axis]) return false;
+  const plane = liveSlicePlanes[axis];
+  // Number("") === 0 — пустое/пробельное поле отклоняем, иначе плоскость прыгает в 0.
+  const text = String(rawValue ?? "").trim();
+  if (!text) return false;
+  let value = Number(text);
+  if (!Number.isFinite(value)) return false;
+  value = clamp(value, plane.min, plane.max);
+  plane.value = value;
+  syncPlaneControlUi(axis, opts || {});
+  if (!(opts && opts.silent)) postSlicePlanesChanged();
+  return true;
+}
+
+function commitPlaneNumberInput(input) {
+  const axis = input.getAttribute("data-axis");
+  if (!axis || !liveSlicePlanes || !liveSlicePlanes[axis]) return;
+  const ok = setPlaneValue(axis, input.value, { source: "number" });
+  if (!ok) {
+    input.value = fmtPlaneValue(liveSlicePlanes[axis].value);
+  }
 }
 
 function hexToRgba(hex, alpha) {
@@ -138,10 +209,50 @@ function drawCutPlaneMarkers(ctx, slice, map, bounds, planes, strokeColor, canva
   ctx.restore();
 }
 
+function clearSliceControlHosts() {
+  ["z", "y", "x"].forEach((axis) => {
+    const host = CONTROL_HOST_BY_AXIS[axis] && CONTROL_HOST_BY_AXIS[axis]();
+    if (host) host.innerHTML = "";
+  });
+}
+
+function bindSliceControlEvents(root) {
+  if (!root) return;
+  const range = root.querySelector('input[type="range"]');
+  const num = root.querySelector("input.bg-slice-value");
+  if (range && !range.dataset.bound) {
+    range.dataset.bound = "1";
+    range.addEventListener("input", () => {
+      const axis = range.getAttribute("data-axis");
+      if (!axis) return;
+      setPlaneValue(axis, range.value, { source: "range" });
+    });
+  }
+  if (num && !num.dataset.bound) {
+    num.dataset.bound = "1";
+    num.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        commitPlaneNumberInput(num);
+        num.blur();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        const axis = num.getAttribute("data-axis");
+        if (axis && liveSlicePlanes && liveSlicePlanes[axis]) {
+          num.value = fmtPlaneValue(liveSlicePlanes[axis].value);
+        }
+        num.blur();
+      }
+    });
+    num.addEventListener("change", () => commitPlaneNumberInput(num));
+    num.addEventListener("blur", () => commitPlaneNumberInput(num));
+    num.addEventListener("click", (e) => e.stopPropagation());
+  }
+}
+
 function renderSliceControls() {
-  if (!els.sliceControls) return;
-  if (!liveMode || currentPreviewKind !== "zone" || !liveSlicePlanes) {
-    els.sliceControls.innerHTML = "";
+  if (!liveSlicePlanes) {
+    clearSliceControlHosts();
     return;
   }
   const items = [
@@ -149,29 +260,87 @@ function renderSliceControls() {
     { axis: "y", label: "XZ @ Y", min: liveSlicePlanes.y.min, max: liveSlicePlanes.y.max, value: liveSlicePlanes.y.value },
     { axis: "x", label: "YZ @ X", min: liveSlicePlanes.x.min, max: liveSlicePlanes.x.max, value: liveSlicePlanes.x.value },
   ];
-  els.sliceControls.innerHTML = items.map((it) => `
-    <label class="bg-slice-control" data-axis="${it.axis}">
-      <span>${it.label}: <b>${fmtPlaneValue(it.value)}</b></span>
-      <input type="range" min="${it.min}" max="${it.max}" step="any" value="${it.value}" data-axis="${it.axis}" />
-    </label>
-  `).join("");
-  els.sliceControls.querySelectorAll("input[type=range]").forEach((input) => {
-    input.addEventListener("input", () => {
-      const axis = input.getAttribute("data-axis");
-      const value = Number(input.value);
-      if (!axis || !liveSlicePlanes || !Number.isFinite(value)) return;
-      liveSlicePlanes[axis].value = value;
-      const label = input.parentElement && input.parentElement.querySelector("b");
-      if (label) label.textContent = fmtPlaneValue(value);
-      vscode.postMessage({
-        type: "slicePlanesChanged",
-        positions: {
-          x: liveSlicePlanes.x.value,
-          y: liveSlicePlanes.y.value,
-          z: liveSlicePlanes.z.value,
-        },
-      });
-      requestSliceDraw();
+
+  items.forEach((it) => {
+    const host = CONTROL_HOST_BY_AXIS[it.axis] && CONTROL_HOST_BY_AXIS[it.axis]();
+    if (!host) return;
+    let root = host.querySelector(`.bg-slice-control[data-axis="${it.axis}"]`);
+    if (!root) {
+      host.innerHTML = `
+        <label class="bg-slice-control" data-axis="${it.axis}">
+          <span class="bg-slice-control-label">
+            ${it.label}:
+            <input class="bg-slice-value" type="number" inputmode="decimal" step="any"
+              min="${it.min}" max="${it.max}" value="${fmtPlaneValue(it.value)}" data-axis="${it.axis}" title="Точное положение плоскости" />
+          </span>
+          <input type="range" min="${it.min}" max="${it.max}" step="any" value="${it.value}" data-axis="${it.axis}" />
+        </label>
+      `;
+      root = host.querySelector(`.bg-slice-control[data-axis="${it.axis}"]`);
+      bindSliceControlEvents(root);
+    }
+    liveSlicePlanes[it.axis].min = it.min;
+    liveSlicePlanes[it.axis].max = it.max;
+    liveSlicePlanes[it.axis].value = it.value;
+    syncPlaneControlUi(it.axis, {});
+  });
+}
+
+function normalizeSliceVisibility(raw) {
+  return {
+    xy: !(raw && raw.xy === false),
+    xz: !(raw && raw.xz === false),
+    yz: !(raw && raw.yz === false),
+  };
+}
+
+function visibleSliceCount() {
+  return SLICE_SLOTS.reduce((n, slot) => n + (sliceVisibility[slot] ? 1 : 0), 0);
+}
+
+function persistSliceVisibility() {
+  vscode.postMessage({
+    type: "sliceVisibilityChanged",
+    visibility: { ...sliceVisibility },
+  });
+}
+
+function applySliceVisibility() {
+  if (!visibleSliceCount()) sliceVisibility.xy = true;
+  SLICE_SLOTS.forEach((slot) => {
+    const on = !!sliceVisibility[slot];
+    const panel = document.querySelector(`.bg-slice-panel[data-slot="${slot}"]`);
+    const btn = els.sliceVisBar && els.sliceVisBar.querySelector(`.bg-slice-vis-btn[data-slot="${slot}"]`);
+    if (panel) panel.classList.toggle("is-hidden", !on);
+    if (btn) {
+      btn.classList.toggle("is-on", on);
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+  });
+  if (els.slicesRoot) {
+    els.slicesRoot.style.setProperty("--bg-slice-visible", String(Math.max(1, visibleSliceCount())));
+  }
+  requestSliceDraw();
+}
+
+function toggleSliceVisibility(slot) {
+  if (!SLICE_SLOTS.includes(slot)) return;
+  const next = !sliceVisibility[slot];
+  if (!next && visibleSliceCount() <= 1) return;
+  sliceVisibility[slot] = next;
+  applySliceVisibility();
+  persistSliceVisibility();
+}
+
+function initSliceVisibilityUi(bootVisibility) {
+  sliceVisibility = normalizeSliceVisibility(bootVisibility);
+  applySliceVisibility();
+  if (!els.sliceVisBar || els.sliceVisBar.dataset.bound) return;
+  els.sliceVisBar.dataset.bound = "1";
+  els.sliceVisBar.querySelectorAll(".bg-slice-vis-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const slot = btn.getAttribute("data-slot");
+      if (slot) toggleSliceVisibility(slot);
     });
   });
 }
@@ -811,7 +980,11 @@ function drawOneSlice(slot, slice) {
 }
 
 function drawSlices() {
-  sliceSlots.forEach((slot, i) => drawOneSlice(slot, slices[i] || null));
+  sliceSlots.forEach((slot, i) => {
+    const slotId = SLICE_SLOTS[i];
+    if (slotId && !sliceVisibility[slotId]) return;
+    drawOneSlice(slot, slices[i] || null);
+  });
 }
 
 let navRaf = 0;
@@ -1036,9 +1209,27 @@ window.addEventListener("message", (event) => {
       drawSlices();
     } else if (dp) {
       currentPreviewKind = "body";
-      liveSlicePlanes = null;
-      renderSliceControls();
       slices = dp.slices || [];
+      const bb =
+        dp.focusBbox && dp.focusBbox.min && dp.focusBbox.max
+          ? dp.focusBbox
+          : dp.bbox && dp.bbox.min && dp.bbox.max
+            ? dp.bbox
+            : null;
+      if (bb) {
+        const pickPos = (axis, fallback) => {
+          const s = slices.find((item) => item && item.axis === axis);
+          return s && typeof s.position === "number" ? s.position : fallback;
+        };
+        liveSlicePlanes = {
+          x: { min: bb.min.x, max: bb.max.x, value: pickPos("x", (bb.min.x + bb.max.x) / 2) },
+          y: { min: bb.min.y, max: bb.max.y, value: pickPos("y", (bb.min.y + bb.max.y) / 2) },
+          z: { min: bb.min.z, max: bb.max.z, value: pickPos("z", (bb.min.z + bb.max.z) / 2) },
+        };
+      } else {
+        liveSlicePlanes = null;
+      }
+      renderSliceControls();
       const n = (dp.neighborNames || []).length;
       if (els.neighborInfo) {
         els.neighborInfo.textContent = n ? "соседей: " + n + " (серым)" : "соседей в кадре нет";
@@ -1076,10 +1267,17 @@ window.addEventListener("message", (event) => {
 
 (function applyBoot() {
   const bootEl = document.getElementById("bg-boot");
-  if (!bootEl || !bootEl.textContent) return;
+  let boot = null;
+  if (bootEl && bootEl.textContent) {
+    try {
+      boot = JSON.parse(bootEl.textContent);
+    } catch (err) {
+      renderWarnings(["Не удалось прочитать список типов: " + err]);
+    }
+  }
+  initSliceVisibilityUi(boot && boot.sliceVisibility);
+  if (!boot || boot.mode === "live") return;
   try {
-    const boot = JSON.parse(bootEl.textContent);
-    if (boot.mode === "live") return;
     constants = boot.constants || [];
     fillTypes(boot.types || [], boot.form && boot.form.bodyType);
     if (boot.form) {

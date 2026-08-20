@@ -280,11 +280,44 @@ legend {
   font-size: 11px;
 }
 
-.bg-slice-controls {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  margin: 2px 0 2px;
+.bg-slice-vis {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+}
+
+.bg-slice-vis-btn {
+  border: 1px solid color-mix(in srgb, var(--bg-border, #45475a) 85%, transparent);
+  border-radius: 4px;
+  padding: 3px 10px;
+  margin: 0;
+  background: color-mix(in srgb, var(--bg-panel, #1e1e2e) 92%, #000);
+  color: var(--bg-muted);
+  font: 11px/1.2 var(--bg-ui, system-ui, sans-serif);
+  font-weight: 600;
+  cursor: pointer;
+  opacity: 0.55;
+}
+
+.bg-slice-vis-btn.is-on {
+  opacity: 1;
+  color: #b8ff2e;
+  border-color: color-mix(in srgb, #b8ff2e 45%, var(--bg-border, #45475a));
+  background: color-mix(in srgb, #b8ff2e 12%, var(--bg-panel, #1e1e2e));
+}
+
+.bg-slice-vis-btn:hover {
+  opacity: 1;
+}
+
+.bg-slice-control-host {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.bg-slice-control-host:empty {
+  display: none;
 }
 
 .bg-slice-control {
@@ -296,9 +329,31 @@ legend {
   font-size: 11px;
 }
 
-.bg-slice-control b {
-  color: var(--bg-fg);
+.bg-slice-control-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.bg-slice-control input.bg-slice-value {
+  width: 6.2em;
+  min-width: 0;
+  margin: 0;
+  padding: 1px 4px;
+  border: 1px solid color-mix(in srgb, var(--bg-border, #45475a) 80%, transparent);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--bg-panel, #1e1e2e) 88%, #000);
+  color: #b8ff2e;
+  font: inherit;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.bg-slice-control input.bg-slice-value:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--bg-accent, #89b4fa) 70%, #fff);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--bg-accent, #89b4fa) 35%, transparent);
 }
 
 .bg-slice-control input[type="range"] {
@@ -308,16 +363,29 @@ legend {
 
 .bg-slices {
   display: grid;
-  grid-template-rows: repeat(3, minmax(140px, 1fr));
+  grid-template-rows: repeat(var(--bg-slice-visible, 3), minmax(120px, 1fr));
   gap: 8px;
   flex: 1 1 auto;
   min-height: 0;
+}
+
+.bg-slice-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+  min-width: 0;
+}
+
+.bg-slice-panel.is-hidden {
+  display: none;
 }
 
 .bg-slice {
   margin: 0;
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
   min-height: 0;
   border: 1px solid var(--bg-border);
   border-radius: 6px;

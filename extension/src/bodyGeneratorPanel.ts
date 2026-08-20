@@ -7,6 +7,11 @@ import {
   type BodyGeneratorInput,
   type BodyTypeOption,
 } from "./mcuLanguageBridge";
+import {
+  loadSliceVisibility,
+  parseSliceVisibilityMessage,
+  saveSliceVisibility,
+} from "./sliceViewVisibility";
 
 type VisibleConstant = {
   name: string;
@@ -42,6 +47,7 @@ type MeshPreviewApi = {
     scenePrimitives: NonNullable<GeometrySceneLike["primitives"]>;
     sceneBbox?: GeometrySceneLike["bbox"];
     nearby?: { maxCount?: number; maxGapFactor?: number; excludeName?: string };
+    slicePositions?: Partial<{ x: number; y: number; z: number }>;
     transf?: { protoName: string; mode: string; A: number; B: number; f: number };
   }) => {
     meshes: unknown[];
@@ -49,6 +55,7 @@ type MeshPreviewApi = {
     neighborNames: string[];
     nearest?: { name: string; gap: number };
     bbox: GeometrySceneLike["bbox"] | null;
+    focusBbox?: GeometrySceneLike["bbox"] | null;
     unsupported: boolean;
     warnings: string[];
     slices?: Array<{
@@ -103,6 +110,9 @@ export class BodyGeneratorPanel {
   private lastLine = 0;
   private lastChar = 0;
   private editorWatch: vscode.Disposable[] = [];
+  private manualSlicePositions: Partial<{ x: number; y: number; z: number }> | undefined;
+  private manualSliceTimer: ReturnType<typeof setTimeout> | undefined;
+  private previewGeneration = 0;
 
   constructor(private readonly context: vscode.ExtensionContext) {
     try {
@@ -148,6 +158,9 @@ export class BodyGeneratorPanel {
       this.panel = undefined;
       for (const d of this.editorWatch) d.dispose();
       this.editorWatch = [];
+      this.manualSlicePositions = undefined;
+      if (this.manualSliceTimer) clearTimeout(this.manualSliceTimer);
+      this.manualSliceTimer = undefined;
     });
     await this.pushState();
   }
@@ -155,6 +168,7 @@ export class BodyGeneratorPanel {
   private async onMessage(msg: {
     type?: string;
     form?: Partial<FormState>;
+    positions?: Partial<{ x: number; y: number; z: number }>;
   }): Promise<void> {
     if (!this.panel) return;
     switch (msg.type) {
@@ -162,9 +176,29 @@ export class BodyGeneratorPanel {
         await this.pushState();
         break;
       case "preview":
-        if (msg.form) this.applyForm(msg.form);
+        if (msg.form) {
+          this.applyForm(msg.form);
+          this.manualSlicePositions = undefined;
+        }
         this.postPreview();
         break;
+      case "slicePlanesChanged":
+        this.manualSlicePositions = {
+          x: typeof msg.positions?.x === "number" ? msg.positions.x : undefined,
+          y: typeof msg.positions?.y === "number" ? msg.positions.y : undefined,
+          z: typeof msg.positions?.z === "number" ? msg.positions.z : undefined,
+        };
+        if (this.manualSliceTimer) clearTimeout(this.manualSliceTimer);
+        this.manualSliceTimer = setTimeout(() => {
+          this.manualSliceTimer = undefined;
+          this.postPreview();
+        }, 150);
+        break;
+      case "sliceVisibilityChanged": {
+        const visibility = parseSliceVisibilityMessage(msg);
+        if (visibility) await saveSliceVisibility(this.context, visibility);
+        break;
+      }
       case "insert":
         if (msg.form) this.applyForm(msg.form);
         await this.insertIntoEditor();
@@ -353,14 +387,16 @@ export class BodyGeneratorPanel {
 
   private async runPreview(): Promise<void> {
     if (!this.panel) return;
+    const gen = ++this.previewGeneration;
     try {
       const api = loadBodyGeneratorApi();
       const insertName = await this.resolveInsertName();
+      if (gen !== this.previewGeneration || !this.panel) return;
       const built = api.buildBodyStatement({ ...this.toInput(), name: insertName });
       const scene = await this.fetchScene();
-      if (!this.panel) return;
+      if (gen !== this.previewGeneration || !this.panel) return;
       let constsForEval = await this.fetchConstants();
-      if (!this.panel) return;
+      if (gen !== this.previewGeneration || !this.panel) return;
       let vars = api.constantsToVarMap(constsForEval);
       const isTransf = this.form.bodyType.toUpperCase() === "TRANSF";
       let resolved = isTransf
@@ -374,6 +410,7 @@ export class BodyGeneratorPanel {
         const uri = this.targetUri();
         if (uri) {
           const all = await this.fetchIndexConstants({ uri });
+          if (gen !== this.previewGeneration || !this.panel) return;
           constsForEval = this.mergeConstants(constsForEval, all);
           vars = api.constantsToVarMap(constsForEval);
           if (isTransf) transf = api.resolveTransfParams(this.form.params, vars);
@@ -398,6 +435,7 @@ export class BodyGeneratorPanel {
           scenePrimitives: scene?.primitives ?? [],
           sceneBbox: scene?.bbox,
           nearby: { maxCount: this.form.nearbyCount, maxGapFactor: 4 },
+          slicePositions: this.manualSlicePositions,
           transf: {
             protoName: transf.protoName,
             mode: transf.mode,
@@ -415,11 +453,12 @@ export class BodyGeneratorPanel {
           scenePrimitives: scene?.primitives ?? [],
           sceneBbox: scene?.bbox,
           nearby: { maxCount: this.form.nearbyCount, maxGapFactor: 4 },
+          slicePositions: this.manualSlicePositions,
         });
         warnings.push(...(draftPreview.warnings ?? []));
       }
 
-      if (!this.panel) return;
+      if (gen !== this.previewGeneration || !this.panel) return;
       void this.panel.webview.postMessage({
         type: "preview",
         text: built.text,
@@ -429,7 +468,7 @@ export class BodyGeneratorPanel {
         autoName: this.form.name === "*" ? insertName : null,
       });
     } catch (e) {
-      if (!this.panel) return;
+      if (gen !== this.previewGeneration || !this.panel) return;
       void this.panel.webview.postMessage({
         type: "preview",
         text: "",
@@ -540,10 +579,12 @@ export class BodyGeneratorPanel {
 
     const selected = this.form.bodyType || "RCZ";
     const current = this.types.find((t) => t.key === selected) ?? this.types[0];
+    const sliceVisibility = loadSliceVisibility(this.context);
     const boot = JSON.stringify({
       types: this.types,
       form: this.form,
       constants: [],
+      sliceVisibility,
     }).replace(/</g, "\\u003c");
 
     return `<!DOCTYPE html>
@@ -616,19 +657,33 @@ export class BodyGeneratorPanel {
           <span class="bg-muted" id="neighborInfo"></span>
         </div>
         <p class="bg-hint bg-slice-hint">колесо — зум · перетаскивание — сдвиг · двойной клик — вписать</p>
-        <div class="bg-slices">
-          <figure class="bg-slice">
-            <figcaption id="capXY">XY</figcaption>
-            <div class="bg-slice-view"><canvas id="sliceXY"></canvas></div>
-          </figure>
-          <figure class="bg-slice">
-            <figcaption id="capXZ">XZ</figcaption>
-            <div class="bg-slice-view"><canvas id="sliceXZ"></canvas></div>
-          </figure>
-          <figure class="bg-slice">
-            <figcaption id="capYZ">YZ</figcaption>
-            <div class="bg-slice-view"><canvas id="sliceYZ"></canvas></div>
-          </figure>
+        <div class="bg-slice-vis" id="sliceVisBar" role="toolbar" aria-label="Видимость сечений">
+          <button type="button" class="bg-slice-vis-btn" data-slot="xy" title="Показать/скрыть XY">XY</button>
+          <button type="button" class="bg-slice-vis-btn" data-slot="xz" title="Показать/скрыть XZ">XZ</button>
+          <button type="button" class="bg-slice-vis-btn" data-slot="yz" title="Показать/скрыть YZ">YZ</button>
+        </div>
+        <div class="bg-slices" id="slicesRoot">
+          <section class="bg-slice-panel" data-slot="xy" data-axis="z">
+            <div class="bg-slice-control-host" id="sliceControlZ"></div>
+            <figure class="bg-slice">
+              <figcaption id="capXY">XY</figcaption>
+              <div class="bg-slice-view"><canvas id="sliceXY"></canvas></div>
+            </figure>
+          </section>
+          <section class="bg-slice-panel" data-slot="xz" data-axis="y">
+            <div class="bg-slice-control-host" id="sliceControlY"></div>
+            <figure class="bg-slice">
+              <figcaption id="capXZ">XZ</figcaption>
+              <div class="bg-slice-view"><canvas id="sliceXZ"></canvas></div>
+            </figure>
+          </section>
+          <section class="bg-slice-panel" data-slot="yz" data-axis="x">
+            <div class="bg-slice-control-host" id="sliceControlX"></div>
+            <figure class="bg-slice">
+              <figcaption id="capYZ">YZ</figcaption>
+              <div class="bg-slice-view"><canvas id="sliceYZ"></canvas></div>
+            </figure>
+          </section>
         </div>
         <ul class="bg-warnings" id="warnings"></ul>
         <pre id="preview" class="bg-code"></pre>
