@@ -30,7 +30,8 @@ import {
   isSumIsotopeMember,
 } from "./sumIsotope";
 import { materialVolumeCm3, parseMaterialVolumes } from "./materialVolumes";
-import { buildZoneRegistrationMap } from "./zoneRegistration";
+import { buildZoneRegistrationMap, getResolvedZoneNumbers } from "./zoneRegistration";
+import { zoneTailToPointerSpec } from "./zonePointerResolution";
 import { buildScopedVars, constScopeKey } from "./constantScope";
 import { collectZoneBodyRefs, isAllSpaceZoneRef } from "./zoneBodyRefs";
 import { formatExpandedLineRef } from "./includeLineMap";
@@ -233,7 +234,7 @@ export function analyzeSemantics(ast: DocumentAst): DiagnosticMessage[] {
       }
     }
 
-    const resolved = zoneReg.get(z.name);
+    const resolved = getResolvedZoneNumbers(zoneReg, z);
     if (maxMat > 0 && resolved?.materialNum != null && resolved.materialNum > maxMat) {
       diags.push({
         severity: "warning",
@@ -241,6 +242,49 @@ export function analyzeSemantics(ast: DocumentAst): DiagnosticMessage[] {
         code: "zone-mat",
         range: z.range,
       });
+    }
+  }
+
+  // Условные указатели: картограммы P/O/M проверяем только для зон прототипов этой NET
+  // (и netCarrier), иначе УРУ из LATT/другой сети даёт ложные warning.
+  {
+    for (const net of ast.nets) {
+      const haveP = new Set((net.regCartogram ?? []).map((r) => r.pointerIndex));
+      const haveO = new Set((net.objCartogram ?? []).map((r) => r.pointerIndex));
+      const haveM = new Set((net.matCartogram ?? []).map((r) => r.pointerIndex));
+      if (haveP.size === 0 && haveO.size === 0 && haveM.size === 0) continue;
+
+      const used = collectConditionalPointersForNet(ast, net);
+      for (const n of used.uru) {
+        if (haveP.size > 0 && !haveP.has(n)) {
+          diags.push({
+            severity: "warning",
+            message: `NET ${net.name}: УРУ ${n} используется в зонах прототипов, но нет картограммы P${String(n).padStart(2, "0")}**`,
+            code: "conditional-pointer-missing",
+            range: net.range,
+          });
+        }
+      }
+      for (const n of used.uou) {
+        if (haveO.size > 0 && !haveO.has(n)) {
+          diags.push({
+            severity: "warning",
+            message: `NET ${net.name}: УОУ ${n} используется в зонах прототипов, но нет картограммы O${String(n).padStart(2, "0")}**`,
+            code: "conditional-pointer-missing",
+            range: net.range,
+          });
+        }
+      }
+      for (const n of used.umu) {
+        if (haveM.size > 0 && !haveM.has(n)) {
+          diags.push({
+            severity: "warning",
+            message: `NET ${net.name}: УМУ ${n} используется в зонах прототипов, но нет картограммы M${String(n).padStart(2, "0")}**`,
+            code: "conditional-pointer-missing",
+            range: net.range,
+          });
+        }
+      }
     }
   }
 
@@ -278,6 +322,20 @@ export function analyzeSemantics(ast: DocumentAst): DiagnosticMessage[] {
             }
           }
         }
+      }
+    }
+
+    // Абсолютные reg/obj из P/O — предупреждение только для «странных» отрицательных nested позже;
+    // здесь проверяем размер строки vs cols
+    for (const row of [...(net.regCartogram ?? []), ...(net.objCartogram ?? []), ...(net.matCartogram ?? [])]) {
+      if (row.all) continue;
+      if (row.values.length > 0 && row.values.length !== net.cols && row.values.length < net.cols) {
+        diags.push({
+          severity: "warning",
+          message: `NET ${net.name}: ${row.label} — ${row.values.length} знач., ожидается ${net.cols} (cols)`,
+          code: "cartogram-dim-mismatch",
+          range: net.range,
+        });
       }
     }
   }
@@ -335,6 +393,35 @@ function netPrototypeName(raw: string): string | null {
   return s;
 }
 
+/** УРУ/УОУ/УМУ только из зон прототипов NET (cell:/lcell:) или netCarrier. */
+function collectConditionalPointersForNet(
+  ast: DocumentAst,
+  net: NetNode
+): { uru: Set<number>; uou: Set<number>; umu: Set<number> } {
+  const proto = new Set(uniqueNetPrototypes(net).map((n) => n.toUpperCase()));
+  const netName = net.name.toUpperCase();
+  const cache = new Map<number, number>();
+  const uru = new Set<number>();
+  const uou = new Set<number>();
+  const umu = new Set<number>();
+  for (const z of ast.zones) {
+    const scope = z.scope ?? "global";
+    let related = Boolean(z.netCarrier && z.netCarrier.toUpperCase() === netName);
+    if (!related && scope.startsWith("cell:")) {
+      related = proto.has(scope.slice(5).toUpperCase());
+    } else if (!related && scope.startsWith("lcell:")) {
+      related = proto.has(scope.slice(6).toUpperCase());
+    }
+    if (!related) continue;
+    const spec = zoneTailToPointerSpec(z.tail, cache);
+    if (!spec) continue;
+    if (spec.reg.kind === "conditional") uru.add(spec.reg.index);
+    if (spec.obj.kind === "conditional") uou.add(spec.obj.index);
+    if (spec.mat?.kind === "conditional") umu.add(spec.mat.index);
+  }
+  return { uru, uou, umu };
+}
+
 function uniqueNetPrototypes(net: NetNode): string[] {
   const set = new Set<string>();
   for (const row of net.typeMap) {
@@ -344,6 +431,11 @@ function uniqueNetPrototypes(net: NetNode): string[] {
     }
   }
   return [...set].sort();
+}
+
+function previewCartogramValues(values: string[]): string {
+  const joined = values.join(" ");
+  return joined.length > 40 ? `${joined.slice(0, 37)}…` : joined;
 }
 
 function buildNetSummaries(ast: DocumentAst): NetSummary[] {
@@ -358,6 +450,30 @@ function buildNetSummaries(ast: DocumentAst): NetSummary[] {
       row: idx + 1,
       label: `T${String(idx + 1).padStart(2, "0")}`,
       prototypes: row,
+    })),
+    regCartogram: (net.regCartogram ?? []).map((r) => ({
+      pointerIndex: r.pointerIndex,
+      label: r.label,
+      rowIndex: r.rowIndex,
+      layer: r.layer,
+      all: r.all,
+      valuesPreview: previewCartogramValues(r.values),
+    })),
+    objCartogram: (net.objCartogram ?? []).map((r) => ({
+      pointerIndex: r.pointerIndex,
+      label: r.label,
+      rowIndex: r.rowIndex,
+      layer: r.layer,
+      all: r.all,
+      valuesPreview: previewCartogramValues(r.values),
+    })),
+    matCartogram: (net.matCartogram ?? []).map((r) => ({
+      pointerIndex: r.pointerIndex,
+      label: r.label,
+      rowIndex: r.rowIndex,
+      layer: r.layer,
+      all: r.all,
+      valuesPreview: previewCartogramValues(r.values),
     })),
     carrierZones: ast.zones
       .filter((z) => z.netCarrier === net.name)
@@ -481,20 +597,26 @@ export function buildSummaries(ast: DocumentAst): {
 
   const zoneReg = buildZoneRegistrationMap(ast.zones);
   const zones: ZoneSummary[] = ast.zones.map((z) => {
-    const resolved = zoneReg.get(z.name);
+    const resolved = getResolvedZoneNumbers(zoneReg, z);
     return {
       name: z.name,
       expression: z.expression.length > 40 ? z.expression.slice(0, 37) + "…" : z.expression,
       materialNum: resolved?.materialNum,
       regNum: resolved?.regNum,
       objNum: resolved?.objNum,
+      regPointerIndex: resolved?.regPointerIndex,
+      objPointerIndex: resolved?.objPointerIndex,
+      matPointerIndex: resolved?.matPointerIndex,
+      hasConditionalPointers: resolved?.hasConditionalPointers,
       range: z.range,
     };
   });
 
   const objMap = new Map<number, ObjectSummary>();
   for (const z of zones) {
-    const o = z.objNum ?? 1;
+    // Условные без абсолютного obj не попадают в «Объект 1» по умолчанию
+    if (z.objNum == null) continue;
+    const o = z.objNum;
     if (!objMap.has(o)) {
       objMap.set(o, { objectNum: o, zoneNames: [], materialNums: [] });
     }

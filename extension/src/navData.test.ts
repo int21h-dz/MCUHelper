@@ -305,6 +305,7 @@ describe("navData", () => {
     const zones = buildZonesTree(payload, "file:///t.mcu");
     assert.strictEqual(zones[0]!.uri, "file:///t.mcu");
     assert.strictEqual(zones[0]!.range?.start.line, 8);
+    assert.strictEqual(zones[0]!.children?.[0]!.range?.start.line, 8);
     const objects = buildObjectsTree(payload, "file:///t.mcu");
     assert.strictEqual(objects[0]!.uri, "file:///t.mcu");
     assert.strictEqual(objects[0]!.range?.start.line, 8);
@@ -506,10 +507,82 @@ describe("navData", () => {
     assert.ok(!kids.some((c) => c.range?.start.line === 9));
   });
 
+  it("zones tree shows conditional pointers separately", () => {
+    const payload: IndexPayload = {
+      summaries: {
+        materials: [],
+        zones: [
+          { name: "ABS", expression: "A", materialNum: 1, regNum: 1, objNum: 1, range: { start: { line: 1, character: 0 }, end: { line: 1, character: 5 } } },
+          {
+            name: "COND",
+            expression: "B",
+            materialNum: 2,
+            regPointerIndex: 1,
+            objPointerIndex: 2,
+            hasConditionalPointers: true,
+            range: { start: { line: 2, character: 0 }, end: { line: 2, character: 5 } },
+          },
+        ],
+        objects: [{ objectNum: 1, zoneNames: ["ABS"], materialNums: [1] }],
+        constants: [],
+        bodies: [],
+        nets: [],
+        lattices: [],
+      },
+    };
+    const tree = buildZonesTree(payload, "file:///t.mcu");
+    assert.ok(tree.some((n) => n.label === "Условные указатели"));
+    const cond = tree.find((n) => n.label === "Условные указатели");
+    assert.ok(cond?.children?.[0]?.description?.includes("УРУ−1"));
+    assert.ok(tree.some((n) => n.label === "Рег. зона 1"));
+  });
+
+  it("zones tree keeps absolute-reg + УОУ when sibling has objNum", () => {
+    const payload: IndexPayload = {
+      summaries: {
+        materials: [],
+        zones: [
+          {
+            name: "ABS",
+            expression: "A",
+            materialNum: 1,
+            regNum: 5,
+            objNum: 1,
+            range: { start: { line: 1, character: 0 }, end: { line: 1, character: 5 } },
+          },
+          {
+            name: "UOU",
+            expression: "B",
+            materialNum: 2,
+            regNum: 5,
+            objPointerIndex: 3,
+            hasConditionalPointers: true,
+            range: { start: { line: 2, character: 0 }, end: { line: 2, character: 5 } },
+          },
+        ],
+        objects: [{ objectNum: 1, zoneNames: ["ABS"], materialNums: [1] }],
+        constants: [],
+        bodies: [],
+        nets: [],
+        lattices: [],
+      },
+    };
+    const tree = buildZonesTree(payload, "file:///t.mcu");
+    const reg5 = tree.find((n) => n.label === "Рег. зона 5");
+    assert.ok(reg5, JSON.stringify(tree.map((n) => n.label)));
+    const labels = (reg5!.children ?? []).map((c) => c.label);
+    assert.ok(labels.includes("ABS"), labels.join(","));
+    assert.ok(labels.includes("UOU"), labels.join(","));
+    const uou = reg5!.children!.find((c) => c.label === "UOU");
+    assert.ok(uou?.description?.includes("УОУ−3"), uou?.description);
+  });
+
   it("zones and objects trees format registration", () => {
     const payload = richPayload();
     const zones = buildZonesTree(payload, "file:///t.mcu");
-    assert.ok(zones[0]!.description?.includes("M1"));
+    assert.ok(zones[0]!.description?.includes("рег. №1"));
+    assert.strictEqual(zones[0]!.children?.length, 1);
+    assert.strictEqual(zones[0]!.children?.[0]!.label, "FUEL");
     const objects = buildObjectsTree(payload, "file:///t.mcu");
     assert.ok(objects[0]!.children?.length === 2);
     assert.ok(objects[0]!.children?.[0]!.uri);
@@ -578,7 +651,7 @@ describe("navData", () => {
     const tree = buildNetsTree(richPayload(), "file:///t.mcu");
     assert.strictEqual(tree.length, 1);
     const children = tree[0]!.children ?? [];
-    assert.ok(children.some((c) => c.label === "Картограмма"));
+    assert.ok(children.some((c) => c.label === "Картограмма T**"));
     assert.ok(children.some((c) => c.label === "Прототипы CELL"));
     assert.ok(children.some((c) => c.label === "Зоны-носители"));
     assert.ok(tree[0]!.description?.includes("×"));

@@ -66,13 +66,23 @@ export interface BodyNode {
 
 export interface ZoneTailLegacy {
   kind: "legacy";
+  /**
+   * Рег. номер: положительный = безусловный; отрицательный = УРУ (−|n|).
+   * UserGuide §9.1.4.
+   */
   reg?: number;
+  /**
+   * Материальный номер: положительный = безусловный; отрицательный = УМУ (−|n|).
+   */
   mat?: number;
+  /**
+   * Объектный номер: положительный = безусловный; отрицательный = УОУ (−|n|).
+   */
   obj?: number;
   bcType?: string;
   /** :mat или /:mat — reg=1, obj по умолчанию 1 (UserGuide §9.1.4). */
   defaultRegObj?: boolean;
-  /** /reg[/obj] без mat — материал из предыдущей зоны с тем же reg. */
+  /** /reg[/obj] без mat — материал из предыдущей зоны с тем же reg (только absolute reg). */
   inheritMat?: boolean;
 }
 
@@ -118,6 +128,24 @@ export interface CellPrototypeNode {
   range: SourceRange;
 }
 
+/**
+ * Строка картограммы NET P/O/M (UserGuide §9.2.3).
+ * Метка `P<kk><jj>`: kk = номер условного указателя, jj = номер строки сети.
+ */
+export interface NetCartogramRow {
+  label: string;
+  /** Номер условного указателя (УРУ/УОУ/УМУ), 1-based. */
+  pointerIndex: number;
+  /** Номер строки сети j (1-based); отсутствует при ALL. */
+  rowIndex?: number;
+  /** Номер слоя k (1-based) для LAY-форм. */
+  layer?: number;
+  /** `PkkALL` / `OkkALL` / `MkkALL` — одно значение на всю сетку. */
+  all?: boolean;
+  /** Развёрнутые значения строки (или одно значение при all). */
+  values: string[];
+}
+
 export interface NetNode {
   kind: "net";
   name: string;
@@ -126,9 +154,18 @@ export interface NetNode {
   rows: number;
   layers?: number;
   typeMap: string[][];
+  /** @deprecated используйте regCartogram */
   regMaps?: string[][][];
+  /** @deprecated используйте objCartogram */
   objMaps?: string[][][];
+  /** @deprecated используйте matCartogram */
   matMaps?: string[][][];
+  /** Картограммы регистрационных номеров (P**). */
+  regCartogram?: NetCartogramRow[];
+  /** Картограммы объектных номеров (O**). */
+  objCartogram?: NetCartogramRow[];
+  /** Картограммы материальных номеров (M**). */
+  matCartogram?: NetCartogramRow[];
   range: SourceRange;
 }
 
@@ -258,6 +295,14 @@ export interface ZoneSummary {
   materialNum?: number;
   regNum?: number;
   objNum?: number;
+  /** УРУ (1-based), если рег. указатель условный. */
+  regPointerIndex?: number;
+  /** УОУ (1-based), если объектный указатель условный. */
+  objPointerIndex?: number;
+  /** УМУ (1-based), если материальный указатель условный. */
+  matPointerIndex?: number;
+  /** Хотя бы один из указателей условный. */
+  hasConditionalPointers?: boolean;
   range: SourceRange;
   /** URI файла зоны (main или `#include`). */
   uri?: string;
@@ -301,6 +346,15 @@ export interface NetCartogramRowSummary {
   prototypes: string[];
 }
 
+export interface NetPointerCartogramSummary {
+  pointerIndex: number;
+  label: string;
+  rowIndex?: number;
+  layer?: number;
+  all?: boolean;
+  valuesPreview: string;
+}
+
 export interface NetSummary {
   name: string;
   root: string;
@@ -309,6 +363,12 @@ export interface NetSummary {
   layers?: number;
   typeMapRowCount: number;
   cartogram: NetCartogramRowSummary[];
+  /** Картограммы P** (рег. номера для УРУ). */
+  regCartogram?: NetPointerCartogramSummary[];
+  /** Картограммы O** (объектные номера для УОУ). */
+  objCartogram?: NetPointerCartogramSummary[];
+  /** Картограммы M** (материалы для УМУ). */
+  matCartogram?: NetPointerCartogramSummary[];
   carrierZones: Array<{ name: string; range: SourceRange; uri?: string }>;
   prototypes: Array<{ name: string; range?: SourceRange; uri?: string }>;
   range: SourceRange;

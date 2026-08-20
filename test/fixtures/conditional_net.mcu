@@ -1,0 +1,31 @@
+/**
+ * Условные указатели + NET P/O/M (фрагмент по UserGuide рис. A.49 / §9.2.3).
+ * ZN1 — безусловные; ZNTE — УРУ/УОУ −1; картограммы P/O перекодируют по ячейке.
+ */
+PIN 1 0
+MATR 1
+U235 1.E-3
+MATR 2
+U238 1.E-3
+HEAD 3 0
+CONT T T
+RCZ NETVOL 0 0 -1 2 2 1
+END
+NETC (ZT01) NETVOL /1:1
+END
+CELL NC
+RPP S 0 1 0 1 0 1
+RPP H 0.2 0.8 0.2 0.8 0 1
+END
+ZN1 S -H /4:2/5
+ZNTE H /-1:1/-1
+END
+NET ZT01 0 0 -1 2 2
+T01 NC NC
+T02 NC NC
+P0101 10 11
+P0102 12 13
+O0101 20 21
+O0102 22 23
+END
+FINISH

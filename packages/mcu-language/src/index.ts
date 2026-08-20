@@ -40,6 +40,7 @@ export * from "./otherModules";
 export * from "./registrationBuilder";
 export * from "./bodyGenerator";
 export * from "./zoneRegistration";
+export * from "./zonePointerResolution";
 export * from "./zoneStatement";
 export * from "./zoneBodyRefs";
 export * from "./netCartogram";

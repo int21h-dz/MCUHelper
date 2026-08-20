@@ -106,6 +106,12 @@ export function loadBodyGeneratorApi(): {
   return requireLanguage("bodyGenerator");
 }
 
+export function loadZoneStatementApi(): {
+  looksLikeZoneStatement: (text: string) => boolean;
+} {
+  return requireLanguage("zoneStatement");
+}
+
 export type ResultSummary = {
   sourcePath: string;
   keff?: number;

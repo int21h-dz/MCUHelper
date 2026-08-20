@@ -38,12 +38,15 @@ const els = {
   capXZ: document.getElementById("capXZ"),
   capYZ: document.getElementById("capYZ"),
   idleHint: document.getElementById("idleHint"),
+  sliceControls: document.getElementById("sliceControls"),
 };
 
 let types = [];
 let constants = [];
 let currentFields = [];
 let slices = [];
+let currentPreviewKind = "body";
+let liveSlicePlanes = null;
 
 const ZOOM_MIN = 0.25;
 const ZOOM_MAX = 40;
@@ -57,6 +60,120 @@ const sliceSlots = [
 
 function clamp(n, a, b) {
   return Math.max(a, Math.min(b, n));
+}
+
+function fmtPlaneValue(n) {
+  return Number.isFinite(n) ? Number(n).toFixed(3) : "—";
+}
+
+function hexToRgba(hex, alpha) {
+  const h = String(hex || "").trim();
+  if (!h) return `rgba(61,154,139,${alpha})`;
+  const m = /^#([0-9a-f]{6})$/i.exec(h);
+  if (!m) return `rgba(61,154,139,${alpha})`;
+  const v = parseInt(m[1], 16);
+  const r = (v >> 16) & 255;
+  const g = (v >> 8) & 255;
+  const b = v & 255;
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function collectSlicePlanePositions() {
+  if (liveSlicePlanes) {
+    return {
+      x: liveSlicePlanes.x.value,
+      y: liveSlicePlanes.y.value,
+      z: liveSlicePlanes.z.value,
+    };
+  }
+  const planes = {};
+  for (const s of slices) {
+    if (s && s.axis && Number.isFinite(s.position)) {
+      planes[s.axis] = s.position;
+    }
+  }
+  return planes;
+}
+
+function drawCutPlaneMarkers(ctx, slice, map, bounds, planes, strokeColor, canvasW, canvasH) {
+  if (!slice || !slice.axis || !planes) return;
+  const axis = slice.axis;
+  const w = Number.isFinite(canvasW) ? canvasW : 0;
+  const h = Number.isFinite(canvasH) ? canvasH : 0;
+  if (w <= 0 || h <= 0) return;
+
+  ctx.save();
+  ctx.setLineDash([7, 5]);
+  ctx.lineWidth = 1.15;
+  ctx.strokeStyle = strokeColor || "rgba(255, 236, 0, 0.92)";
+
+  // Линии до краёв webview (canvas), не только до рамки bounds.
+  const drawVertical = (u) => {
+    if (!Number.isFinite(u)) return;
+    const x = map(u, bounds.vMin).x;
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, h);
+    ctx.stroke();
+  };
+  const drawHorizontal = (v) => {
+    if (!Number.isFinite(v)) return;
+    const y = map(bounds.uMin, v).y;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(w, y);
+    ctx.stroke();
+  };
+
+  if (axis === "z") {
+    drawVertical(planes.x);
+    drawHorizontal(planes.y);
+  } else if (axis === "y") {
+    drawVertical(planes.x);
+    drawHorizontal(planes.z);
+  } else if (axis === "x") {
+    drawVertical(planes.y);
+    drawHorizontal(planes.z);
+  }
+  ctx.restore();
+}
+
+function renderSliceControls() {
+  if (!els.sliceControls) return;
+  if (!liveMode || currentPreviewKind !== "zone" || !liveSlicePlanes) {
+    els.sliceControls.innerHTML = "";
+    return;
+  }
+  const items = [
+    { axis: "z", label: "XY @ Z", min: liveSlicePlanes.z.min, max: liveSlicePlanes.z.max, value: liveSlicePlanes.z.value },
+    { axis: "y", label: "XZ @ Y", min: liveSlicePlanes.y.min, max: liveSlicePlanes.y.max, value: liveSlicePlanes.y.value },
+    { axis: "x", label: "YZ @ X", min: liveSlicePlanes.x.min, max: liveSlicePlanes.x.max, value: liveSlicePlanes.x.value },
+  ];
+  els.sliceControls.innerHTML = items.map((it) => `
+    <label class="bg-slice-control" data-axis="${it.axis}">
+      <span>${it.label}: <b>${fmtPlaneValue(it.value)}</b></span>
+      <input type="range" min="${it.min}" max="${it.max}" step="any" value="${it.value}" data-axis="${it.axis}" />
+    </label>
+  `).join("");
+  els.sliceControls.querySelectorAll("input[type=range]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const axis = input.getAttribute("data-axis");
+      const value = Number(input.value);
+      if (!axis || !liveSlicePlanes || !Number.isFinite(value)) return;
+      liveSlicePlanes[axis].value = value;
+      const label = input.parentElement && input.parentElement.querySelector("b");
+      if (label) label.textContent = fmtPlaneValue(value);
+      vscode.postMessage({
+        type: "slicePlanesChanged",
+        positions: {
+          x: liveSlicePlanes.x.value,
+          y: liveSlicePlanes.y.value,
+          z: liveSlicePlanes.z.value,
+        },
+      });
+      requestSliceDraw();
+    });
+  });
 }
 
 function resetSliceView(slot) {
@@ -147,6 +264,29 @@ function pickGrayBody(slot, uv) {
     }
   });
   return bestName;
+}
+
+function pickGridZone(slot, uv) {
+  const slice = slot.slice;
+  if (!slice || !slice.grid || !slice.bounds || !uv) return null;
+  const rows = slice.grid.length;
+  const cols = rows ? slice.grid[0].length : 0;
+  if (!rows || !cols) return null;
+  const b = slice.bounds;
+  if (uv.u < b.uMin || uv.u > b.uMax || uv.v < b.vMin || uv.v > b.vMax) return null;
+  const col = clamp(Math.floor(((uv.u - b.uMin) / (b.uMax - b.uMin || 1)) * cols), 0, cols - 1);
+  const row = clamp(Math.floor(((b.vMax - uv.v) / (b.vMax - b.vMin || 1)) * rows), 0, rows - 1);
+  const idx = slice.grid[row] && slice.grid[row][col];
+  if (!idx) return null;
+  const meta = (slice.zoneIndex || []).find((z) => z.index === idx);
+  return meta && meta.name ? meta.name : null;
+}
+
+function pickSliceName(slot, uv) {
+  const slice = slot.slice;
+  if (slice && slice.zonePreview && slice.polylines && slice.polylines.length) return pickGrayBody(slot, uv);
+  if (slice && slice.grid) return pickGridZone(slot, uv);
+  return pickGrayBody(slot, uv);
 }
 
 function placeTip(slot, clientX, clientY) {
@@ -385,6 +525,50 @@ function drawOneSlice(slot, slice) {
     };
   }
 
+  function drawHatchWithinCurrentPath(color) {
+    ctx.save();
+    ctx.clip("evenodd");
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    const hatchSpacing = 8;
+    for (let x = -cssH; x < cssW + cssH; x += hatchSpacing) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x + cssH, cssH);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawSlicePlaneMarkers() {
+    const planes = collectSlicePlanePositions();
+    drawCutPlaneMarkers(ctx, slice, map, b, planes, "rgba(255, 236, 0, 0.92)", cssW, cssH);
+  }
+
+  function drawGridOverlay(rows, cols) {
+    if (!rows || !cols) return;
+    ctx.save();
+    ctx.strokeStyle = "rgba(190,190,190,0.16)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let col = 0; col <= cols; col++) {
+      const u = b.uMin + (du * col) / cols;
+      const p0 = map(u, b.vMin);
+      const p1 = map(u, b.vMax);
+      ctx.moveTo(p0.x, p0.y);
+      ctx.lineTo(p1.x, p1.y);
+    }
+    for (let row = 0; row <= rows; row++) {
+      const v = b.vMax - (dv * row) / rows;
+      const p0 = map(b.uMin, v);
+      const p1 = map(b.uMax, v);
+      ctx.moveTo(p0.x, p0.y);
+      ctx.lineTo(p1.x, p1.y);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
   ctx.save();
   ctx.beginPath();
   ctx.rect(0, 0, cssW, cssH);
@@ -413,6 +597,176 @@ function drawOneSlice(slot, slice) {
   ctx.stroke();
 
   const hoverName = slot.hoverName;
+  if (slice.zonePreview && slice.polylines && slice.polylines.length) {
+    const rows = slice.grid && slice.grid.length ? slice.grid.length : 0;
+    const cols = rows ? slice.grid[0].length : 0;
+    drawGridOverlay(rows, cols);
+    if (slice.segments && slice.segments.length) {
+      ctx.save();
+      ctx.strokeStyle = "#3d9a8b";
+      ctx.lineWidth = hoverName ? 2.1 : 1.5;
+      ctx.beginPath();
+      (slice.segments || []).forEach((seg) => {
+        if (!seg || !seg.a || !seg.b) return;
+        const p1 = map(seg.a.u, seg.a.v);
+        const p2 = map(seg.b.u, seg.b.v);
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+      });
+      ctx.stroke();
+      ctx.restore();
+    }
+    ctx.beginPath();
+    // Важно: ctx.fill("evenodd") неявно замыкает open-contours,
+    // поэтому заполняем только действительно closed контуры.
+    (slice.polylines || [])
+      .filter((pl) => pl && pl.closed)
+      .forEach((pl) => {
+        if (!pl.points || !pl.points.length) return;
+      pl.points.forEach((p, i) => {
+        const q = map(p.u, p.v);
+        if (i === 0) ctx.moveTo(q.x, q.y);
+        else ctx.lineTo(q.x, q.y);
+      });
+        ctx.closePath();
+      });
+    ctx.fillStyle = hoverName ? "rgba(205,214,244,0.18)" : "rgba(61,154,139,0.18)";
+    ctx.fill("evenodd");
+    const zoneName = slice.zoneIndex && slice.zoneIndex[1] && slice.zoneIndex[1].name;
+    const zoneColor = slice.zoneIndex && slice.zoneIndex[1] && slice.zoneIndex[1].color ? slice.zoneIndex[1].color : "#3d9a8b";
+    ctx.beginPath();
+    (slice.polylines || [])
+      .filter((pl) => pl && pl.closed && (zoneName ? pl.name === zoneName : true))
+      .forEach((pl) => {
+        if (!pl.points || !pl.points.length) return;
+        pl.points.forEach((p, i) => {
+          const q = map(p.u, p.v);
+          if (i === 0) ctx.moveTo(q.x, q.y);
+          else ctx.lineTo(q.x, q.y);
+        });
+        ctx.closePath();
+      });
+    drawHatchWithinCurrentPath(hexToRgba(zoneColor, 0.26));
+
+    (slice.polylines || []).forEach((pl) => {
+      if (!pl.points || pl.points.length < 2) return;
+      const hovered = hoverName && pl.name === hoverName;
+      ctx.beginPath();
+      pl.points.forEach((p, i) => {
+        const q = map(p.u, p.v);
+        if (i === 0) ctx.moveTo(q.x, q.y);
+        else ctx.lineTo(q.x, q.y);
+      });
+      if (pl.closed) ctx.closePath();
+      ctx.strokeStyle = hovered ? "#cdd6f4" : (pl.color || "#3d9a8b");
+      ctx.lineWidth = hovered ? 2.2 : 1.5;
+      ctx.stroke();
+    });
+    drawSlicePlaneMarkers();
+    ctx.restore();
+    ctx.fillStyle = "#9d9d9d";
+    ctx.font = "11px system-ui, sans-serif";
+    ctx.fillText(slice.uLabel || "U", cssW - 18, cssH - 6);
+    ctx.fillText(slice.vLabel || "V", 6, 14);
+    return;
+  }
+  if (slice.grid) {
+    const rows = slice.grid.length || 0;
+    const cols = rows ? slice.grid[0].length : 0;
+    drawGridOverlay(rows, cols);
+    const duCell = cols ? du / cols : 0;
+    const dvCell = rows ? dv / rows : 0;
+    const zoneColorByIndex = new Map((slice.zoneIndex || []).map((z) => [z.index, z.color || "#3d9a8b"]));
+    for (let row = 0; row < rows; row++) {
+      const vTop = b.vMax - row * dvCell;
+      const vBottom = vTop - dvCell;
+      for (let col = 0; col < cols; col++) {
+        const idx = slice.grid[row][col];
+        if (!idx) continue;
+        const uLeft = b.uMin + col * duCell;
+        const uRight = uLeft + duCell;
+        const p1 = map(uLeft, vTop);
+        const p2 = map(uRight, vBottom);
+        ctx.fillStyle = idx && hoverName === ((slice.zoneIndex || []).find((z) => z.index === idx) || {}).name
+          ? "rgba(205,214,244,0.30)"
+          : "rgba(61,154,139,0.28)";
+        ctx.fillRect(
+          Math.min(p1.x, p2.x),
+          Math.min(p1.y, p2.y),
+          Math.max(1, Math.abs(p2.x - p1.x)),
+          Math.max(1, Math.abs(p2.y - p1.y))
+        );
+      }
+    }
+
+    ctx.beginPath();
+    for (let row = 0; row < rows; row++) {
+      const vTop = b.vMax - row * dvCell;
+      const vBottom = vTop - dvCell;
+      for (let col = 0; col < cols; col++) {
+        const idx = slice.grid[row][col];
+        if (!idx) continue;
+        const uLeft = b.uMin + col * duCell;
+        const uRight = uLeft + duCell;
+        const p1 = map(uLeft, vTop);
+        const p2 = map(uRight, vBottom);
+        ctx.rect(
+          Math.min(p1.x, p2.x),
+          Math.min(p1.y, p2.y),
+          Math.max(1, Math.abs(p2.x - p1.x)),
+          Math.max(1, Math.abs(p2.y - p1.y))
+        );
+      }
+    }
+    drawHatchWithinCurrentPath(hoverName ? "rgba(205,214,244,0.24)" : "rgba(61,154,139,0.20)");
+
+    ctx.strokeStyle = "#3d9a8b";
+    ctx.lineWidth = hoverName ? 1.8 : 1.25;
+    ctx.beginPath();
+    const cellAt = (r, c) => (r < 0 || c < 0 || r >= rows || c >= cols ? 0 : (slice.grid[r] && slice.grid[r][c]) || 0);
+    for (let row = 0; row < rows; row++) {
+      const vTop = b.vMax - row * dvCell;
+      const vBottom = vTop - dvCell;
+      for (let col = 0; col < cols; col++) {
+        const idx = cellAt(row, col);
+        if (!idx) continue;
+        const uLeft = b.uMin + col * duCell;
+        const uRight = uLeft + duCell;
+        if (!cellAt(row - 1, col)) {
+          const a = map(uLeft, vTop);
+          const bb = map(uRight, vTop);
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(bb.x, bb.y);
+        }
+        if (!cellAt(row + 1, col)) {
+          const a = map(uLeft, vBottom);
+          const bb = map(uRight, vBottom);
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(bb.x, bb.y);
+        }
+        if (!cellAt(row, col - 1)) {
+          const a = map(uLeft, vTop);
+          const bb = map(uLeft, vBottom);
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(bb.x, bb.y);
+        }
+        if (!cellAt(row, col + 1)) {
+          const a = map(uRight, vTop);
+          const bb = map(uRight, vBottom);
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(bb.x, bb.y);
+        }
+      }
+    }
+    ctx.stroke();
+    drawSlicePlaneMarkers();
+    ctx.restore();
+    ctx.fillStyle = "#9d9d9d";
+    ctx.font = "11px system-ui, sans-serif";
+    ctx.fillText(slice.uLabel || "U", cssW - 18, cssH - 6);
+    ctx.fillText(slice.vLabel || "V", 6, 14);
+    return;
+  }
   const ordered = (slice.polylines || []).slice().sort((a, b2) => {
     const ah = a.highlight ? 1 : 0;
     const bh = b2.highlight ? 1 : 0;
@@ -447,6 +801,7 @@ function drawOneSlice(slot, slice) {
     }
     ctx.stroke();
   });
+  drawSlicePlaneMarkers();
   ctx.restore();
 
   ctx.fillStyle = "#9d9d9d";
@@ -518,7 +873,7 @@ function attachSliceNav(slot) {
       return;
     }
     const loc = canvasLocal(canvas, e.clientX, e.clientY);
-    const name = pickGrayBody(slot, screenToUv(slot, loc.x, loc.y));
+    const name = pickSliceName(slot, screenToUv(slot, loc.x, loc.y));
     if (name !== slot.hoverName) {
       slot.hoverName = name;
       drawOneSlice(slot, slot.slice);
@@ -642,7 +997,47 @@ window.addEventListener("message", (event) => {
     }
     if (msg.resetView) sliceSlots.forEach(resetSliceView);
     const dp = msg.draftPreview;
-    if (dp) {
+    const zp = msg.zonePreview;
+    if (zp) {
+      currentPreviewKind = "zone";
+      slices = zp.slices || [];
+      if (zp.bbox && zp.bbox.min && zp.bbox.max) {
+        const pickPos = (axis, fallback) => {
+          const s = slices.find((item) => item && item.axis === axis);
+          return s && typeof s.position === "number" ? s.position : fallback;
+        };
+        liveSlicePlanes = {
+          x: { min: zp.bbox.min.x, max: zp.bbox.max.x, value: pickPos("x", (zp.bbox.min.x + zp.bbox.max.x) / 2) },
+          y: { min: zp.bbox.min.y, max: zp.bbox.max.y, value: pickPos("y", (zp.bbox.min.y + zp.bbox.max.y) / 2) },
+          z: { min: zp.bbox.min.z, max: zp.bbox.max.z, value: pickPos("z", (zp.bbox.min.z + zp.bbox.max.z) / 2) },
+        };
+      } else {
+        liveSlicePlanes = null;
+      }
+      renderSliceControls();
+      if (els.neighborInfo) {
+        const s0 = slices && slices[0];
+        if (s0 && s0.debugGrid) {
+          const r = s0.debugGrid.rows;
+          const c = s0.debugGrid.cols;
+          const step = Number(s0.debugGrid.step);
+          const stepTxt = Number.isFinite(step) ? step.toPrecision(3) : "?";
+          const prims = s0.debugGrid.primitiveCount ?? 0;
+          const mf = s0.debugGrid.minFeature;
+          const mfTxt = mf == null ? "null" : Number(mf).toPrecision(3);
+          const refsFound = s0.debugGrid.refsFound ?? 0;
+          const matchedInCtx = s0.debugGrid.matchedInCtx ?? 0;
+          els.neighborInfo.textContent = `сетка: ${c}×${r} · step≈${stepTxt} · прим: ${prims} (matched ${matchedInCtx}/${refsFound}), min≈${mfTxt}`;
+        } else {
+          els.neighborInfo.textContent = "логическая зона";
+        }
+      }
+      if (els.nearestInfo) els.nearestInfo.textContent = "сечение зоны";
+      drawSlices();
+    } else if (dp) {
+      currentPreviewKind = "body";
+      liveSlicePlanes = null;
+      renderSliceControls();
       slices = dp.slices || [];
       const n = (dp.neighborNames || []).length;
       if (els.neighborInfo) {
@@ -661,6 +1056,9 @@ window.addEventListener("message", (event) => {
       drawSlices();
     } else if (msg.resetView || !liveMode) {
       slices = [];
+      currentPreviewKind = "body";
+      liveSlicePlanes = null;
+      renderSliceControls();
       if (els.neighborInfo) els.neighborInfo.textContent = "";
       if (els.nearestInfo) els.nearestInfo.textContent = "ближайшее: —";
       drawSlices();

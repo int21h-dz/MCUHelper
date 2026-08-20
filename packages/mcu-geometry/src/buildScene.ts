@@ -1,5 +1,5 @@
 import type { DocumentAst } from "@mcuhelper/mcu-language";
-import { buildZoneRegistrationMap, parseNumbers } from "@mcuhelper/mcu-language";
+import { buildZoneRegistrationMap, getResolvedZoneNumbers, parseNumbers } from "@mcuhelper/mcu-language";
 import { colorForBody, colorForZone } from "./colors";
 import { buildPrimitive, buildVars, bboxUnion, emptyBbox } from "./primitives";
 import { applyTransfToPrimitive, normalizeTransfMode } from "./meshPreview";
@@ -66,7 +66,7 @@ export function buildScene(ast: DocumentAst, options?: { scope?: string }): Geom
   const zones: ZoneSolid[] = ast.zones
     .filter((z) => inScope(z.scope))
     .map((z, idx) => {
-      const r = zoneReg.get(z.name);
+      const r = getResolvedZoneNumbers(zoneReg, z);
       const parsedExpression = parseZoneExpression(z.expression) ?? undefined;
       const bodyRefs = parsedExpression ? collectBodyRefs(parsedExpression) : [];
       return {

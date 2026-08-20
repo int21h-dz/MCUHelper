@@ -119,6 +119,10 @@ export interface IndexPayload {
       materialNum?: number;
       regNum?: number;
       objNum?: number;
+      regPointerIndex?: number;
+      objPointerIndex?: number;
+      matPointerIndex?: number;
+      hasConditionalPointers?: boolean;
       range: SourceRange;
       uri?: string;
     }>;
@@ -156,6 +160,30 @@ export interface IndexPayload {
       layers?: number;
       typeMapRowCount: number;
       cartogram: Array<{ row: number; label: string; prototypes: string[] }>;
+      regCartogram?: Array<{
+        pointerIndex: number;
+        label: string;
+        rowIndex?: number;
+        layer?: number;
+        all?: boolean;
+        valuesPreview: string;
+      }>;
+      objCartogram?: Array<{
+        pointerIndex: number;
+        label: string;
+        rowIndex?: number;
+        layer?: number;
+        all?: boolean;
+        valuesPreview: string;
+      }>;
+      matCartogram?: Array<{
+        pointerIndex: number;
+        label: string;
+        rowIndex?: number;
+        layer?: number;
+        all?: boolean;
+        valuesPreview: string;
+      }>;
       carrierZones: Array<{ name: string; range: SourceRange; uri?: string }>;
       prototypes: Array<{ name: string; range?: SourceRange; uri?: string }>;
       range: SourceRange;
@@ -600,17 +628,154 @@ export function buildMaterialsTree(
   });
 }
 
+/** Хвост фигуры зоны: рег./объектный указатель и номер материала (UserGuide §9.1.4). */
+function formatRegZonePointers(
+  regNum: number | undefined,
+  objNum: number | undefined,
+  materialNum: number | undefined,
+  opts?: {
+    regPointerIndex?: number;
+    objPointerIndex?: number;
+    matPointerIndex?: number;
+  }
+): string {
+  const regPart =
+    opts?.regPointerIndex != null
+      ? `УРУ−${opts.regPointerIndex}`
+      : `рег.${regNum ?? "?"}`;
+  const objPart =
+    opts?.objPointerIndex != null
+      ? `УОУ−${opts.objPointerIndex}`
+      : `об.${objNum ?? "?"}`;
+  const matPart =
+    opts?.matPointerIndex != null
+      ? `УМУ−${opts.matPointerIndex}`
+      : `M${materialNum ?? "?"}`;
+  return `${regPart}/${objPart} · ${matPart}`;
+}
+
+function zonePointerOpts(z: {
+  regPointerIndex?: number;
+  objPointerIndex?: number;
+  matPointerIndex?: number;
+}) {
+  return {
+    regPointerIndex: z.regPointerIndex,
+    objPointerIndex: z.objPointerIndex,
+    matPointerIndex: z.matPointerIndex,
+  };
+}
+
 export function buildZonesTree(index: IndexPayload, uri: string): NavTreeNode[] {
-  return index.summaries.zones.map((z) => {
-    const click = sidebarClickTarget(index, uri, z.uri, z.range);
-    return {
-      id: `zone-${z.name}`,
-      label: z.name,
-      description: `M${z.materialNum ?? "?"} Z${z.regNum ?? "?"} O${z.objNum ?? "?"} — ${z.expression}`,
-      uri: click.uri,
-      range: click.range,
-    };
-  });
+  // Имя зоны (z.name) — имя геометрической фигуры; regNum — регистрационный номер (не связан с именем).
+  // Корень = рег. зона №regNum; потомки = фигуры с этим regNum.
+  // Условные (УРУ) без абсолютного reg группируются под «Условные указатели».
+  type ZoneRow = IndexPayload["summaries"]["zones"][number];
+  const absolute: ZoneRow[] = [];
+  const conditional: ZoneRow[] = [];
+  for (const z of index.summaries.zones) {
+    if (z.hasConditionalPointers && z.regNum == null) conditional.push(z);
+    else absolute.push(z);
+  }
+
+  const zonesByRegNum = new Map<string, ZoneRow[]>();
+  for (const z of absolute) {
+    const key = z.regNum != null ? String(z.regNum) : "?";
+    const list = zonesByRegNum.get(key);
+    if (list) list.push(z);
+    else zonesByRegNum.set(key, [z]);
+  }
+
+  const allObjects = index.summaries.objects ?? [];
+  const roots: NavTreeNode[] = [];
+
+  if (conditional.length > 0) {
+    roots.push({
+      id: "zone-conditional",
+      label: "Условные указатели",
+      description: `${conditional.length} фигур(ы) с УРУ/УОУ/УМУ`,
+      uri,
+      children: conditional.map((z, i) => {
+        const click = sidebarClickTarget(index, uri, z.uri, z.range);
+        return {
+          id: `zone-cond-${i}`,
+          label: z.name,
+          description: formatRegZonePointers(z.regNum, z.objNum, z.materialNum, zonePointerOpts(z)),
+          uri: click.uri,
+          range: click.range,
+        };
+      }),
+    });
+  }
+
+  for (const [regKey, list] of zonesByRegNum.entries()) {
+    const regNumLabel = regKey === "?" ? "?" : regKey;
+    const children: NavTreeNode[] = [];
+    const objNumsForDesc: string[] = [];
+    const placed = new Set<ZoneRow>();
+
+    for (const obj of allObjects) {
+      const matches = list.filter((z) => z.objNum === obj.objectNum);
+      if (!matches.length) continue;
+
+      objNumsForDesc.push(String(obj.objectNum));
+      for (const [i, z] of matches.entries()) {
+        placed.add(z);
+        const click = sidebarClickTarget(index, uri, z.uri, z.range);
+        children.push({
+          id: `zone-${regKey}-obj-${obj.objectNum}-z-${i}`,
+          label: z.name,
+          description: formatRegZonePointers(z.regNum, obj.objectNum, z.materialNum, zonePointerOpts(z)),
+          uri: click.uri,
+          range: click.range,
+        });
+      }
+    }
+
+    // УОУ / без objNum: не терять фигуры, если в группе уже есть зоны с обычным obj.
+    for (const [i, z] of list.entries()) {
+      if (placed.has(z)) continue;
+      const click = sidebarClickTarget(index, uri, z.uri, z.range);
+      children.push({
+        id: `zone-${regKey}-rest-${i}`,
+        label: z.name,
+        description: formatRegZonePointers(z.regNum, z.objNum, z.materialNum, zonePointerOpts(z)),
+        uri: click.uri,
+        range: click.range,
+      });
+      objNumsForDesc.push(
+        z.objPointerIndex != null ? `УОУ−${z.objPointerIndex}` : z.objNum != null ? String(z.objNum) : "?"
+      );
+    }
+
+    if (!children.length) {
+      for (const [i, z] of list.entries()) {
+        const click = sidebarClickTarget(index, uri, z.uri, z.range);
+        children.push({
+          id: `zone-${regKey}-z-${i}`,
+          label: z.name,
+          description: formatRegZonePointers(z.regNum, z.objNum, z.materialNum, zonePointerOpts(z)),
+          uri: click.uri,
+          range: click.range,
+        });
+        objNumsForDesc.push(z.objNum != null ? String(z.objNum) : "?");
+      }
+    }
+
+    const firstClickable = children.find((c) => c.uri && c.range);
+    const figureNames = [...new Set(list.map((z) => z.name))];
+
+    roots.push({
+      id: `zone-${regKey}`,
+      label: `Рег. зона ${regNumLabel}`,
+      description: `рег. №${regNumLabel} · объекты: ${[...new Set(objNumsForDesc)].join(", ")} · фигуры: ${figureNames.join(", ")}`,
+      uri: firstClickable?.uri ?? uri,
+      range: firstClickable?.range,
+      children,
+    });
+  }
+
+  return roots;
 }
 
 export function buildObjectsTree(index: IndexPayload, uri: string): NavTreeNode[] {
@@ -636,7 +801,7 @@ export function buildObjectsTree(index: IndexPayload, uri: string): NavTreeNode[
       return {
         id: `obj-${o.objectNum}-z-${i}`,
         label: zn,
-        description: `мат. ${o.materialNums.join(",")}`,
+        description: formatRegZonePointers(zone?.regNum, o.objectNum, zone?.materialNum ?? o.materialNums[i], zone ? zonePointerOpts(zone) : undefined),
         uri: click.uri,
         range: click.range,
       };
@@ -646,8 +811,8 @@ export function buildObjectsTree(index: IndexPayload, uri: string): NavTreeNode[
 
     return {
       id: `obj-${o.objectNum}`,
-      label: `Object ${o.objectNum}`,
-      description: `Зоны: ${o.zoneNames.join(", ")}`,
+      label: `Объект ${o.objectNum}`,
+      description: `Фигуры: ${o.zoneNames.join(", ")}`,
       uri: firstClickable?.uri ?? uri,
       range: firstClickable?.range,
       children,
@@ -713,6 +878,29 @@ export function buildBodiesTree(index: IndexPayload, uri: string): NavTreeNode[]
 }
 
 export function buildNetsTree(index: IndexPayload, uri: string): NavTreeNode[] {
+  const pointerCartChildren = (
+    netName: string,
+    kind: "reg" | "obj" | "mat",
+    rows: NonNullable<IndexPayload["summaries"]["nets"][number]["regCartogram"]> | undefined,
+    title: string
+  ): NavTreeNode[] => {
+    if (!rows?.length) return [];
+    return [
+      {
+        id: `net-${netName}-${kind}`,
+        label: title,
+        description: `${rows.length} строк`,
+        children: rows.map((row, i) => ({
+          id: `net-${netName}-${kind}-${i}`,
+          label: row.label,
+          description: row.all
+            ? `Указ.${row.pointerIndex} ALL · ${row.valuesPreview}`
+            : `Указ.${row.pointerIndex} стр.${row.rowIndex ?? "?"} · ${row.valuesPreview}`,
+        })),
+      },
+    ];
+  };
+
   return (index.summaries.nets ?? []).map((net) => {
     const click = sidebarClickTarget(index, uri, net.uri, net.range);
     return {
@@ -726,7 +914,7 @@ export function buildNetsTree(index: IndexPayload, uri: string): NavTreeNode[] {
           ? [
               {
                 id: `net-${net.name}-cart`,
-                label: "Картограмма",
+                label: "Картограмма T**",
                 description: `${net.typeMapRowCount} строк`,
                 children: net.cartogram.map((row, i) => ({
                   id: `net-${net.name}-cart-${i}`,
@@ -736,6 +924,9 @@ export function buildNetsTree(index: IndexPayload, uri: string): NavTreeNode[] {
               },
             ]
           : []),
+        ...pointerCartChildren(net.name, "reg", net.regCartogram, "Картограмма P** (рег.)"),
+        ...pointerCartChildren(net.name, "obj", net.objCartogram, "Картограмма O** (объекты)"),
+        ...pointerCartChildren(net.name, "mat", net.matCartogram, "Картограмма M** (материалы)"),
         ...(net.prototypes.length > 0
           ? [
               {

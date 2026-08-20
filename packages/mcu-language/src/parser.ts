@@ -23,7 +23,11 @@ import type {
 } from "./ast";
 import { lexDocument, type LineInfo } from "./lexer";
 import { mergeTrailingMultiplyOperands } from "./expression";
-import { expandCartogramTokens } from "./netCartogram";
+import {
+  appendCartogramRow,
+  buildNetCartogramRow,
+  parseCartogramLabel,
+} from "./netCartogram";
 import { collectIncludesFromSource, resolveIncludeFilePath, resolveIncludeFileUri } from "./includeResolve";
 import { expandIncludes, expandRepeats } from "./preprocessor";
 import { applyGeometryScopeTransition, initialGeometryScopeState } from "./geometryScope";
@@ -91,6 +95,11 @@ function detectFragment(label: string, current: FragmentId | null, stmtText: str
   return next;
 }
 
+/**
+ * Хвост зоны §9.1.4.
+ * Slash: отрицательные целые = УРУ/УОУ/УМУ (храним со знаком).
+ * Hash: m/z/o — безусловные; im/iz/io — условные (положительные индексы).
+ */
 function parseZoneTail(text: string): ZoneTailLegacy | ZoneTailHash | null {
   const hashIdx = text.indexOf("#");
   if (hashIdx >= 0) {
@@ -112,7 +121,8 @@ function parseZoneTail(text: string): ZoneTailLegacy | ZoneTailHash | null {
     return tail;
   }
 
-  const slashRegMat = text.match(/\/(\d+):(\d+)(?:\/(\d+))?/);
+  // /reg:mat[/obj] — reg/mat/obj могут быть отрицательными (УРУ/УМУ/УОУ)
+  const slashRegMat = text.match(/\/(-?\d+):(-?\d+)(?:\/(-?\d+))?/);
   if (slashRegMat) {
     return {
       kind: "legacy",
@@ -122,7 +132,7 @@ function parseZoneTail(text: string): ZoneTailLegacy | ZoneTailHash | null {
     };
   }
 
-  const slashColonMat = text.match(/\/:(\d+)(?:\/(\d+))?/);
+  const slashColonMat = text.match(/\/:(-?\d+)(?:\/(-?\d+))?/);
   if (slashColonMat) {
     return {
       kind: "legacy",
@@ -137,7 +147,8 @@ function parseZoneTail(text: string): ZoneTailLegacy | ZoneTailHash | null {
     return { kind: "legacy", bcType: bc[1] };
   }
 
-  const slashRegOnly = text.match(/\/(\d+)(?:\/(\d+))?(?!\s*:)/);
+  // /reg[/obj] без mat — наследование mat; reg/obj могут быть отриц.
+  const slashRegOnly = text.match(/\/(-?\d+)(?:\/(-?\d+))?(?!\s*:)/);
   if (slashRegOnly) {
     return {
       kind: "legacy",
@@ -147,7 +158,7 @@ function parseZoneTail(text: string): ZoneTailLegacy | ZoneTailHash | null {
     };
   }
 
-  const colonOnly = text.match(/:(\d+)/);
+  const colonOnly = text.match(/(?<![A-Za-z0-9]):(-?\d+)/);
   if (colonOnly) {
     return {
       kind: "legacy",
@@ -738,7 +749,7 @@ export function parseDocument(text: string, options: ParseOptions): DocumentAst 
       /^M\d+/i.test(label) ||
       /^E-?\d+/i.test(label) ||
       /^I-?\d+/i.test(label) ||
-      /^F-?\d+/i.test(label) ||
+      (/^F-?\d+/i.test(label) && !looksLikeZoneStatement(stmt.text)) ||
       (inG2mpCartogram && isG2mpCartogramRow(label));
     const isZoneStmt = !BODY_KEYS.has(label) && /^[A-Za-z]/.test(label) && !skipAsZone;
     if (isZoneStmt) {
@@ -749,25 +760,33 @@ export function parseDocument(text: string, options: ParseOptions): DocumentAst 
       }
     }
 
-    // NET cartograms T01, P0101, O0101, M0156
+    // NET cartograms T01, P0101, O0101, M0156 (UserGuide §9.2.3)
     if (/^T\d+/i.test(label) && nets.length > 0) {
       const vals = stmt.text.split(/\s+/).slice(1);
       nets[nets.length - 1].typeMap.push(vals);
     }
-    if (/^P\d+/i.test(label) && nets.length > 0) {
-      const vals = expandCartogramTokens(stmt.text.split(/\s+/).slice(1));
-      if (!nets[nets.length - 1].regMaps) nets[nets.length - 1].regMaps = [];
-      nets[nets.length - 1].regMaps!.push([vals]);
-    }
-    if (/^O\d+/i.test(label) && nets.length > 0) {
-      const vals = expandCartogramTokens(stmt.text.split(/\s+/).slice(1));
-      if (!nets[nets.length - 1].objMaps) nets[nets.length - 1].objMaps = [];
-      nets[nets.length - 1].objMaps!.push([vals]);
-    }
-    if (/^M\d+/i.test(label) && nets.length > 0) {
-      const vals = expandCartogramTokens(stmt.text.split(/\s+/).slice(1));
-      if (!nets[nets.length - 1].matMaps) nets[nets.length - 1].matMaps = [];
-      nets[nets.length - 1].matMaps!.push([vals]);
+    if (/^[POM]\d+/i.test(label) && nets.length > 0) {
+      const net = nets[nets.length - 1]!;
+      const tokens = stmt.text.split(/\s+/).slice(1);
+      const parsed = parseCartogramLabel(label);
+      if (parsed?.layHeader) {
+        // PkkLAY <layer> — заголовок слоя; следующие строки того же указателя получат layer
+        const lay = tokens[0] ? parseInt(tokens[0], 10) : undefined;
+        (net as NetNode & { _pendingLay?: { kind: typeof parsed.kind; pointerIndex: number; layer: number } })._pendingLay =
+          lay != null && Number.isFinite(lay)
+            ? { kind: parsed.kind, pointerIndex: parsed.pointerIndex, layer: lay }
+            : undefined;
+      } else {
+        const row = buildNetCartogramRow(label, tokens);
+        if (row && parsed) {
+          const pending = (net as NetNode & { _pendingLay?: { kind: typeof parsed.kind; pointerIndex: number; layer: number } })
+            ._pendingLay;
+          if (pending && pending.kind === parsed.kind && pending.pointerIndex === parsed.pointerIndex) {
+            row.layer = pending.layer;
+          }
+          appendCartogramRow(net, parsed.kind, row);
+        }
+      }
     }
 
     const isKnownSpecialLine =
@@ -782,7 +801,7 @@ export function parseDocument(text: string, options: ParseOptions): DocumentAst 
       /^M\d+/i.test(label) ||
       /^E-?\d+/i.test(label) ||
       /^I-?\d+/i.test(label) ||
-      /^F-?\d+/i.test(label) ||
+      (/^F-?\d+/i.test(label) && !looksLikeZoneStatement(stmt.text)) ||
       (inG2mpCartogram && isG2mpCartogramRow(label));
     if (label && !isKnownSpecialLine) {
       diagnostics.push({

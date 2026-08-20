@@ -109,6 +109,8 @@ export interface SliceZoneMeta {
   name: string;
   color: string;
   materialNum?: number;
+  regNum?: number;
+  objNum?: number;
 }
 
 export interface SliceGrid {

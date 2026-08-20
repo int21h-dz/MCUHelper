@@ -38,7 +38,7 @@ import {
   specificBurnupMwdPerKg,
   totalMaterialMassG,
 } from "../materialVolumes";
-import { buildZoneRegistrationMap } from "../zoneRegistration";
+import { buildZoneRegistrationMap, getResolvedZoneNumbers, zoneRegistrationKey } from "../zoneRegistration";
 import { computeMcuIsotopeLines, iaeaLabelToMcuNuclide } from "../naturalIsotopes";
 
 const fixtures = path.join(__dirname, "../../../../test/fixtures");
@@ -575,7 +575,7 @@ describe("naturalIsotopes", () => {
 describe("zoneRegistration", () => {
   it("defaults reg and obj to 1 for :mat tail", () => {
     const ast = parseDocument("HEAD 1 0\nCONT T T\nRPP A 0 1 0 1 0 1\nZ1 A :4\nEND\nFINISH", { uri: "t" });
-    const reg = buildZoneRegistrationMap(ast.zones).get("Z1");
+    const reg = buildZoneRegistrationMap(ast.zones).get(zoneRegistrationKey("Z1"));
     assert.ok(reg);
     assert.strictEqual(reg!.materialNum, 4);
     assert.strictEqual(reg!.regNum, 1);
@@ -584,7 +584,7 @@ describe("zoneRegistration", () => {
 
   it("defaults obj to 1 for /reg:mat without object", () => {
     const ast = parseDocument("HEAD 1 0\nCONT T T\nRPP A 0 1 0 1 0 1\nZ1 A /4:2\nEND\nFINISH", { uri: "t" });
-    const reg = buildZoneRegistrationMap(ast.zones).get("Z1");
+    const reg = buildZoneRegistrationMap(ast.zones).get(zoneRegistrationKey("Z1"));
     assert.ok(reg);
     assert.strictEqual(reg!.materialNum, 2);
     assert.strictEqual(reg!.regNum, 4);
@@ -597,11 +597,49 @@ describe("zoneRegistration", () => {
       { uri: "t" }
     );
     const map = buildZoneRegistrationMap(ast.zones);
-    const z2 = map.get("ZON2");
+    const z2 = map.get(zoneRegistrationKey("ZON2"));
     assert.ok(z2);
     assert.strictEqual(z2!.materialNum, 2);
     assert.strictEqual(z2!.regNum, 2);
     assert.strictEqual(z2!.objNum, 3);
+  });
+
+  it("keeps distinct tails for same zone name in different LCELL", () => {
+    const text = `HEAD 3 0
+CONT T T
+RCZ CNT 0 0 0 10 5
+END
+Z0 CNT /8:8
+END
+LCELL A
+RPP L 0 1 0 1 0 1
+END
+GROU L /-7:7/2
+END
+ENDL
+LCELL B
+RPP L 0 1 0 1 0 1
+END
+GROU L /-15:27/2
+END
+ENDL
+LATT GLTL Z0
+LISTEL A B
+PARM /1 0,0,0
+FINISH`;
+    const ast = parseDocument(text, { uri: "dup-grou.mcu" });
+    const map = buildZoneRegistrationMap(ast.zones);
+    const a = getResolvedZoneNumbers(map, { name: "GROU", scope: "lcell:A" });
+    const b = getResolvedZoneNumbers(map, { name: "GROU", scope: "lcell:B" });
+    assert.equal(a?.regPointerIndex, 7);
+    assert.equal(a?.materialNum, 7);
+    assert.equal(b?.regPointerIndex, 15);
+    assert.equal(b?.materialNum, 27);
+    const sum = buildSummaries(ast);
+    const sumA = sum.zones.find((z) => z.name === "GROU" && z.regPointerIndex === 7);
+    const sumB = sum.zones.find((z) => z.name === "GROU" && z.regPointerIndex === 15);
+    assert.ok(sumA);
+    assert.ok(sumB);
   });
 
   it("resolves burnup :mat zones as M Z O = mat 1 1", () => {

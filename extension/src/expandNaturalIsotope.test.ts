@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { findNuclideSpan } from "./expandNaturalIsotope";
+import { findNuclideSpan, HOVER_ENABLED_COMMANDS } from "./expandNaturalIsotope";
 
 describe("findNuclideSpan", () => {
   it("finds nuclide at cursor position", () => {
@@ -17,5 +17,13 @@ describe("findNuclideSpan", () => {
 
   it("returns null for wrong nuclide name", () => {
     assert.strictEqual(findNuclideSpan("H 0.001", "U235", 1), null);
+  });
+});
+
+describe("HOVER_ENABLED_COMMANDS", () => {
+  it("allows revealEditorRange for material hover links", () => {
+    assert.ok(HOVER_ENABLED_COMMANDS.includes("mcuhelper.revealEditorRange"));
+    assert.ok(HOVER_ENABLED_COMMANDS.includes("mcuhelper.addToSumIsotope"));
+    assert.ok(HOVER_ENABLED_COMMANDS.includes("mcuhelper.expandNaturalIsotope"));
   });
 });

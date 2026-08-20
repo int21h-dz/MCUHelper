@@ -8,6 +8,7 @@ import {
   handleGetIndex,
   handleQueryPoint,
   handleGetGeometry,
+  handleGetLiveZonePreview,
   buildDocumentSymbols,
   collectDiagnostics,
   applyServerSettings,
@@ -62,6 +63,19 @@ describe("serverHandlers integration", () => {
     assert.ok(names.includes("K"));
     assert.ok(names.includes("L"));
     assert.ok(!names.includes("CNT"));
+  });
+
+  it("handleGetLiveZonePreview returns slices for zone line", () => {
+    const { uri, getDoc, text } = setupFixture("trx_geometry");
+    const line = text.split(/\r?\n/).findIndex((l) => /^\s*FUEL\b/i.test(l));
+    assert.ok(line >= 0);
+    const preview = handleGetLiveZonePreview({ uri, line, character: 0, resolution: 40 }, getDoc);
+    assert.ok(preview);
+    assert.strictEqual(preview!.zoneName, "FUEL");
+    assert.strictEqual(preview!.slices.length, 3);
+    const zSlice = preview!.slices[0];
+    assert.ok(zSlice.grid.some((row) => row.some((cell) => cell === 1)));
+    assert.ok((zSlice.polylines?.length ?? 0) > 0);
   });
 
   it("buildDocumentSymbols lists fragments and zones", () => {

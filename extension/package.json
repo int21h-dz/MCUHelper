@@ -201,7 +201,7 @@
       },
       {
         "command": "mcuhelper.showZones",
-        "title": "MCU-NR: Показать зоны",
+        "title": "MCU-NR: Показать рег. зоны",
         "icon": "$(layers)"
       },
       {
@@ -385,6 +385,11 @@
         "icon": "$(add)"
       },
       {
+        "command": "mcuhelper.revealEditorRange",
+        "title": "MCU-NR: Перейти к фрагменту",
+        "icon": "$(go-to-file)"
+      },
+      {
         "command": "mcuhelper.expandIncludeInline",
         "title": "MCU-NR: Развернуть #include inline"
       },
@@ -450,7 +455,7 @@
         {
           "type": "webview",
           "id": "mcuhelper.zones",
-          "name": "Зоны"
+          "name": "Рег. зоны"
         },
         {
           "type": "webview",

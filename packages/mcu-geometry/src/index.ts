@@ -30,6 +30,7 @@ export {
 } from "./primitives";
 export { buildScene, sliceAtZ } from "./buildScene";
 export { buildGeometryContext, queryPoint, buildSliceGrid, computeSceneBbox } from "./query";
+export { buildLiveZonePreview } from "./liveZonePreview";
 export { parseGltlPlacements } from "./gltl";
 export { resolveNetCell, netPrototypeAt, cellPitchFromContainer } from "./netQuery";
 export type { GeometryContext } from "./query";
@@ -65,3 +66,4 @@ export type {
   DraftBodyPreviewInput,
   DraftBodyPreviewResult,
 } from "./meshPreview";
+export type { LiveZonePreviewResult, LiveZonePreviewSlice } from "./liveZonePreview";

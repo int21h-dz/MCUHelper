@@ -35,7 +35,7 @@ import {
 } from "@mcuhelper/mcu-language";
 import { fileURLToPath } from "url";
 import { isGeoBodyLabel } from "@mcuhelper/mcu-schema";
-import { buildScene, buildSliceGrid, queryPoint } from "@mcuhelper/mcu-geometry";
+import { buildLiveZonePreview, buildScene, buildSliceGrid, queryPoint } from "@mcuhelper/mcu-geometry";
 import type { SliceAxis } from "@mcuhelper/mcu-geometry";
 import { SymbolInformation, SymbolKind, Diagnostic, DiagnosticSeverity, FoldingRange, FoldingRangeKind, DocumentLink } from "vscode-languageserver";
 import { collectAwLibMassDiagnostics, collectAwLibMissingDiagnostics } from "./awLibVerify";
@@ -1537,6 +1537,35 @@ export function handleGetSlice(
   if (!index) return null;
   const scene = buildScene(index.ast);
   return buildSliceGrid(index.ast, args.axis, args.position, args.resolution ?? 256, scene.bbox);
+}
+
+export function handleGetLiveZonePreview(
+  args: {
+    uri: string;
+    line: number;
+    character?: number;
+    resolution?: number;
+    quality?: "rough" | "draft" | "full";
+    slicePositions?: Partial<{ x: number; y: number; z: number }>;
+  },
+  getDoc: (uri: string) => TextDocument | undefined
+) {
+  const index = resolveDocumentIndex(args.uri, getDoc);
+  if (!index) return null;
+  const expandedLine = mapMainLineToExpanded(index.ast.includeLineMap, args.line);
+  const scope = resolveScopeAtLine(index.ast.statements, expandedLine);
+  const zone = index.ast.zones.find((z) => {
+    const sameScope = (z.scope ?? "global") === (scope ?? "global");
+    return sameScope && expandedLine >= z.range.start.line && expandedLine <= z.range.end.line;
+  });
+  if (!zone) return null;
+  return buildLiveZonePreview(index.ast, {
+    zoneName: zone.name,
+    scope,
+    resolution: args.resolution,
+    quality: args.quality,
+    slicePositions: args.slicePositions,
+  });
 }
 
 export async function handleValidateInput(

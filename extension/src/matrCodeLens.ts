@@ -192,12 +192,26 @@ export function registerMatrCodeLens(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(
       "mcuhelper.revealEditorRange",
       async (
-        uriStr: string,
-        range: {
+        uriOrArgs:
+          | string
+          | [
+              string,
+              {
+                start: { line: number; character: number };
+                end: { line: number; character: number };
+              }
+            ],
+        rangeArg?: {
           start: { line: number; character: number };
           end: { line: number; character: number };
         }
       ) => {
+        // CodeLens: (uri, range); markdown hover: иногда один аргумент — массив [uri, range].
+        const uriStr = Array.isArray(uriOrArgs) ? uriOrArgs[0] : uriOrArgs;
+        const range = Array.isArray(uriOrArgs) ? uriOrArgs[1] : rangeArg;
+        if (!uriStr || !range?.start || !range?.end) {
+          return;
+        }
         const uri = vscode.Uri.parse(uriStr);
         const doc = await vscode.workspace.openTextDocument(uri);
         const editor = await vscode.window.showTextDocument(doc, { preview: false });

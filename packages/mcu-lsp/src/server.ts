@@ -51,6 +51,7 @@ import {
   handleGetIsotopeMarks,
   handleGetIncludeGraph,
   handleGetGeometry,
+  handleGetLiveZonePreview,
   handleQueryPoint,
   handleGetSlice,
   handleValidateInput,
@@ -668,6 +669,8 @@ connection.onRequest("mcuhelper/getGeometry", (args: string | { uri: string; lin
 connection.onRequest("mcuhelper/queryPoint", (args) => handleQueryPoint(args, getDoc));
 
 connection.onRequest("mcuhelper/getSlice", (args) => handleGetSlice(args, getDoc));
+
+connection.onRequest("mcuhelper/getLiveZonePreview", (args) => handleGetLiveZonePreview(args, getDoc));
 
 connection.onNotification("mcuhelper/activeDocument", (args: { uri?: string }) => {
   const nextUri = args?.uri;

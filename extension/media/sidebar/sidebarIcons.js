@@ -135,11 +135,11 @@
       searchPh: "Фильтр объектов…",
     },
     "mcuhelper.zones": {
-      title: "Зоны",
+      title: "Рег. зоны",
       icon: "zone",
       accent: "#4a9eff",
-      hint: "Клик — переход к зоне",
-      searchPh: "Фильтр зон…",
+      hint: "Группировка по рег. номеру (regNum) · потомки — имена фигур в геометрии",
+      searchPh: "Фильтр рег. зон…",
     },
     "mcuhelper.nets": {
       title: "Сети",

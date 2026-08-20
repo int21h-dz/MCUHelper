@@ -9,6 +9,7 @@ import {
   pointInBody,
   queryPoint,
   buildSliceGrid,
+  buildLiveZonePreview,
   buildScene,
 } from "./index";
 
@@ -155,6 +156,100 @@ describe("buildSliceGrid", () => {
     assert.ok(slice.zoneIndex.length >= 4);
     const centerIdx = slice.grid[16][16];
     assert.ok(centerIdx > 0);
+  });
+});
+
+describe("buildLiveZonePreview", () => {
+  it("builds three slices for a zone in current scope", () => {
+    const ast = loadFixture("trx_geometry.mcu");
+    const preview = buildLiveZonePreview(ast, { zoneName: "FUEL", resolution: 40 });
+    assert.ok(preview);
+    assert.strictEqual(preview!.zoneName, "FUEL");
+    assert.strictEqual(preview!.slices.length, 3);
+    const zSlice = preview!.slices[0];
+    assert.ok(zSlice.grid.some((row) => row.some((cell) => cell === 1)));
+    assert.ok((zSlice.polylines?.length ?? 0) > 0);
+    assert.strictEqual(zSlice.zoneIndex[1]?.name, "FUEL");
+  });
+
+  it("adapts grid to elongated bodies instead of fixed square resolution", () => {
+    const ast = parseDocument(
+      [
+        "HEAD 3 0",
+        "CONT T T M M M M M M",
+        "RPP A 0 100 0 1 0 1",
+        "END",
+        "LONG A",
+        "END",
+        "FINISH",
+      ].join("\n"),
+      { uri: "adaptive-grid" }
+    );
+    const preview = buildLiveZonePreview(ast, { zoneName: "LONG", resolution: 96 });
+    assert.ok(preview);
+    const xy = preview!.slices[0];
+    assert.ok(xy.grid.length >= 24);
+    assert.ok((xy.grid[0]?.length ?? 0) > 96);
+    assert.ok((xy.grid[0]?.length ?? 0) > xy.grid.length);
+  });
+
+  it("keeps LCELL scope when expanding body context for duplicate zone names", () => {
+    const ast = parseDocument(
+      [
+        "HEAD 3 0",
+        "CONT T T",
+        "RPP ROOT 0 2 0 2 0 1",
+        "END",
+        "Z0 ROOT /1:1",
+        "END",
+        "LCELL A",
+        "RPP LA 0 1 0 1 0 1",
+        "END",
+        "GROU LA /-1:7/2",
+        "END",
+        "ENDL",
+        "LCELL B",
+        "RPP LB 10 11 10 11 0 1",
+        "END",
+        "GROU LB /-2:27/2",
+        "END",
+        "ENDL",
+        "LATT GLTL Z0",
+        "LISTEL A B",
+        "PARM /1 0,0,0",
+        "FINISH",
+      ].join("\n"),
+      { uri: "dup-grou-preview" }
+    );
+    const previewB = buildLiveZonePreview(ast, {
+      zoneName: "GROU",
+      scope: "lcell:B",
+      resolution: 24,
+    });
+    assert.ok(previewB);
+    assert.strictEqual(previewB!.scope, "lcell:B");
+    assert.ok(previewB!.expression.includes("LB"), previewB!.expression);
+    assert.ok(!previewB!.expression.includes("LA"), previewB!.expression);
+  });
+});
+
+describe("conditional_net geometry", () => {
+  const ast = loadFixture("conditional_net.mcu");
+
+  it("resolves ZNTE via NET P/O cartograms at cell [2,1,1]", () => {
+    const r = queryPoint(ast, { x: 1.5, y: 0.5, z: -0.5 });
+    assert.ok(r.zone?.name.includes("ZNTE"), r.zone?.name);
+    assert.strictEqual(r.zone?.regNum, 11);
+    assert.strictEqual(r.zone?.objNum, 21);
+    assert.strictEqual(r.zone?.materialNum, 1);
+  });
+
+  it("resolves ZN1 with absolute numbers", () => {
+    const r = queryPoint(ast, { x: 0.1, y: 0.1, z: -0.5 });
+    assert.ok(r.zone?.name.includes("ZN1"), r.zone?.name);
+    assert.strictEqual(r.zone?.regNum, 4);
+    assert.strictEqual(r.zone?.objNum, 5);
+    assert.strictEqual(r.zone?.materialNum, 2);
   });
 });
 

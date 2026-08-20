@@ -342,9 +342,31 @@ export function getCompletions(
 
   if (/#\s*m?\s*=?$/i.test(prefix) || /#\s*$/.test(prefix)) {
     items.push(
-      { label: "m=1", kind: CompletionItemKind.Property, detail: "Материальный номер" },
-      { label: "z=1", kind: CompletionItemKind.Property, detail: "Регистрационный номер" },
-      { label: "o=1", kind: CompletionItemKind.Property, detail: "Объектный номер" }
+      { label: "m=1", kind: CompletionItemKind.Property, detail: "Материальный номер (безусловный)" },
+      { label: "z=1", kind: CompletionItemKind.Property, detail: "Регистрационный номер (безусловный)" },
+      { label: "o=1", kind: CompletionItemKind.Property, detail: "Объектный номер (безусловный)" },
+      { label: "im=1", kind: CompletionItemKind.Property, detail: "УМУ — условный материальный указатель" },
+      { label: "iz=1", kind: CompletionItemKind.Property, detail: "УРУ — условный рег. указатель" },
+      { label: "io=1", kind: CompletionItemKind.Property, detail: "УОУ — условный объектный указатель" }
+    );
+  }
+
+  if (/\/-?$/.test(prefix) || /\/-\d*$/.test(prefix)) {
+    items.push(
+      {
+        label: "/-1:1/-1",
+        kind: CompletionItemKind.Snippet,
+        detail: "УРУ/мат/УОУ (условные указатели)",
+        insertText: "/-${1:1}:${2:1}/-${3:1}",
+        insertTextFormat: InsertTextFormat.Snippet,
+      },
+      {
+        label: "/-1:1",
+        kind: CompletionItemKind.Snippet,
+        detail: "УРУ + материал",
+        insertText: "/-${1:1}:${2:1}",
+        insertTextFormat: InsertTextFormat.Snippet,
+      }
     );
   }
 
@@ -374,7 +396,23 @@ export function getCompletions(
       filterText: "ZONE",
       insertText: "${1:ZON1} ${2:BODY} # m=${3:1} z=${4:1} o=${5:1}",
       insertTextFormat: InsertTextFormat.Snippet,
-      detail: "Зона (формат #)",
+      detail: "Зона (формат #, безусловные)",
+    });
+    items.push({
+      label: "zone-conditional-snippet",
+      kind: CompletionItemKind.Snippet,
+      filterText: "ZONEC",
+      insertText: "${1:ZON1} ${2:BODY} /-${3:1}:${4:1}/-${5:1}",
+      insertTextFormat: InsertTextFormat.Snippet,
+      detail: "Зона с УРУ/УОУ (slash)",
+    });
+    items.push({
+      label: "zone-hash-conditional-snippet",
+      kind: CompletionItemKind.Snippet,
+      filterText: "ZONECI",
+      insertText: "${1:ZON1} ${2:BODY} # im=${3:1} iz=${4:1} io=${5:1}",
+      insertTextFormat: InsertTextFormat.Snippet,
+      detail: "Зона с УМУ/УРУ/УОУ (hash)",
     });
 
     items.push({

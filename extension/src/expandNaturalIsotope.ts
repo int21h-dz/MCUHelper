@@ -34,9 +34,11 @@ export function findNuclideSpan(
   return null;
 }
 
-const HOVER_ENABLED_COMMANDS = [
+/** Команды из markdown-ссылок в LSP hover (иначе клик мёртвый, title = сырой command:…). */
+export const HOVER_ENABLED_COMMANDS = [
   "mcuhelper.expandNaturalIsotope",
   "mcuhelper.addToSumIsotope",
+  "mcuhelper.revealEditorRange",
 ];
 
 function toTrustedHoverMarkdown(value: string): vscode.MarkdownString {

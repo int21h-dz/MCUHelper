@@ -21,6 +21,7 @@ import {
   specificActivityBqPerG,
   formatBodyVolumeCm3,
   buildZoneRegistrationMap,
+  getResolvedZoneNumbers,
   formatBurnupLoadHover,
   formatVolCardHover,
   formatMassDensityGcm3,
@@ -50,11 +51,159 @@ import {
   rangeCoversEditorLine,
   collectSourceSpectra,
   type DocumentIndex,
+  type MaterialNode,
+  type SourceRange,
 } from "@mcuhelper/mcu-language";
 import { getCachedNuclideIaeaMarkdown, formatNaturalInsertHoverButton, prefetchNuclideIaeaHover, type NaturalInsertContext } from "./iaeaNds";
 import { formatAwMismatchHoverLine, getAwMassMismatch } from "./awLibVerify";
 import { formatParameteThrHoverLines } from "./parameteThrVerify";
 import type { Position } from "vscode-languageserver";
+
+const MATERIAL_NUCLIDE_PREVIEW_MAX = 8;
+
+/** Expanded range → URI+range для command:mcuhelper.revealEditorRange (без импорта symbolRefs — цикл). */
+function materialRevealLocation(
+  index: DocumentIndex,
+  range: SourceRange
+): { uri: string; range: { start: { line: number; character: number }; end: { line: number; character: number } } } | null {
+  const lineMap = index.ast.includeLineMap;
+  const mapped = remapRangeToMainDocument(range, lineMap);
+  if (mapped) {
+    return { uri: index.uri, range: { start: mapped.start, end: mapped.end } };
+  }
+  const entry = lineMap?.[range.start.line];
+  if (entry?.source === "include" && entry.includeUri != null && entry.includeLine != null) {
+    return {
+      uri: entry.includeUri,
+      range: {
+        start: { line: entry.includeLine, character: range.start.character },
+        end: { line: entry.includeLine, character: range.end.character },
+      },
+    };
+  }
+  if (!lineMap?.length) {
+    return { uri: index.uri, range: { start: range.start, end: range.end } };
+  }
+  if (entry?.source === "include") {
+    const mainLine = entry.mainIncludeLine ?? entry.mainLine;
+    if (mainLine != null) {
+      return {
+        uri: index.uri,
+        range: { start: { line: mainLine, character: 0 }, end: { line: mainLine, character: 120 } },
+      };
+    }
+  }
+  // Не отдаём expanded-координаты на main URI — прыжок будет мимо.
+  return null;
+}
+
+export function formatRevealMaterialHoverLink(index: DocumentIndex, material: MaterialNode): string | null {
+  const loc = materialRevealLocation(index, material.range);
+  if (!loc) return null;
+  const query = encodeURIComponent(JSON.stringify([loc.uri, loc.range]));
+  return `**[↗ Открыть MATR ${material.number}](command:mcuhelper.revealEditorRange?${query})**`;
+}
+
+/** Краткая карточка материала для zone/хвост/MATR-номер hover. */
+export function formatMaterialBriefHover(index: DocumentIndex, materialNumber: number): string {
+  const mat = index.ast.materials.find((m) => m.number === materialNumber);
+  if (!mat) {
+    return `_MATR ${materialNumber} не найден в задаче_`;
+  }
+  const vars = buildScopedVars(index.ast.constants, mat.range.offset, "global");
+  const density = analyzeMaterialMassDensity(mat, vars);
+  const meta: string[] = [];
+  if (mat.group) meta.push(`GROUP=\`${mat.group}\``);
+  if (mat.nameLib) meta.push(`NAME=\`${mat.nameLib}\``);
+  if (mat.temperature != null) meta.push(`T=${mat.temperature}`);
+  if (density?.rho != null && density.rho > 0) {
+    meta.push(`ρ ≈ **${formatMassDensityGcm3(density.rho)}**`);
+  } else if (mat.densParam && mat.densValue != null) {
+    meta.push(`${mat.densParam}=${mat.densValue}`);
+  }
+
+  const names = mat.nuclides.map((n) => n.name);
+  const preview =
+    names.length === 0
+      ? null
+      : names.length <= MATERIAL_NUCLIDE_PREVIEW_MAX
+        ? names.join(", ")
+        : `${names.slice(0, MATERIAL_NUCLIDE_PREVIEW_MAX).join(", ")} … (+${names.length - MATERIAL_NUCLIDE_PREVIEW_MAX})`;
+
+  const lines = [`**MATR ${mat.number}**`];
+  if (meta.length) lines.push(meta.join(" · "));
+  lines.push(preview ? `Нуклиды: ${preview}` : "_Нуклиды не заданы_");
+  const link = formatRevealMaterialHoverLink(index, mat);
+  if (link) lines.push("", link);
+  return lines.join("\n");
+}
+
+/**
+ * Номер материала под курсором в хвосте регистрации зоны (`/reg:mat`, `#M=`, `#IM=`).
+ * Не путать с рег./объектным номером.
+ */
+function materialNumberAtRegistrationTail(line: string, character: number): number | null {
+  const covers = (start: number, len: number) => character >= start && character < start + len;
+
+  const slashRe = /\/(-?\d+):(-?\d+)(?:\/(-?\d+))?/g;
+  let m: RegExpExecArray | null;
+  while ((m = slashRe.exec(line)) !== null) {
+    const matTok = m[2];
+    const matStart = m.index + 1 + m[1].length + 1; // после "/reg:"
+    if (covers(matStart, matTok.length)) return parseInt(matTok, 10);
+  }
+
+  const bareColonRe = /(?<![A-Za-z0-9/]):(-?\d+)/g;
+  while ((m = bareColonRe.exec(line)) !== null) {
+    const matTok = m[1];
+    const matStart = m.index + 1;
+    if (covers(matStart, matTok.length)) return parseInt(matTok, 10);
+  }
+
+  const hashRe = /#(IM|M)\s*=\s*(-?\d+)/gi;
+  while ((m = hashRe.exec(line)) !== null) {
+    const matTok = m[2];
+    const matStart = m.index + m[0].length - matTok.length;
+    if (covers(matStart, matTok.length)) return parseInt(matTok, 10);
+  }
+
+  return null;
+}
+
+function formatMaterialHoverAtNumericToken(
+  index: DocumentIndex,
+  line: string,
+  pos: Position,
+  _editorUri?: string
+): string | null {
+  const token = numericTokenAtPosition(line, pos.character);
+  if (!token) return null;
+
+  const matFromTail = materialNumberAtRegistrationTail(line, pos.character);
+  if (matFromTail != null) {
+    if (matFromTail < 0) {
+      return [
+        `УМУ **−${Math.abs(matFromTail)}**`,
+        "",
+        "_Конкретный номер материала зависит от картограммы M (NET) или контекста._",
+      ].join("\n");
+    }
+    return formatMaterialBriefHover(index, matFromTail);
+  }
+
+  // Номер на строке MATR N …
+  if (/^\s*MATR\b/i.test(line)) {
+    const matrNum = line.match(/^\s*MATR\s+(\d+)\b/i);
+    if (matrNum) {
+      const start = line.indexOf(matrNum[1]);
+      if (pos.character >= start && pos.character < start + matrNum[1].length) {
+        return formatMaterialBriefHover(index, parseInt(matrNum[1], 10));
+      }
+    }
+  }
+
+  return null;
+}
 
 export function fullLine(
   doc: { getText: (r: { start: Position; end: Position }) => string },
@@ -349,16 +498,33 @@ function hoverContextual(line: string, word: string): string | null {
   }
 
   const hashHints: Record<string, string> = {
-    M: "m — материальный номер (MATR)",
-    Z: "z — регистрационный номер зоны",
-    O: "o — объектный номер",
-    IM: "im — материал для импорта",
-    IZ: "iz — рег. зона для импорта",
-    IO: "io — объект для импорта",
+    M: "m — материальный номер (MATR), безусловный",
+    Z: "z — регистрационный номер зоны, безусловный",
+    O: "o — объектный номер, безусловный",
+    IM: "im — УМУ (условный материальный указатель), положительный индекс → картограмма M**",
+    IZ: "iz — УРУ (условный рег. указатель), положительный индекс → картограмма P** / Npm в LATT",
+    IO: "io — УОУ (условный объектный указатель), положительный индекс → картограмма O** / Nom в LATT",
     G: "g — группа материалов",
   };
   if (line.includes("#") && hashHints[word]) {
     return `**#${word.toLowerCase()}=**\n\n${hashHints[word]}`;
+  }
+
+  const cart = word.match(/^([POM])(\d{2})(?:ALL|LAY|(\d{2}))?$/i);
+  if (cart) {
+    const letter = cart[1]!.toUpperCase();
+    const ptr = parseInt(cart[2]!, 10);
+    const kind =
+      letter === "P" ? "регистрационных номеров (УРУ)" : letter === "O" ? "объектных номеров (УОУ)" : "материальных номеров (УМУ)";
+    const upper = word.toUpperCase();
+    if (upper.endsWith("ALL")) {
+      return `**${word}**\n\nКартограмма ${kind}: указатель **${ptr}**, значение на всю сеть (ALL).`;
+    }
+    if (upper.endsWith("LAY")) {
+      return `**${word}**\n\nЗаголовок слоя картограммы ${kind} для указателя **${ptr}**.`;
+    }
+    const row = cart[3] ? parseInt(cart[3], 10) : 1;
+    return `**${word}**\n\nКартограмма ${kind}: указатель **${ptr}**, строка сети **${row}** (UserGuide §9.2.3).`;
   }
 
   return null;
@@ -705,6 +871,8 @@ export function getHover(
   const rawWord = wordAtPosition(line, pos.character);
   if (!rawWord) {
     if (!index) return null;
+    const matNumeric = formatMaterialHoverAtNumericToken(index, line, pos, editorUri);
+    if (matNumeric) return matNumeric;
     const numericBodyNode = findBodyByNumericZoneRef(index, line, pos, editorUri);
     if (!numericBodyNode) return null;
     const vol = computeBodyVolumeCm3FromAst(numericBodyNode, index.ast);
@@ -806,15 +974,47 @@ export function getHover(
     return lines.join("\n\n");
   }
 
-  const zone = index.ast.zones.find((z) => z.name.toUpperCase() === word);
+  const zone =
+    index.ast.zones.find(
+      (z) =>
+        z.name.toUpperCase() === word &&
+        rangeCoversEditorLine(z.range, pos.line, index.ast.includeLineMap, editorUri)
+    ) ??
+    (() => {
+      const sameName = index.ast.zones.filter((z) => z.name.toUpperCase() === word);
+      return sameName.length === 1 ? sameName[0] : undefined;
+    })();
   if (zone) {
-    const reg = buildZoneRegistrationMap(index.ast.zones).get(zone.name);
+    const reg = getResolvedZoneNumbers(buildZoneRegistrationMap(index.ast.zones), zone);
     const lines = [`Зона **${zone.name}**`, "", `Выражение: \`${zone.expression}\``];
+    if (zone.scope && zone.scope !== "global") {
+      lines.push("", `Scope: \`${zone.scope}\``);
+    }
     if (reg) {
-      lines.push(
-        "",
-        `Материал **${reg.materialNum ?? "—"}** · рег. зона **${reg.regNum}** · объект **${reg.objNum}**`
-      );
+      const regPart =
+        reg.regPointerIndex != null
+          ? `УРУ **−${reg.regPointerIndex}**`
+          : `рег. зона **${reg.regNum ?? "—"}**`;
+      const objPart =
+        reg.objPointerIndex != null
+          ? `УОУ **−${reg.objPointerIndex}**`
+          : `объект **${reg.objNum ?? "—"}**`;
+      const matPart =
+        reg.matPointerIndex != null
+          ? `УМУ **−${reg.matPointerIndex}**`
+          : `материал **${reg.materialNum ?? "—"}**`;
+      lines.push("", `${matPart} · ${regPart} · ${objPart}`);
+      if (reg.hasConditionalPointers) {
+        lines.push("", "_Условные указатели перекодируются через картограммы P/O/M (NET) или Npm/Nom (LATT)._");
+      }
+      if (reg.materialNum != null) {
+        lines.push("", formatMaterialBriefHover(index, reg.materialNum));
+      } else if (reg.matPointerIndex != null) {
+        lines.push(
+          "",
+          "_УМУ — конкретный номер материала зависит от картограммы M (NET) или контекста._"
+        );
+      }
     }
     return lines.join("\n");
   }

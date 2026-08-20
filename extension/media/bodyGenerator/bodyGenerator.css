@@ -280,6 +280,32 @@ legend {
   font-size: 11px;
 }
 
+.bg-slice-controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 2px 0 2px;
+}
+
+.bg-slice-control {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  color: var(--bg-muted);
+  font-size: 11px;
+}
+
+.bg-slice-control b {
+  color: var(--bg-fg);
+  font-weight: 600;
+}
+
+.bg-slice-control input[type="range"] {
+  width: 100%;
+  margin: 0;
+}
+
 .bg-slices {
   display: grid;
   grid-template-rows: repeat(3, minmax(140px, 1fr));

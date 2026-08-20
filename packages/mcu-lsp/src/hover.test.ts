@@ -14,6 +14,7 @@ import {
   getHover,
   getHoverContent,
   getHoverAsync,
+  formatMaterialBriefHover,
 } from "./hover";
 
 const fixtures = path.join(__dirname, "../../../test/fixtures");
@@ -175,6 +176,145 @@ describe("getHover", () => {
     const hover = getHoverContent(doc, { line: 6, character: 1 }, index, { enableIaeaNuclide: false });
     assert.ok(hover?.includes("Зона **R003**"));
     assert.ok(!hover?.includes("Параметр:"));
+  });
+
+  it("hover on duplicate zone name uses LCELL scope under cursor", () => {
+    const text = [
+      "HEAD 3 0",
+      "CONT T T",
+      "RCZ CNT 0 0 0 10 5",
+      "END",
+      "Z0 CNT /8:8",
+      "END",
+      "LCELL A",
+      "RPP L 0 1 0 1 0 1",
+      "END",
+      "GROU L /-7:7/2",
+      "END",
+      "ENDL",
+      "LCELL B",
+      "RPP L 0 1 0 1 0 1",
+      "END",
+      "GROU L /-15:27/2",
+      "END",
+      "ENDL",
+      "LATT GLTL Z0",
+      "LISTEL A B",
+      "PARM /1 0,0,0",
+      "FINISH",
+    ].join("\n");
+    const { doc, index } = openText(text);
+    const grouA = index.ast.zones.find((z) => z.name === "GROU" && z.scope === "lcell:A")!;
+    const grouB = index.ast.zones.find((z) => z.name === "GROU" && z.scope === "lcell:B")!;
+    const hoverA = getHover(doc, { line: grouA.range.start.line, character: 2 }, index);
+    const hoverB = getHover(doc, { line: grouB.range.start.line, character: 2 }, index);
+    assert.ok(hoverA?.includes("УРУ **−7**"), hoverA ?? "");
+    assert.ok(hoverA?.includes("материал **7**"), hoverA ?? "");
+    assert.ok(hoverA?.includes("lcell:A"), hoverA ?? "");
+    assert.ok(hoverB?.includes("УРУ **−15**"), hoverB ?? "");
+    assert.ok(hoverB?.includes("материал **27**"), hoverB ?? "");
+    assert.ok(hoverB?.includes("lcell:B"), hoverB ?? "");
+  });
+
+  it("zone hover appends MATR brief and reveal link when material exists", () => {
+    const text = [
+      "PIN 1 0",
+      "MATR 7 GROUP=FUEL NAME=UOX",
+      "U235 1.0E-3",
+      "U238 2.0E-2",
+      "O16 4.0E-2",
+      "MATR 27",
+      "ZR 4.0E-2",
+      "HEAD 3 0",
+      "CONT T T",
+      "RCZ CNT 0 0 0 10 5",
+      "END",
+      "ZFUEL CNT /1:7",
+      "ZCLAD CNT /2:27",
+      "END",
+      "FINISH",
+    ].join("\n");
+    const { doc, index } = openText(text);
+    const zFuel = index.ast.zones.find((z) => z.name === "ZFUEL")!;
+    const hover = getHover(doc, { line: zFuel.range.start.line, character: 2 }, index);
+    assert.ok(hover?.includes("материал **7**"), hover ?? "");
+    assert.ok(hover?.includes("**MATR 7**"), hover ?? "");
+    assert.ok(hover?.includes("GROUP=`FUEL`"), hover ?? "");
+    assert.ok(hover?.includes("NAME=`UOX`"), hover ?? "");
+    assert.ok(hover?.includes("U235"), hover ?? "");
+    assert.ok(hover?.includes("mcuhelper.revealEditorRange"), hover ?? "");
+    assert.ok(hover?.includes("Открыть MATR 7"), hover ?? "");
+  });
+
+  it("hover on material number in zone tail shows MATR brief", () => {
+    const text = [
+      "PIN 1 0",
+      "MATR 27",
+      "ZR 4.0E-2",
+      "HF 1.0E-4",
+      "HEAD 3 0",
+      "CONT T T",
+      "RCZ CNT 0 0 0 10 5",
+      "END",
+      "ZCLAD CNT /-15:27/2",
+      "END",
+      "FINISH",
+    ].join("\n");
+    const { doc, index } = openText(text);
+    const zoneLine = index.ast.zones.find((z) => z.name === "ZCLAD")!.range.start.line;
+    const lineText = doc.getText({
+      start: { line: zoneLine, character: 0 },
+      end: { line: zoneLine, character: 200 },
+    });
+    const matIdx = lineText.indexOf(":27");
+    assert.ok(matIdx >= 0, lineText);
+    const hover = getHover(doc, { line: zoneLine, character: matIdx + 1 }, index);
+    assert.ok(hover?.includes("**MATR 27**"), hover ?? "");
+    assert.ok(hover?.includes("ZR"), hover ?? "");
+    assert.ok(hover?.includes("HF"), hover ?? "");
+    assert.ok(hover?.includes("mcuhelper.revealEditorRange"), hover ?? "");
+  });
+
+  it("hover on reg digit equal to mat does not show MATR brief", () => {
+    const text = [
+      "PIN 1 0",
+      "MATR 13",
+      "AL 1.0E-2",
+      "HEAD 3 0",
+      "CONT T T",
+      "RCZ CNT 0 0 0 10 5",
+      "END",
+      "ZSAME CNT /13:13",
+      "END",
+      "FINISH",
+    ].join("\n");
+    const { doc, index } = openText(text);
+    const zoneLine = index.ast.zones.find((z) => z.name === "ZSAME")!.range.start.line;
+    const lineText = doc.getText({
+      start: { line: zoneLine, character: 0 },
+      end: { line: zoneLine, character: 200 },
+    });
+    const slash = lineText.indexOf("/13:13");
+    assert.ok(slash >= 0, lineText);
+    const hoverReg = getHover(doc, { line: zoneLine, character: slash + 1 }, index);
+    assert.ok(!hoverReg?.includes("**MATR 13**"), hoverReg ?? "(null)");
+    const hoverMat = getHover(doc, { line: zoneLine, character: slash + 4 }, index);
+    assert.ok(hoverMat?.includes("**MATR 13**"), hoverMat ?? "");
+  });
+
+  it("hover on MATR number shows material brief", () => {
+    const text = ["PIN 1 0", "MATR 3 GROUP=WATER", "H 6.0E-2", "O16 3.0E-2", "FINISH"].join("\n");
+    const { doc, index } = openText(text);
+    const hover = getHover(doc, { line: 1, character: 5 }, index); // на "3"
+    assert.ok(hover?.includes("**MATR 3**"), hover ?? "");
+    assert.ok(hover?.includes("GROUP=`WATER`"), hover ?? "");
+    assert.ok(hover?.includes("H"), hover ?? "");
+  });
+
+  it("formatMaterialBriefHover reports missing MATR", () => {
+    const { index } = openText(["PIN 1 0", "MATR 1", "U235 1e-3", "FINISH"].join("\n"));
+    const brief = formatMaterialBriefHover(index, 99);
+    assert.ok(brief.includes("не найден"), brief);
   });
 
   it("hover on body name inside zone expression prefers body, not nuclide params", () => {

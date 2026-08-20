@@ -1,6 +1,13 @@
 import type { BodyNode, DocumentAst, ZoneNode } from "@mcuhelper/mcu-language";
 
-import { buildZoneRegistrationMap, parseNumbers } from "@mcuhelper/mcu-language";
+import {
+  buildZoneRegistrationMap,
+  computeNpmNom,
+  getResolvedZoneNumbers,
+  maxConditionalIndices,
+  parseNumbers,
+  resolveZoneNumbersInContext,
+} from "@mcuhelper/mcu-language";
 
 import { colorForMaterial, colorForZone } from "./colors";
 
@@ -17,6 +24,8 @@ import type { PointQueryResult, SliceAxis, SliceGrid, SliceZoneMeta, Vec3 } from
 import { isBodyRefInHits } from "./bodyRefs";
 
 import { collectBodyRefs, evalZoneExpr, parseZoneExpression } from "./zoneExpression";
+
+import type { ResolvedZoneNumbers } from "@mcuhelper/mcu-language";
 
 
 
@@ -94,24 +103,42 @@ function scopeFilterFor(scope: string): (s?: string) => boolean {
 
 
 
-function zoneMeta(z: ZoneNode, zoneReg: ReturnType<typeof buildZoneRegistrationMap>, displayName?: string) {
-
-  const r = zoneReg.get(z.name);
-
+function zoneMeta(
+  z: ZoneNode,
+  zoneReg: ReturnType<typeof buildZoneRegistrationMap>,
+  displayName?: string,
+  override?: ResolvedZoneNumbers | null
+) {
+  const r = override ?? getResolvedZoneNumbers(zoneReg, z);
   return {
-
     materialNum: r?.materialNum,
-
     regNum: r?.regNum,
-
     objNum: r?.objNum,
-
     color: colorForMaterial(r?.materialNum),
-
     displayName: displayName ?? z.name,
-
   };
+}
 
+/** Npm/Nom перед элементом LISTEL с индексом elementIndex (0-based). */
+function latticeNpmNomBeforeElement(ast: DocumentAst, lattice: DocumentAst["lattices"][number], elementIndex: number): {
+  npm: number;
+  nom: number;
+} {
+  const globalZones = ast.zones.filter((z) => !z.scope || z.scope === "global");
+  let { npm, nom } = computeNpmNom(globalZones);
+  for (let ei = 0; ei < elementIndex; ei++) {
+    const elName = lattice.elements[ei];
+    if (!elName) continue;
+    const scope = `lcell:${elName}`;
+    const elZones = ast.zones.filter((z) => z.scope === scope);
+    const abs = computeNpmNom(elZones);
+    if (abs.npm > npm) npm = abs.npm;
+    if (abs.nom > nom) nom = abs.nom;
+    const { maxUru, maxUou } = maxConditionalIndices(elZones);
+    npm += maxUru;
+    nom += maxUou;
+  }
+  return { npm, nom };
 }
 
 
@@ -135,87 +162,48 @@ export function findBodiesAtPoint(ctx: GeometryContext, p: Vec3): string[] {
 
 
 function queryZonesInContext(
-
   ctx: GeometryContext,
-
   p: Vec3,
-
   bodyHits: string[],
-
-  namePrefix = ""
-
+  namePrefix = "",
+  resolveOverride?: (z: ZoneNode) => ResolvedZoneNumbers | null | undefined
 ): PointQueryResult | null {
-
   const isInBody = (ref: string) => isBodyRefInHits(ref, bodyHits, ctx);
 
-
-
   for (const z of ctx.zones) {
-
     const expr = parseZoneExpression(z.expression);
-
     if (!expr) continue;
-
     if (!evalZoneExpr(expr, isInBody)) continue;
 
-
-
     const displayName = namePrefix ? `${namePrefix}${z.name}` : z.name;
-
-    const meta = zoneMeta(z, ctx.zoneReg, displayName);
-
+    const override = resolveOverride?.(z);
+    const meta = zoneMeta(z, ctx.zoneReg, displayName, override);
     const material = meta.materialNum
-
       ? ctx.ast.materials.find((m) => m.number === meta.materialNum)
-
       : undefined;
 
-
-
     return {
-
       point: p,
-
       zone: {
-
         name: displayName,
-
         materialNum: meta.materialNum,
-
         regNum: meta.regNum,
-
         objNum: meta.objNum,
-
         expression: z.expression,
-
         color: meta.color,
-
       },
-
       material: material
-
         ? {
-
             number: material.number,
-
             nuclides: material.nuclides.map((n) => ({ name: n.name, density: n.density })),
-
             temperature: material.temperature,
-
           }
-
         : undefined,
-
       objectNum: meta.objNum,
-
       bodyHits,
-
     };
-
   }
-
   return null;
-
 }
 
 
@@ -241,56 +229,35 @@ function isInGlobalZone(ctx: GeometryContext, p: Vec3, zoneName: string): boolea
 
 
 function queryLatticeAtPoint(ast: DocumentAst, globalCtx: GeometryContext, p: Vec3): PointQueryResult | null {
-
   for (const lat of ast.lattices) {
-
     if (lat.latticeType.toUpperCase() !== "GLTL") continue;
-
     const hosts = latticeHostZones(lat);
-
     if (!hosts.some((h) => isInGlobalZone(globalCtx, p, h))) continue;
 
-
-
     const placements = parseGltlPlacements(lat, globalCtx.vars);
-
     for (const pl of placements) {
-
       const elName = lat.elements[pl.protoIndex - 1];
-
       if (!elName) continue;
 
-
-
       const scope = `lcell:${elName}`;
-
       const lctx = buildGeometryContext(ast, scopeFilterFor(scope));
-
       if (lctx.bodies.size === 0) continue;
 
-
-
       const localP = translatePoint(p, pl.offset.x, pl.offset.y, pl.offset.z);
-
       const bodyHits = findBodiesAtPoint(lctx, localP);
-
       if (bodyHits.length === 0) continue;
 
-
-
-      const hit = queryZonesInContext(lctx, p, bodyHits, `${elName}.`);
-
+      const elementIndex = pl.protoIndex - 1;
+      const { npm, nom } = latticeNpmNomBeforeElement(ast, lat, elementIndex);
+      const cache = new Map<number, number>();
+      const hit = queryZonesInContext(lctx, p, bodyHits, `${elName}.`, (z) =>
+        resolveZoneNumbersInContext(z, cache, { kind: "lattice", npm, nom })
+      );
       if (hit) return hit;
-
     }
-
   }
-
   return null;
-
 }
-
-
 
 function queryNetAtPoint(ast: DocumentAst, globalCtx: GeometryContext, p: Vec3): PointQueryResult | null {
   const bodyHits = findBodiesAtPoint(globalCtx, p);
@@ -316,7 +283,10 @@ function queryNetAtPoint(ast: DocumentAst, globalCtx: GeometryContext, p: Vec3):
 
     const [i, j, k] = cellHit.cellIndex;
     const prefix = `${net.name}[${i},${j}${k > 1 ? `,${k}` : ""}].`;
-    const hit = queryZonesInContext(cctx, p, localHits, prefix);
+    const cache = new Map<number, number>();
+    const hit = queryZonesInContext(cctx, p, localHits, prefix, (z) =>
+      resolveZoneNumbersInContext(z, cache, { kind: "net", net, cellIndex: [i, j, k] })
+    );
     if (hit) return hit;
   }
   return null;

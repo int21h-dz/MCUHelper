@@ -415,6 +415,36 @@ let cachedSidebarIndex:
   | { uri: string; index: IndexPayload | null; errorMsg?: string }
   | undefined;
 
+function mergeCachedSidebarIndex(
+  prev: { uri: string; index: IndexPayload | null; errorMsg?: string } | undefined,
+  next: { uri: string; index: IndexPayload | null; errorMsg?: string },
+  scope: SidebarRefreshScope
+): { uri: string; index: IndexPayload | null; errorMsg?: string } {
+  if (
+    scope !== "constants" ||
+    !prev ||
+    prev.uri !== next.uri ||
+    !prev.index ||
+    !next.index
+  ) {
+    return next;
+  }
+  return {
+    uri: next.uri,
+    errorMsg: next.errorMsg,
+    index: {
+      ...prev.index,
+      ...next.index,
+      summaries: {
+        ...prev.index.summaries,
+        constants: next.index.summaries.constants,
+      },
+      editorContext: next.index.editorContext,
+      hash: next.index.hash,
+    },
+  };
+}
+
 export function getAppliedSidebarUri(): string | undefined {
   return lastAppliedSidebarUri;
 }
@@ -729,7 +759,8 @@ async function refreshSidebarsOnce(
     return;
   }
 
-  cachedSidebarIndex = { uri, index, errorMsg };
+  const nextCache = mergeCachedSidebarIndex(cachedSidebarIndex, { uri, index, errorMsg }, scope);
+  cachedSidebarIndex = nextCache;
   if (index?.summaries?.constants?.length) {
     rememberEquNames(
       uri,

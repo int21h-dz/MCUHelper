@@ -4,7 +4,8 @@
  */
 import type { DiagnosticMessage, DocumentAst, SourceRange } from "./ast";
 import { parseMaterialVolumes } from "./materialVolumes";
-import { buildZoneRegistrationMap, resolveZoneTail } from "./zoneRegistration";
+import { buildZoneRegistrationMap, getResolvedZoneNumbers, resolveZoneTail } from "./zoneRegistration";
+import { uniquePositiveIntsFromCartogramRows } from "./netCartogram";
 
 export type RegistrationListKind = "material" | "zone" | "object";
 
@@ -123,12 +124,14 @@ function collectGeometryNumbers(ast: DocumentAst): {
   for (const z of ast.zones) {
     const resolved = resolveZoneTail(z.tail, cache);
     if (!resolved) continue;
-    if (resolved.regNum > 0) zones.add(resolved.regNum);
-    if (resolved.objNum > 0) objects.add(resolved.objNum);
+    if (resolved.regNum != null && resolved.regNum > 0) zones.add(resolved.regNum);
+    if (resolved.objNum != null && resolved.objNum > 0) objects.add(resolved.objNum);
   }
   for (const net of ast.nets) {
     addFromNetMaps(net.regMaps, zones);
     addFromNetMaps(net.objMaps, objects);
+    for (const n of uniquePositiveIntsFromCartogramRows(net.regCartogram)) zones.add(n);
+    for (const n of uniquePositiveIntsFromCartogramRows(net.objCartogram)) objects.add(n);
   }
   return { materials, zones, objects };
 }
@@ -165,7 +168,7 @@ export function analyzeZoneMaterialLinks(ast: DocumentAst): DiagnosticMessage[] 
   const diags: DiagnosticMessage[] = [];
   const zoneReg = buildZoneRegistrationMap(ast.zones);
   for (const z of ast.zones) {
-    const resolved = zoneReg.get(z.name);
+    const resolved = getResolvedZoneNumbers(zoneReg, z);
     if (resolved?.materialNum == null) continue;
     if (matNumbers.has(resolved.materialNum)) continue;
     diags.push({
