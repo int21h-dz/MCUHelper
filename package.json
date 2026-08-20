@@ -1,6 +1,7 @@
 {
   "name": "mcuhelper",
   "private": true,
+  "license": "MIT",
   "scripts": {
     "build": "npm run build --prefix packages/mcu-schema && npm run build --prefix packages/mcu-language && npm run build --prefix packages/mcu-geometry && npm run build --prefix packages/mcu-lsp && npm run build --prefix extension && npm run copy-extension-assets",
     "refresh-livechart-cache": "node scripts/refresh-livechart-cache.js",

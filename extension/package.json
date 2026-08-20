@@ -3,6 +3,7 @@
   "displayName": "MCU-NR Helper",
   "description": "Подсветка, диагностика, hover и навигация для исходных данных MCU-NR",
   "version": "0.14.0",
+  "license": "MIT",
   "publisher": "mcuhelper",
   "repository": {
     "type": "git",
