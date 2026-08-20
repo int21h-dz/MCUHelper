@@ -36,3 +36,4 @@ RUNTEST/
 *:Zone.Identifier:$DATA
 **/*:Zone.Identifier*
 test/fixtures/default.phy
+docs/DEV.md

@@ -62,17 +62,17 @@ npm test
 
 Последовательно: `mcu-schema` → `mcu-language` → `mcu-geometry` → `mcu-lsp` → `extension`. Фреймворк — **node:test** (без Jest/Mocha).
 
-### Снимок 2026-08-14
+### Снимок 2026-08-20
 
-**888 тестов, 0 падений:**
+**995 тестов, 0 падений:**
 
 | Пакет | Тестов |
 |-------|--------|
 | mcu-schema | 60 |
-| mcu-language | 435 |
-| mcu-geometry | 92 |
-| mcu-lsp | 178 |
-| extension | 123 |
+| mcu-language | 466 |
+| mcu-geometry | 101 |
+| mcu-lsp | 210 |
+| extension | 158 |
 
 > [`README.md`](../README.md) ссылается на этот снимок; при расхождении цифр правьте оба файла.
 
@@ -130,7 +130,7 @@ HTML: после `test:coverage` открой `coverage/index.html` — крас
 | `iaeaNds` (mcu-lsp) | ~43% → **95.6% lines / 96% funcs** | `resetIaeaNdsStateForTest`: temp-кэш + inject `fetchImpl`; без `~/.mcuhelper` и без глобального `fetch` |
 | `meshPreview` (mcu-geometry) | ~69% → **99.4% lines / 100% funcs** | типы тел, bbox, сечения, nearby, граничные случаи |
 
-Тестов: **888** (было 869). `coverage:check` — зелёный.
+Тестов: **995** (было 888). `coverage:check` — зелёный.
 
 ### Честные дыры (включены в отчёт)
 
