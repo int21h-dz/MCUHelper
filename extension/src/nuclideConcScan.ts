@@ -6,7 +6,7 @@ const OPTIONAL_PARAM_RE = /^(ACE|MODS|DTEM|PHT)=/i;
 
 const CARD_HEADS = new Set([
   "MATR", "PIN", "HEAD", "TEMPR", "FINISH", "END", "DEF", "EQU", "SET", "VOL",
-  "SINOT", "SIDEN",
+  "SINOT", "SIDEN", "ICE", "ICENOT",
 ]);
 
 export type QuickConcIssue = {

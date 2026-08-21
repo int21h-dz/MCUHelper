@@ -3,6 +3,7 @@ import * as fs from "fs";
 import type { DocumentAst } from "./ast";
 import { parseDocument, type ParseOptions } from "./parser";
 import { analyzeSemantics, buildSummaries } from "./semantic";
+import { filterDiagnosticsOutsideInlineDbm } from "./inlineDbmExpand";
 import {
   normalizeIncludeFsKey,
   parseIncludeLine,
@@ -107,7 +108,7 @@ function buildIndex(
   });
   const parseMs = performance.now() - t0;
   const t1 = performance.now();
-  ast.diagnostics = analyzeSemantics(ast);
+  ast.diagnostics = filterDiagnosticsOutsideInlineDbm(text, analyzeSemantics(ast));
   const semanticsMs = performance.now() - t1;
   const t2 = performance.now();
   const skipSummaries = Boolean(options?.skipSummaries && previous);

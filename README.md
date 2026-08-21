@@ -2,9 +2,9 @@
 
 **Расширение для [Visual Studio Code](https://code.visualstudio.com/download) и Language Server** для исходных данных семейства [MCU6](#о-mcu-и-mcu-nr).
 
-[`VS Code ^1.85`](https://code.visualstudio.com/download) · `Node.js` · язык `mcunr` · 995 тестов
+[`VS Code ^1.85`](https://code.visualstudio.com/download) · `Node.js` · язык `mcunr` · 1066 тестов
 
-> **English:** MCU Helper is a VS Code extension and Language Server for editing MCU6 input decks — text files that describe materials, 3D geometry, sources, tallying, and burnup for Monte Carlo particle transport. It brings syntax highlighting, diagnostics, completions, hover documentation, MATR CodeLens (ρ, V, activity), sum-isotope highlighting (`SI` / `SINOT` / `SIDEN`), conditional zone pointers (УРУ/УОУ/УМУ + NET P/O/M cartograms / LATT Npm·Nom), zone hover with MATR preview and jump-to-material, live zone/body slice preview, MDBNR library checks (AW.LIB / PARAMETE.THR T½ vs IAEA), PNNL materials builder, body generator with nearby-body slices, IAPWS-IF97 water/steam dens, a module catalog, run actions for MCU-NR, and convenient navigation inside MCU input files.
+> **English:** MCU Helper is a VS Code extension and Language Server for editing MCU6 input decks — text files that describe materials, 3D geometry, sources, tallying, and burnup for Monte Carlo particle transport. It brings syntax highlighting, diagnostics, completions, hover documentation, MATR CodeLens (ρ, V, activity), sum-isotope highlighting (`SI` / `SINOT` / `SIDEN`), `.DBM` materials from MDBNR (inline expand/collapse like `#include`, export MATR → library), CPM…CPMEND material replication, conditional zone pointers (УРУ/УОУ/УМУ + NET P/O/M cartograms / LATT Npm·Nom), zone hover with MATR preview and jump-to-material, live zone/body slice preview, visual **GLTL** lattice constructor (`LISTEL` / `PARM`), MDBNR library checks (AW.LIB / PARAMETE.THR T½ vs IAEA), PNNL materials builder, body generator with nearby-body slices, IAPWS-IF97 water/steam dens, a module catalog, run actions for MCU-NR, and convenient navigation inside MCU input files.
 
 ![Демонстрация MCU Helper в VS Code](media/Promo.gif)
 
@@ -55,8 +55,8 @@
 | Компонент | Назначение |
 |-----------|------------|
 | [`packages/mcu-schema`](packages/mcu-schema) | Схемы карт PIN/GEO, типы тел, hover-тексты, каталог шаблонов модулей |
-| [`packages/mcu-language`](packages/mcu-language) | Лексер, парсер, семантика, индекс, конструкторы MATR/тел, вода/пар |
-| [`packages/mcu-geometry`](packages/mcu-geometry) | Geometry IR, queryPoint / NET·LATT, live-превью зон и тел (три сечения) |
+| [`packages/mcu-language`](packages/mcu-language) | Лексер, парсер, семантика, индекс, `.DBM`/CPM/ICE, конструкторы MATR/тел/GLTL, вода/пар |
+| [`packages/mcu-geometry`](packages/mcu-geometry) | Geometry IR, queryPoint / NET·LATT·GLTL, live-превью зон и тел (три сечения) |
 | [`packages/mcu-lsp`](packages/mcu-lsp) | Language Server: diagnostics, completion, hover, custom requests |
 | [`extension/`](extension) | UI VS Code: боковая панель, webview-конструкторы, команды |
 
@@ -94,8 +94,11 @@ flowchart LR
 - **Автодополнение** — все карты (~229 меток), алиасы, аргументы карт (`SUMZON`→`SUMB`…`ZONG`, `CONTEN`→`DENS`…, `CODE`→`RSTP`…), хвосты зон (`#im`/`#iz`/`#io`), метки картограмм `P`/`O`/`M`, символы документа
 - **Signature Help** — подсказка активного параметра при вводе тел (`RCC`, `RCZ`, …), карт (`MATR`, `POWER`, `STEP`, `SI`/`SINOT`/`SIDEN`, …), строк нуклидов
 - **Всплывающие подсказки** — описания из UserGuide; для **зон** — выражение, scope, материал / УРУ·УОУ·УМУ, краткая карточка `MATR` (GROUP/NAME/T/ρ, нуклиды) и ссылка **↗ Открыть MATR**; hover на номер материала в хвосте `/reg:mat` и на `MATR N`; для нуклидов — концентрация, плотность, атомная масса, удельная активность (Бк/г = a_V/ρ) по T½ из PARAMETE.THR; данные **IAEA NDS** (природные смеси — bundled fallback без сети для частых элементов + кнопка разложения); для `POWER`/`STEP`, `EMES`/`EPRO`, `VOL` — дополнительные расчёты и мини-отчёты
-- **CodeLens над `MATR`** — компактная строка интегральных характеристик: всего нуклидов, сколько в SI, сколько из SI нет в AW.LIB, ρ, V, масса, удельная активность (Бк/г), T, GROUP. Lens садится на видимый заголовок `MATR` в этом файле (не на чужой include)
+- **CodeLens над `MATR`** — компактная строка интегральных характеристик: всего нуклидов, сколько в SI, сколько из SI нет в AW.LIB, ρ, V, масса, удельная активность (Бк/г), T, GROUP. Lens садится на видимый заголовок `MATR` в этом файле (не на чужой include). Для материалов из `.DBM` — дополнительно CodeLens **▸ / ▾** (inline-разворот состава, как у `#include`)
+- **Материалы `.DBM`** (UserGuide §8.11) — `NAME=` на `MATR` как имя файла библиотеки (≤6 символов) + кодовая строка состава; чтение/запись в корне MDBNR (`mcuhelper.mcuConstantsLibPath`); в sidebar — бейдж DBM и переход к файлу библиотеки; **Отправить в DBM** (контекстное меню / вкладка «Материалы») переносит состав в `*.DBM` и оставляет в варианте ссылку `NAME=lib` + код; watch каталога MDBNR перезагружает библиотеки в LSP
+- **CPM…CPMEND** (UserGuide §8.8) — размножение блоков материалов: в индексе и sidebar видны повторённые номера; клик ведёт к карте `CPM`
 - **Суммарный изотоп** (UserGuide §8.5) — карты `SI` / `SINOT` / `SIDEN`: нуклиды входящие в суммарный изотоп подсвечиваются серым в редакторе и приглушённо в панели «Материалы»; в hover — причина пометки (список SI/SINOT или порог `SIDEN`). Серая подсветка только в том файле, где нуклид реально написан (main и include не смешиваются)
+- **ICE / ICENOT** (UserGuide §8.7) — учёт карт при разложении природных элементов на изотопы из hover
 - **Автоопределение языка** `mcunr` по содержимому (`PIN`, `MATR`, `HEAD`, …)
 - **Автоопределение кодировки** — UTF-8 / Windows-1251 / CP866 / KOI8-R для legacy-файлов и `#include`
 - **Сворачивание (folding)** — фрагменты варианта, блоки `MATR`, `LCELL…ENDL` и `LATT`
@@ -108,7 +111,8 @@ flowchart LR
 - **Условные указатели** (UserGuide §9.1.4, §9.2.3, §9.2.5) — парсинг `/-N:mat/-M` и `#IM=`/`#IZ=`/`#IO=`; перекодировка через картограммы `P**`/`O**`/`M**` в `NET` (per-cell) и через Npm/Nom в `LATT`/`LCELL`; безусловные номера картограммами не трогаются
 - **Ключ зоны `scope::name`** — одноимённые фигуры в разных `CELL`/`LCELL` (часто `GROU`, `CLAD`) не схлопываются в индексе и hover
 - **Query / сечения** — материал и регистрация зоны с учётом ячейки сети или элемента решётки
-- **Live-превью зоны** — три ортогональных сечения с ползунками плоскости реза и маркерами пересечения; стадии качества `rough → draft → full`
+- **Live-превью зоны** — три ортогональных сечения с ползунками / точным вводом положения плоскости реза, кнопками скрытия видов и маркерами пересечения; стадии качества `rough → draft → full`
+- **Конструктор решётки GLTL** (UserGuide §9.2.6.1) — визуальная расстановка прототипов `LISTEL` с `PARM [/n] x,y,z`; автооткрытие при курсоре в блоке `LATT GLTL` (настройка `mcuhelper.liveLatticeGenerator`). В UI сейчас **только GLTL** (G2MP/G2AR есть в API ядра, панель их не показывает)
 
 ### Боковая панель MCU-NR
 
@@ -120,13 +124,13 @@ flowchart LR
 | **Каталог** | 8 модулей варианта; карточки карт с hover; drag или клик → вставка шаблона |
 | **Диагностика** | Ошибки и предупреждения текущего файла; группы **`#include`** (переход в include-файл) и **«Сверка изотопов»** (AW/THR vs IAEA, экспорт CSV); открывается после MCU-run при ошибках LST |
 | **Навигация** | Фрагменты варианта, карты/операторы и `#include` (без тел, зон, EQU/SET, CONT); клик по include — к строке директивы в варианте |
-| **Материалы** | Дерево `MATR` с плотностью и группами; нуклиды суммарного изотопа — приглушённо. Кнопки **Конструктор материалов** и **Вода / пар** |
+| **Материалы** | Дерево `MATR` с плотностью и группами; бейджи **DBM** / **CPM**; нуклиды суммарного изотопа — приглушённо. Кнопки **Конструктор материалов**, **Вода / пар**, **Отправить в DBM** |
 | **Константы** | Эффективный набор `EQU`/`SET` в позиции курсора (global + локальные LCELL/CELL); клик ведёт к определению в main или в файле `#include` |
 | **Тела** | Список геометрических тел по scope. Кнопка **Генератор тел** |
 | **Объекты** | Регистрационные объекты |
 | **Рег. зоны** | Фигуры по регистрационному номеру; отдельная группа **«Условные указатели»** (УРУ/УОУ/УМУ без абсолютного reg) |
 | **Сети** | Ячейки `NET`, прототипы, картограммы **P / O / M** |
-| **Решётки** | Элементы `LATT` / `LCELL` |
+| **Решётки** | Элементы `LATT` / `LCELL` (LISTEL). Кнопка **Конструктор решётки GLTL** |
 
 Клик по элементу — переход к строке в файле. Кнопка обновления на панели — пересчёт индекса. Status bar **MCU-NR** открывает вкладку «Запуск».
 
@@ -177,7 +181,8 @@ flowchart LR
 
 ### Прочее
 
-- **MCU-NR: Разложить природный элемент на изотопы** — кнопка в hover нуклида (ICE)
+- **MCU-NR: Разложить природный элемент на изотопы** — кнопка в hover нуклида с учётом карт `ICE` / `ICENOT`
+- **MCU-NR: Отправить в DBM** — экспорт видимого `MATR` в библиотеку `.DBM` MDBNR
 - **MCU-NR: Добавить в суммарный изотоп** — кнопка в hover и «В SI» в панелях Диагностика/Материалы для нуклидов с `aw-mass-missing` / `phy-missing` (и `-siden`); ищет карту SI/`SINOT` в том числе внутри `#include`; не превышает 200 символов code-части строки (при необходимости — continuation)
 - **MCU-NR: Определить язык по содержимому** — ручное переключение на `mcunr`
 - **MCU-NR: Определить кодировку** — повторная проверка кодировки файла
@@ -187,7 +192,7 @@ flowchart LR
 
 ## Конструкторы и калькуляторы
 
-Webview-панели рядом с редактором. Те же команды — кнопками на вкладках **Материалы** и **Тела** (и иконками в `view/title`).
+Webview-панели рядом с редактором. Те же команды — кнопками на вкладках **Материалы**, **Тела** и **Решётки** (и иконками в `view/title`).
 
 ### Конструктор материалов
 
@@ -215,7 +220,16 @@ Webview-панели рядом с редактором. Те же команд�
 - параметры с подсказками EQU и описаниями групп (UserGuide §9.1.3);
 - превью: **три сечения** через центр черновика (XY / XZ / YZ), заливка черновика и контуры ближайших тел (не вся сцена);
 - навигация вида на каждом сечении: колесо — зум, ЛКМ-drag — сдвиг, двойной клик — вписать;
-- то же webview используется для **живого превью тела/зоны** в варианте (ползунки плоскостей реза, маркеры срезов).
+- то же webview используется для **живого превью тела/зоны** в варианте (ползунки / точный ввод плоскостей реза, скрытие видов, маркеры срезов).
+
+### Конструктор решётки GLTL
+
+Команда **MCU-NR: Конструктор решётки GLTL**. Карта `LATT` типа **GLTL** (UserGuide §9.2.6.1): список прототипов `LISTEL` и явные сдвиги `PARM [/n] x,y,z`.
+
+- палитра элементов LISTEL над графикой (drag-and-drop), snap по рёбрам footprints из `LCELL`;
+- **Из контекста** — подхватить блок `LATT GLTL` под курсором; **Вставить** / **Заменить** — записать текст карты в вариант;
+- автооткрытие при курсоре внутри `LATT GLTL` (`mcuhelper.liveLatticeGenerator`); закрытую панель снова не открывает, пока не вызовете команду вручную;
+- G2MP / G2AR в UI не выводятся (остаются в API `latticeGenerator.ts`).
 
 ---
 
@@ -268,7 +282,7 @@ npm run build
 3. В Activity Bar нажмите иконку **MCU-NR** — откроется боковая панель с каталогом и навигацией.
 4. Наведите курсор на карту или нуклид — появится hover с описанием и данными (для нуклидов суммарного изотопа — ещё и причина пометки).
 5. Для запуска расчёта: вкладка **Запуск** → **Настроить пути** → **Debug** / **Run**.
-6. Состав `MATR` — **Конструктор материалов** на вкладке «Материалы»; геометрия — **Генератор тел** / **Превью тела** на вкладке «Тела» (превью следует за курсором в строке RCZ/HEX/…). Наведите на имя зоны — в hover видны материал и ссылка на `MATR`.
+6. Состав `MATR` — **Конструктор материалов** / **Отправить в DBM** на вкладке «Материалы»; геометрия — **Генератор тел** / **Превью тела** на «Тела»; решётки GLTL — **Конструктор решётки** на «Решётки» (или авто при курсоре в блоке LATT). Наведите на имя зоны — в hover видны материал и ссылка на `MATR`.
 
 **Примеры файлов** в репозитории:
 
@@ -328,7 +342,9 @@ npm run build
 | MCU-NR: Конструктор материалов | Справочник PNNL + AW.LIB → MATR в конец PIN |
 | MCU-NR: Вода / пар | IAPWS-IF97 ρ–T → dens H и O; контекст из MATR под курсором |
 | MCU-NR: Генератор тел | Тип BODY/TRANSF, три сечения и ближайшие тела |
+| MCU-NR: Конструктор решётки GLTL | Визуальная сборка LATT GLTL (LISTEL / PARM) |
 | MCU-NR: Превью тела | Живые сечения тела под курсором в варианте (без формы) |
+| MCU-NR: Отправить в DBM | Экспорт MATR → `*.DBM` в MDBNR, в варианте — NAME=lib + код |
 | MCU-NR: Граф #include | QuickPick зависимостей include |
 | MCU-NR: Сравнить FIN/LST | Сводка Δ метрик + CSV в буфер |
 | MCU-NR: Сечения геометрии | Панель сечений существующей геометрии |
@@ -346,11 +362,13 @@ npm run build
 |---------|----------|
 | MCU-NR: Определить язык по содержимому | Принудительно `mcunr` |
 | MCU-NR: Определить кодировку | Повторная проверка кодировки файла |
-| MCU-NR: Разложить природный элемент на изотопы | ICE-разложение из hover |
+| MCU-NR: Разложить природный элемент на изотопы | ICE/ICENOT-разложение из hover |
 | MCU-NR: Добавить в суммарный изотоп | Дописать нуклид в карту SI (из hover / sidebar) |
 | MCU-NR: Развернуть #include inline | CodeLens: вставить редактируемый блок include в вариант |
 | MCU-NR: Свернуть #include | CodeLens: сохранить inline-блок обратно в include-файл |
 | MCU-NR: Открыть файл #include | CodeLens: открыть include с языком `mcunr` |
+| MCU-NR: Развернуть материал .DBM inline | CodeLens: показать состав из `*.DBM` в варианте |
+| MCU-NR: Свернуть материал .DBM | CodeLens: сохранить правки в `*.DBM` и свернуть блок |
 
 ---
 
@@ -363,9 +381,11 @@ npm run build
 | `mcuhelper.mcuNrPath` | *(пусто)* | Путь к исполняемому файлу MCU-NR |
 | `mcuhelper.mcuConstantsLibPath` | *(пусто)* | Корень MDBNR (библиотека констант; в `mcu5.ini` — со слэшем в конце) |
 | `mcuhelper.liveBodyPreview` | `true` | Автооткрытие живого превью сечений при курсоре на строке тела. Закрытую панель не открывает снова, пока не вызовете «Превью тела» |
+| `mcuhelper.liveLatticeGenerator` | `true` | Автооткрытие конструктора GLTL при курсоре в блоке `LATT GLTL`. Закрытую панель не открывает снова, пока не вызовете «Конструктор решётки» |
 | `mcuhelper.autoDetectLanguage` | `true` | Определять MCU-NR по содержимому и переключать язык на `mcunr` |
 | `mcuhelper.autoDetectFromLanguages` | `plaintext`, `txt`, `ini`, … | С каких language id переключать (уже размеченные языки не трогает) |
 | `mcuhelper.autoDetectEncoding` | `true` | Определять кодировку legacy-файлов и при необходимости переоткрывать документ |
+| `mcuhelper.includeInlineMaxLines` | `4000` | Макс. число строк `#include` для inline-развёртки через CodeLens |
 | `mcuhelper.batchConcurrency` | `1` | Параллельность batch INPUT (1–2) |
 | `mcuhelper.trace.server` | `off` | Лог LSP: `off` / `messages` / `verbose` |
 
@@ -382,7 +402,7 @@ npm install
 npm run build
 ```
 
-Скрипт `build` компилирует все пакеты и копирует бандл LSP в `extension/server/server.js` (нужно для VSIX и Extension Development Host). Также копируются vendor-модули language/geometry (в т.ч. `materialsCompendium.js`, `bodyGenerator.js`, `meshPreview.js`).
+Скрипт `build` компилирует все пакеты и копирует бандл LSP в `extension/server/server.js` (нужно для VSIX и Extension Development Host). `copy-extension-assets` копирует **весь** `packages/mcu-language/dist` → `extension/vendor/mcu-language/` (и патчит `schemaBridge.js` под vendor-пути), плюс `mcu-schema` и `meshPreview.js` — иначе конструктор решётки / `.DBM` не подхватятся в Extension Host.
 
 ### Упаковка VSIX
 
@@ -408,20 +428,20 @@ npm run refresh-materials-compendium
 npm test
 ```
 
-Запускает **995** тестов (снимок 2026-08-20: schema 60, language 466, geometry 101, lsp 210, extension 158) в пакетах `mcu-schema`, `mcu-language`, `mcu-geometry`, `mcu-lsp`, `extension`. Актуальные цифры — в [docs/DEV.md](docs/DEV.md).
+Запускает **1066** тестов (снимок 2026-08-21: schema 60, language 518, geometry 102, lsp 213, extension 173) в пакетах `mcu-schema`, `mcu-language`, `mcu-geometry`, `mcu-lsp`, `extension`. Карта модулей — в [structure.md](structure.md).
 
 ```bash
 npm run test:coverage
 npm run coverage:check
 ```
 
-`coverage:check` — регрессионные полы по пакетам (не цель 95% на весь репозиторий). Снимок и политика exclude — в [docs/DEV.md](docs/DEV.md).
+`coverage:check` — регрессионные полы по пакетам (не цель 95% на весь репозиторий).
 
 ### Документация
 
 | Ресурс | Описание |
 |--------|----------|
-| [docs/DEV.md](docs/DEV.md) | Руководство разработчика: сборка, тесты, покрытие c8 (актуальный снимок) |
+| [structure.md](structure.md) | Карта репозитория: пакеты, ключевые модули, GLTL / `.DBM` / include |
 | [CHANGELOG_RU.md](CHANGELOG_RU.md) | Журнал изменений |
 | [mcuproject.ru](https://mcuproject.ru/rabout.html) | Официальный сайт семейства программ MCU |
 

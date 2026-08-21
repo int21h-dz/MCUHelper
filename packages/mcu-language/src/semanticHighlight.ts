@@ -20,7 +20,8 @@ const BODY_KEYS = new Set([
 ]);
 
 // ⚠ АГЕНТАМ: SI здесь — только карта list (`SI FP1`), не кремний `SI dens` (см. siCardVsNuclide.ts).
-const PIN_ISOTOPE_CARDS = new Set(["SI", "ICE", "CPM", "NEUT", "DELN", "EGRC"]);
+// CPM — размножение материалов (§8.8), не список изотопов PIN.
+const PIN_ISOTOPE_CARDS = new Set(["SI", "SINOT", "ICE", "ICENOT", "NEUT", "DELN", "EGRC"]);
 
 function isExcludedNuclideLikeLine(text: string): boolean {
   const t = text.trim();
@@ -56,9 +57,12 @@ function isPinIsotopeListLine(text: string): boolean {
   if (!looksLikeNuclideLine(text)) return false;
   const parts = text.trim().split(/\s+/);
   if (parts.length < 2) return false;
+  const head = parts[0]!.toUpperCase();
   // SI dens (кремний) — не PIN-list карта.
-  if (parts[0]!.toUpperCase() === "SI" && !isSiSumIsotopeCardLine(text)) return false;
-  return PIN_ISOTOPE_CARDS.has(parts[0].toUpperCase()) && /^[A-Za-z]+\d+$/.test(parts[1]);
+  if (head === "SI" && !isSiSumIsotopeCardLine(text)) return false;
+  if (!PIN_ISOTOPE_CARDS.has(head)) return false;
+  // SI/SINOT: нуклиды вроде FP1/U235; ICE/ICENOT: символы элементов (Fe, U, N).
+  return /^[A-Za-z][A-Za-z0-9]*$/.test(parts[1]!);
 }
 
 function classifyLineStart(text: string, fragment: string | null): SemanticHighlightKind | null {

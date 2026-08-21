@@ -1,6 +1,5 @@
 import type { DiagnosticMessage, DocumentAst, SourceRange } from "./ast";
-
-const NAME_VALUES = new Set(["MCU", "ZA"]);
+import { isDbmLibraryName, isNuclideNameFormat } from "./dbmLib";
 
 function tokenSubrange(text: string, range: SourceRange, token: string): SourceRange {
   const idx = text.indexOf(token);
@@ -43,13 +42,16 @@ export function validateMatrLineParams(
   }
 
   const nameM = tail.match(/NAME\s*=\s*(\S+)/i);
-  if (nameM && !NAME_VALUES.has(nameM[1].toUpperCase())) {
-    diags.push({
-      severity: "error",
-      message: `MATR ${matNumber}: NAME=${nameM[1]} — ожидается MCU или ZA`,
-      code: "matr-param-value",
-      range: tokenSubrange(text, range, `NAME=${nameM[1]}`),
-    });
+  if (nameM) {
+    const nameVal = nameM[1]!;
+    if (!isNuclideNameFormat(nameVal) && !isDbmLibraryName(nameVal)) {
+      diags.push({
+        severity: "error",
+        message: `MATR ${matNumber}: NAME=${nameVal} — ожидается MCU, ZA или имя .DBM (≤6 символов)`,
+        code: "matr-param-value",
+        range: tokenSubrange(text, range, `NAME=${nameVal}`),
+      });
+    }
   }
 
   return diags;
@@ -64,5 +66,26 @@ export function analyzeMatrCardParams(ast: DocumentAst): DiagnosticMessage[] {
     if (matNumber == null) continue;
     diags.push(...validateMatrLineParams(stmt.text, stmt.range, matNumber));
   }
+
+  for (const m of ast.materials) {
+    if (!isDbmLibraryName(m.nameLib)) continue;
+    if (m.nuclides.length > 0) {
+      diags.push({
+        severity: "error",
+        message: `MATR ${m.number}: при NAME=${m.nameLib} нельзя задавать нуклиды — только одно кодовое имя из ${m.nameLib}.DBM`,
+        code: "matr-dbm-mixed",
+        range: m.nuclides[0]?.range ?? m.range,
+      });
+    }
+    if (!m.libMaterialName) {
+      diags.push({
+        severity: "error",
+        message: `MATR ${m.number}: при NAME=${m.nameLib} ожидается кодовое имя материала из ${m.nameLib}.DBM`,
+        code: "matr-dbm-code",
+        range: m.range,
+      });
+    }
+  }
+
   return diags;
 }

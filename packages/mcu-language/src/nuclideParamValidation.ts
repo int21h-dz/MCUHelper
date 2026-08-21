@@ -1,5 +1,6 @@
 import type { DiagnosticMessage, DocumentAst, SourceRange, StatementNode } from "./ast";
 import { buildScopedVars } from "./constantScope";
+import { isDbmLibraryName } from "./dbmLib";
 import { resolveNuclideConcentration } from "./materialDensity";
 import { getCardArgSpec, MODS_VALUES } from "./schemaBridge";
 import { isSiCardListPrefix } from "./siCardVsNuclide";
@@ -22,7 +23,7 @@ const NUCLIDE_LINE_EXCLUDED_HEADS = new Set([
   // ⚠ АГЕНТАМ: SINOT/SIDEN — всегда карты. SI намеренно НЕ здесь:
   // в MATR бывает нуклид кремния `SI dens` (см. siCardVsNuclide.ts / isSiCardListPrefix).
   // Не добавляйте SI в этот Set — иначе кремний потеряет dens-hints и signature help.
-  "SINOT", "SIDEN", "ICE", "CPM", "CPMEND",
+  "SINOT", "SIDEN", "ICE", "ICENOT", "CPM", "CPMEND",
 ]);
 
 function isExcludedNuclideLikeLine(text: string): boolean {
@@ -205,6 +206,8 @@ function collectNuclideCompositionLines(ast: DocumentAst): { stmt: StatementNode
   const sorted = [...ast.statements].sort((a, b) => a.range.start.line - b.range.start.line);
   const out: { stmt: StatementNode; matNumber: number }[] = [];
   let currentMat: number | null = null;
+  /** NAME=LIB (.DBM) — состав только кодовое имя / inline DBM, не нуклиды MATR. */
+  let currentMatDbm = false;
 
   for (const stmt of sorted) {
     const label = (stmt.label ?? "").toUpperCase();
@@ -212,17 +215,25 @@ function collectNuclideCompositionLines(ast: DocumentAst): { stmt: StatementNode
     if (label === "MATR") {
       const m = stmt.text.match(/^MATR\s+(\d+)/i);
       currentMat = m ? parseInt(m[1], 10) : null;
+      const nameM = stmt.text.match(/\bNAME\s*=\s*(\S+)/i);
+      currentMatDbm = Boolean(nameM && isDbmLibraryName(nameM[1]));
       continue;
     }
 
     if (currentMat === null) continue;
 
-    if (["MATR", "END", "FINISH", "DEF", "TEMPR", "PIN"].includes(label)) {
-      if (label === "END" && stmt.fragment === "physical") currentMat = null;
-      else if (label !== "END") currentMat = null;
+    if (["MATR", "END", "FINISH", "DEF", "TEMPR", "PIN", "CPM", "CPMEND"].includes(label)) {
+      if (label === "END" && stmt.fragment === "physical") {
+        currentMat = null;
+        currentMatDbm = false;
+      } else if (label !== "END") {
+        currentMat = null;
+        currentMatDbm = false;
+      }
       continue;
     }
 
+    if (currentMatDbm) continue;
     if (isIgnorableAuxLine(stmt.text)) continue;
     if (looksLikeNuclideLine(stmt.text)) {
       out.push({ stmt, matNumber: currentMat });

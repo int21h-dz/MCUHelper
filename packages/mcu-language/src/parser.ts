@@ -31,6 +31,7 @@ import {
 import { collectIncludesFromSource, resolveIncludeFilePath, resolveIncludeFileUri } from "./includeResolve";
 import { expandIncludes, expandRepeats } from "./preprocessor";
 import { applyGeometryScopeTransition, initialGeometryScopeState } from "./geometryScope";
+import { collectCpmBlocks } from "./cpmBlocks";
 import { isG2mpCartogramRow, latticeTypeUsesCartogram, looksLikeZoneOverridingFragment, looksLikeZoneStatement } from "./zoneStatement";
 import {
   detectFragmentFromLabel,
@@ -41,6 +42,14 @@ import {
   isGeoBodyLabel,
   GEO_BODY_KEYS,
 } from "./schemaBridge";
+import { isSiSumIsotopeCardLine } from "./siCardVsNuclide";
+import { isDbmLibraryName, looksLikeLibMaterialCodeLine } from "./dbmLib";
+import {
+  findInlineDbmBlocks,
+  lineInInlineDbmBlock,
+  parseDbmBeginMarker,
+  parseDbmExpandDirective,
+} from "./inlineDbmExpand";
 
 const BODY_KEYS = GEO_BODY_KEYS;
 
@@ -351,6 +360,22 @@ function looksLikeNuclideLine(text: string): boolean {
   return isNuclideLine(t);
 }
 
+/**
+ * `SI dens` (кремний) — единственный омоним карты и нуклида в составе MATR.
+ * Карты SI list / SINOT / ICE / ICENOT / SIDEN и пр. — не продолжение состава.
+ */
+function isSiliconNuclideCompositionLine(text: string): boolean {
+  const label = text.trim().split(/\s+/)[0]?.toUpperCase() ?? "";
+  return label === "SI" && !isSiSumIsotopeCardLine(text) && looksLikeNuclideLine(text);
+}
+
+/** Конец блока нуклидов MATR: следующая карта PIN (не кремний SI dens). */
+function isMaterialBlockTerminatorLabel(label: string, text: string): boolean {
+  if (["MATR", "END", "FINISH", "DEF", "TEMPR", "PIN", "CPM", "CPMEND"].includes(label)) return true;
+  if (isSiliconNuclideCompositionLine(text)) return false;
+  return isKnownMcuLabel(label);
+}
+
 function parseNuclidesFromLine(
   text: string,
   range: SourceRange
@@ -464,6 +489,9 @@ export function parseDocument(text: string, options: ParseOptions): DocumentAst 
   const { lines, diagnostics: lexDiag } = lexDocument(sourceText);
   diagnostics.push(...lexDiag);
 
+  const inlineDbmBlocks = findInlineDbmBlocks(sourceText);
+  const inInlineDbm = (line: number) => lineInInlineDbmBlock(inlineDbmBlocks, line);
+
   const statements: StatementNode[] = [];
   const materials: MaterialNode[] = [];
   const bodies: BodyNode[] = [];
@@ -533,9 +561,8 @@ export function parseDocument(text: string, options: ParseOptions): DocumentAst 
       // В geometry имена зон часто совпадают с картами регистрации (GROU, CROD, GZAZI…).
       const zoneHomonym =
         frag === "geometry" && looksLikeZoneStatement(stmt.text);
-      // ⚠ АГЕНТАМ: `SI dens` — кремний в MATR, не карта SI (siCardVsNuclide.ts).
-      const siSiliconHomonym =
-        label === "SI" && looksLikeNuclideLine(stmt.text);
+      // ⚠ АГЕНТАМ: только `SI dens` (кремний) — не карта SI list; list-карты SI должны давать wrong-fragment.
+      const siSiliconHomonym = isSiliconNuclideCompositionLine(stmt.text);
       if (
         isKnownMcuLabel(label) &&
         !labelAllowedInFragment(label, frag) &&
@@ -581,12 +608,19 @@ export function parseDocument(text: string, options: ParseOptions): DocumentAst 
       inMaterialBlock = true;
       const mat = parseMaterial(stmt.text, stmt.range);
       if (mat) {
+        const dbmMode = isDbmLibraryName(mat.nameLib);
         /** Continuation-строки MATR склеиваются в один stmt без `\n` — range иначе у всех = заголовок, серое SI не находит имя. */
         const fromLines: NuclideEntry[] = [];
         for (let k = i; k <= stmt.end; k++) {
           const line = lines[k]!;
           const raw = k === i ? line.text.replace(/^\s*MATR\s+\d+/i, "") : line.text;
           if (isIgnorableAuxLine(raw)) continue;
+          if (dbmMode && looksLikeLibMaterialCodeLine(raw) && !mat.libMaterialName) {
+            const code = raw.trim().replace(/;.*/, "").trim();
+            mat.libMaterialName = code;
+            mat.libMaterialRange = rangeFromLine(line);
+            continue;
+          }
           if (!looksLikeNuclideLine(raw)) continue;
           const parsed = parseNuclidesFromLine(raw, rangeFromLine(line));
           if (parsed.diagnostic) diagnostics.push(parsed.diagnostic);
@@ -595,10 +629,44 @@ export function parseDocument(text: string, options: ParseOptions): DocumentAst 
         if (fromLines.length) mat.nuclides = fromLines;
         let j = stmt.end + 1;
         while (j < lines.length) {
+          const lineInfo = lines[j]!;
+          // Inline .DBM (как #include): синтаксис файла библиотеки, не состава MATR.
+          if (inInlineDbm(lineInfo.lineNo)) {
+            const dir = parseDbmBeginMarker(lineInfo.text);
+            if (dir && dbmMode && !mat.libMaterialName) {
+              const parsed = parseDbmExpandDirective(dir);
+              if (
+                parsed &&
+                (!mat.nameLib || parsed.library === mat.nameLib.trim().toUpperCase())
+              ) {
+                mat.libMaterialName = parsed.code;
+                mat.libMaterialRange = rangeFromLine(lineInfo);
+              }
+            }
+            j++;
+            continue;
+          }
           const nextStmt = mergeStatementLines(lines, j);
           const nl = nextStmt.text.split(/\s+/)[0]?.toUpperCase() ?? "";
-          if (["MATR", "END", "FINISH", "DEF", "TEMPR", "PIN"].includes(nl)) break;
+          // SI list / SINOT / ICE / ICENOT / SIDEN — карты PIN, не нуклиды состава.
+          if (isMaterialBlockTerminatorLabel(nl, nextStmt.text)) break;
           if (isIgnorableAuxLine(nextStmt.text)) {
+            j = nextStmt.end + 1;
+            continue;
+          }
+          if (dbmMode && looksLikeLibMaterialCodeLine(nextStmt.text)) {
+            if (!mat.libMaterialName) {
+              mat.libMaterialName = nextStmt.text.trim().replace(/;.*/, "").trim();
+              mat.libMaterialRange = nextStmt.range;
+              j = nextStmt.end + 1;
+              continue;
+            }
+            diagnostics.push({
+              severity: "error",
+              message: `MATR ${mat.number}: при NAME=${mat.nameLib} допускается только одно кодовое имя`,
+              code: "matr-dbm-mixed",
+              range: nextStmt.range,
+            });
             j = nextStmt.end + 1;
             continue;
           }
@@ -732,6 +800,18 @@ export function parseDocument(text: string, options: ParseOptions): DocumentAst 
       inG2mpCartogram = false;
     }
 
+    const looksZone = looksLikeZoneStatement(stmt.text);
+    // Метки T/P/O/M/E/I/F+цифры — и NET-картограммы, и допустимые имена зон.
+    // Пропускаем как зону только если строка НЕ выглядит как зона (как уже сделано для F).
+    const skipNetPointerAsZone =
+      (/^T\d+/i.test(label) ||
+        /^P\d+/i.test(label) ||
+        /^O\d+/i.test(label) ||
+        /^M\d+/i.test(label) ||
+        /^E-?\d+/i.test(label) ||
+        /^I-?\d+/i.test(label) ||
+        /^F-?\d+/i.test(label)) &&
+      !looksZone;
     const skipAsZone =
       label === "EQU" ||
       label === "SET" ||
@@ -742,14 +822,8 @@ export function parseDocument(text: string, options: ParseOptions): DocumentAst 
       label === "LBLACK" ||
       ((inMaterialBlock || currentFragment === "physical") && looksLikeNuclideLine(stmt.text)) ||
       currentFragment !== "geometry" ||
-      (isKnownMcuLabel(label) && !looksLikeZoneStatement(stmt.text)) ||
-      /^T\d+/i.test(label) ||
-      /^P\d+/i.test(label) ||
-      /^O\d+/i.test(label) ||
-      /^M\d+/i.test(label) ||
-      /^E-?\d+/i.test(label) ||
-      /^I-?\d+/i.test(label) ||
-      (/^F-?\d+/i.test(label) && !looksLikeZoneStatement(stmt.text)) ||
+      (isKnownMcuLabel(label) && !looksZone) ||
+      skipNetPointerAsZone ||
       (inG2mpCartogram && isG2mpCartogramRow(label));
     const isZoneStmt = !BODY_KEYS.has(label) && /^[A-Za-z]/.test(label) && !skipAsZone;
     if (isZoneStmt) {
@@ -794,7 +868,12 @@ export function parseDocument(text: string, options: ParseOptions): DocumentAst 
       isBodyStmt ||
       isZoneStmt ||
       isIgnorableAuxLine(stmt.text) ||
+      inInlineDbm(stmt.range.start.line) ||
       ((inMaterialBlock || currentFragment === "physical") && looksLikeNuclideLine(stmt.text)) ||
+      // Кодовое имя из .DBM (§8.11): строка без dens, уже снята в MATR как libMaterialName.
+      (inMaterialBlock &&
+        looksLikeLibMaterialCodeLine(stmt.text) &&
+        isDbmLibraryName(materials[materials.length - 1]?.nameLib)) ||
       /^T\d+/i.test(label) ||
       /^P\d+/i.test(label) ||
       /^O\d+/i.test(label) ||
@@ -849,10 +928,14 @@ export function parseDocument(text: string, options: ParseOptions): DocumentAst 
     });
   }
 
+  const cpm = collectCpmBlocks(statements, materials);
+  diagnostics.push(...cpm.diagnostics);
+
   return {
     uri: options.uri,
     statements,
     materials,
+    cpmBlocks: cpm.blocks,
     bodies,
     zones,
     constants,

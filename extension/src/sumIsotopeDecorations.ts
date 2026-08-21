@@ -10,8 +10,6 @@
  */
 
 import * as vscode from "vscode";
-import * as fs from "fs";
-import * as path from "path";
 
 export interface SumIsotopeRange {
   start: { line: number; character: number };
@@ -228,61 +226,19 @@ export function applySumIsotopeDecorations(
   decorationType: vscode.TextEditorDecorationType,
   nuclides: SumIsotopeNuclideDecoration[]
 ): void {
-  // #region agent log
-  const _dbgT0 = Date.now();
-  // #endregion
   const opts: vscode.DecorationOptions[] = [];
   const lineCount = editor.document.lineCount;
-  let miss = 0;
   for (const n of nuclides) {
     if (n.range.start.line < 0 || n.range.start.line >= lineCount) continue;
     const r =
       nuclideCompositionEditorRange(editor.document, n.name, n.range) ?? markRangeFallback(n, lineCount);
-    if (!r) {
-      miss++;
-      continue;
-    }
+    if (!r) continue;
     opts.push({
       range: r,
       hoverMessage: sumIsotopeHoverMessage(n),
     });
   }
   editor.setDecorations(decorationType, opts);
-  // #region agent log
-  {
-    const payload = {
-      sessionId: "f91ac2",
-      runId: "post-fix4",
-      hypothesisId: "B",
-      location: "sumIsotopeDecorations.ts:applySumIsotopeDecorations",
-      message: "setDecorations done",
-      data: { input: nuclides.length, painted: opts.length, miss, ms: Date.now() - _dbgT0 },
-      timestamp: Date.now(),
-    };
-    fetch("http://127.0.0.1:7911/ingest/3304a270-bbbf-4e90-96de-6ba27b8f72bf", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "f91ac2" },
-      body: JSON.stringify(payload),
-    }).catch(() => {});
-    try {
-      const roots = new Set<string>();
-      roots.add(path.join(__dirname, "..", ".."));
-      for (const f of vscode.workspace.workspaceFolders ?? []) {
-        roots.add(f.uri.fsPath);
-      }
-      const line = JSON.stringify(payload) + "\n";
-      for (const root of roots) {
-        try {
-          fs.appendFileSync(path.join(root, "debug-f91ac2.log"), line);
-        } catch {
-          /* ignore one root */
-        }
-      }
-    } catch {
-      /* ignore */
-    }
-  }
-  // #endregion
 }
 
 export function clearSumIsotopeDecorations(

@@ -15,7 +15,7 @@ import {
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { fileURLToPath } from "url";
-import { getDocumentIndex, clearDocument, rebuildCachedSummaries } from "@mcuhelper/mcu-language";
+import { getDocumentIndex, clearDocument, rebuildCachedSummaries, clearDbmCache, setDbmLibRoot } from "@mcuhelper/mcu-language";
 import { getCompletions, getDefinition, getHoverContent } from "./completion";
 import { findReferences, prepareRename, renameSymbol } from "./symbolRefs";
 import { getSignatureHelp } from "./signatureHelp";
@@ -133,6 +133,7 @@ function snapshotLibraryReportsFromCache(): LibraryVerificationReports {
 
 async function syncAwLibFromSettings(): Promise<void> {
   const libPath = globalSettings.mcuConstantsLibPath ?? "";
+  setDbmLibRoot(libPath || null);
   if (libPath === awLibSyncedPath) {
     await libraryCoreGate;
     return;
@@ -712,6 +713,29 @@ connection.onRequest("mcuhelper/revalidateAllOpen", async () => {
     count++;
   }
   return count;
+});
+
+/**
+ * После create/change/delete *.DBM в корне MDBNR: сброс кэша библиотек материалов,
+ * пересчёт summaries (ρ / dbm.exists) и диагностика открытых документов.
+ */
+connection.onRequest("mcuhelper/reloadDbmLibraries", async () => {
+  setDbmLibRoot(globalSettings.mcuConstantsLibPath ?? null);
+  clearDbmCache();
+  const openUris = documents.all().map((d) => d.uri);
+  const rebuilt = rebuildCachedSummaries(openUris.length > 0 ? openUris : undefined);
+  for (const doc of documents.all()) {
+    clearDiagnosticTimer(doc.uri);
+  }
+  for (const doc of documents.all()) {
+    await validateTextDocument(doc);
+  }
+  connection.sendNotification("mcuhelper/librariesSynced", {
+    rebuiltSummaries: rebuilt,
+    reason: "dbm",
+  });
+  connection.console.info(`[DBM] cache cleared, summaries rebuilt: ${rebuilt}`);
+  return { ok: true, rebuilt };
 });
 
 connection.onRequest("mcuhelper/getLibraryVerificationReports", () => getLibraryVerificationReports());

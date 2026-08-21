@@ -19,6 +19,7 @@ import { registerTemplateInsert } from "./templateInsert";
 import { buildCatalogPayload } from "./catalogBridge";
 import { registerDiagnosticNavigation, fetchMcuDiagnostics } from "./diagnosticNavigation";
 import { registerIncludePreview, setIncludeDocumentOpenedHandler } from "./includePreview";
+import { registerDbmPreview } from "./dbmPreview";
 import { registerMatrCodeLens, updateMatrCodeLensIndex, sameDocumentUri } from "./matrCodeLens";
 import { clearLanguageDetectState, scheduleLanguageDetectOnEdit } from "./languageDetectScheduler";
 import { registerRunPanel, type RunPanelViewProvider } from "./runPanelView";
@@ -28,6 +29,7 @@ import { batchValidateInput } from "./batchValidateCommand";
 import { resolvePostRunOpenTarget, shouldFocusDiagnosticsAfterRun } from "./runPanelHelpers";
 import { runRegistrationBuilder } from "./registrationBuilderCommand";
 import { runBodyGenerator } from "./bodyGeneratorCommand";
+import { registerLatticeGenerator, runLatticeGenerator } from "./latticeGeneratorCommand";
 import { registerBodyLivePreview, runBodyLivePreview } from "./bodyLivePreviewCommand";
 import { runWaterSteam } from "./waterSteamCommand";
 import { runMaterialsBuilder } from "./materialsBuilderCommand";
@@ -36,7 +38,9 @@ import { checkForExtensionUpdates } from "./updateCheck";
 import { checkMaterialsCompendiumUpdate } from "./materialsCompendiumStore";
 import { showIncludeGraph } from "./includeGraphCommand";
 import { compareResults } from "./compareResultsCommand";
+import { registerSendMaterialToDbm } from "./sendToDbm";
 import { registerMcuCodeActions } from "./codeActions";
+import { watchDbmLibraryRoot } from "./dbmLibWatch";
 import {
   applySumIsotopeDecorations,
   clearSumIsotopeDecorations,
@@ -249,12 +253,15 @@ export function activate(context: vscode.ExtensionContext): void {
     },
     refreshUi: () => scheduleRefresh("all"),
   });
+  registerSendMaterialToDbm(context, () => client);
   registerTemplateInsert(context);
   registerDiagnosticNavigation(context, () => client);
   registerIncludePreview(context);
+  registerDbmPreview(context);
   registerMatrCodeLens(context);
   registerWaterSteamFocusTracker(context);
   registerBodyLivePreview(context, client);
+  registerLatticeGenerator(context, client);
   sidebarProviders = createSidebarProviders(context, client);
   setIncludeDocumentOpenedHandler(() => {
     if (sidebarProviders) refreshDiagnosticsSidebar(sidebarProviders);
@@ -293,6 +300,33 @@ export function activate(context: vscode.ExtensionContext): void {
   runStatusItem.text = "$(play-circle) MCU-NR";
   updateConfiguredPathsTooltips();
   context.subscriptions.push(runStatusItem);
+
+  let dbmLibWatch: vscode.Disposable | undefined;
+  const reloadDbmFromDisk = async () => {
+    if (!client || client.state !== State.Running) return;
+    try {
+      await client.sendRequest<{ ok: boolean; rebuilt: number }>("mcuhelper/reloadDbmLibraries");
+    } catch {
+      // старый бандл сервера без reloadDbmLibraries
+    }
+    scheduleRefresh("all");
+  };
+  const rebindDbmLibWatch = () => {
+    dbmLibWatch?.dispose();
+    dbmLibWatch = undefined;
+    const libRoot = (vscode.workspace.getConfiguration("mcuhelper").get<string>("mcuConstantsLibPath") ?? "").trim();
+    if (!libRoot) return;
+    dbmLibWatch = watchDbmLibraryRoot(libRoot, () => {
+      void reloadDbmFromDisk();
+    });
+  };
+  rebindDbmLibWatch();
+  context.subscriptions.push({
+    dispose() {
+      dbmLibWatch?.dispose();
+    },
+  });
+
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (
@@ -300,11 +334,14 @@ export function activate(context: vscode.ExtensionContext): void {
         e.affectsConfiguration("mcuhelper.mcuConstantsLibPath")
       ) {
         updateConfiguredPathsTooltips();
-        if (e.affectsConfiguration("mcuhelper.mcuConstantsLibPath") && helperOutput && client) {
-          // Дать LSP применить settings, затем забрать свежий отчёт T1/2.
-          setTimeout(() => {
-            void pullLibraryReportsToOutput(helperOutput!);
-          }, 800);
+        if (e.affectsConfiguration("mcuhelper.mcuConstantsLibPath")) {
+          rebindDbmLibWatch();
+          if (helperOutput && client) {
+            // Дать LSP применить settings, затем забрать свежий отчёт T1/2.
+            setTimeout(() => {
+              void pullLibraryReportsToOutput(helperOutput!);
+            }, 800);
+          }
         }
       }
     })
@@ -343,6 +380,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("mcuhelper.burnup", () => runMcuStepCommand("b")),
     vscode.commands.registerCommand("mcuhelper.registrationBuilder", () => runRegistrationBuilder(context, client)),
     vscode.commands.registerCommand("mcuhelper.bodyGenerator", () => runBodyGenerator(context, client)),
+    vscode.commands.registerCommand("mcuhelper.latticeGenerator", () => runLatticeGenerator(context, client)),
     vscode.commands.registerCommand("mcuhelper.bodyLivePreview", () => runBodyLivePreview(context, client)),
     vscode.commands.registerCommand("mcuhelper.waterSteam", () => runWaterSteam(context, client)),
     vscode.commands.registerCommand("mcuhelper.materialsBuilder", () => runMaterialsBuilder(context, client)),

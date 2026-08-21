@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import { analyzeDocument } from "@mcuhelper/mcu-language";
 import {
@@ -169,6 +170,71 @@ describe("navData", () => {
     assert.ok(tree[0]!.description?.includes("2 нукл."));
   });
 
+  it("materials tree groups DBM code-name materials separately", () => {
+    const payload = richPayload();
+    payload.summaries.materials.push({
+      number: 2,
+      nuclideCount: 3,
+      usedNuclideCount: 3,
+      sumIsotopeCount: 0,
+      sumIsotopeUsedCount: 0,
+      sumIsotopeMissingAwLibCount: 0,
+      nuclidesPreview: "UO2",
+      massDensityGcm3: null,
+      volumeCm3: null,
+      massG: null,
+      nameLib: "MYMAT",
+      libMaterialName: "UO2",
+      dbm: {
+        library: "MYMAT",
+        material: "UO2",
+        exists: false,
+        fsPath: "C:\\MDB\\MYMAT.DBM",
+        range: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } },
+      },
+      nuclides: [
+        {
+          name: "U235",
+          concentration: "0.0008255",
+          range: { start: { line: 1, character: 0 }, end: { line: 1, character: 4 } },
+        },
+      ],
+      range: { start: { line: 10, character: 0 }, end: { line: 10, character: 20 } },
+    });
+    const tree = buildMaterialsTree(payload, "file:///t.mcu");
+    assert.equal(tree.length, 2);
+    assert.equal(tree[0]!.label, "Состав");
+    assert.equal(tree[1]!.label, "Кодовые имена (.DBM)");
+    const dbmCard = tree[1]!.children![0]!;
+    assert.ok(dbmCard.label.includes("UO2"));
+    assert.ok(dbmCard.children?.some((c) => c.label === "UO2"));
+  });
+
+  it("materials tree appends MDBNR DBM catalog with insert snippets", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mcu-nav-dbm-"));
+    try {
+      fs.writeFileSync(
+        path.join(tmp, "GRAPHI.DBM"),
+        "CARB17 1 2\nC12 1.0 A\n#\n",
+        "utf8"
+      );
+      const tree = buildMaterialsTree(richPayload(), "file:///t.mcu", undefined, tmp);
+      const catalog = tree.find((n) => n.id === "mat-group-dbm-catalog");
+      assert.ok(catalog, "ожидалась группа Библиотека MDBNR");
+      assert.equal(catalog!.label, "Библиотека MDBNR (.DBM)");
+      const lib = catalog!.children?.[0];
+      assert.equal(lib?.label, "GRAPHI.DBM");
+      const mat = lib?.children?.[0];
+      assert.equal(mat?.label, "CARB17");
+      assert.ok(mat?.insertText?.includes("NAME=GRAPHI"));
+      assert.ok(mat?.insertText?.includes("CARB17"));
+      assert.equal(mat?.insertFormat, "snippet");
+      assert.ok(mat?.action?.command === "mcuhelper.revealEditorRange");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("materials tree marks sum-isotope nuclides as muted", () => {
     const payload = richPayload();
     payload.summaries.materials[0]!.nuclides[0]!.sumIsotope = {
@@ -195,6 +261,23 @@ describe("navData", () => {
     assert.ok(desc.includes("в SI: 3"), desc);
     assert.ok(desc.includes("нет в AW: 1"), desc);
     assert.ok(!desc.includes("ρ:"), desc);
+  });
+
+  it("materials tree shows CPM number range and clicks to CPM card", () => {
+    const payload = richPayload();
+    const mat = payload.summaries.materials[0]!;
+    mat.cpm = {
+      repetitions: 3,
+      expandedNumbers: [1, 2, 3],
+      range: { start: { line: 10, character: 0 }, end: { line: 10, character: 5 } },
+      uri: "file:///t.mcu",
+    };
+    mat.group = undefined;
+    mat.temperature = undefined;
+    const tree = buildMaterialsTree(payload, "file:///t.mcu");
+    assert.strictEqual(tree[0]!.label, "1–3");
+    assert.ok(tree[0]!.description?.includes("CPM ×3"), tree[0]!.description);
+    assert.strictEqual(tree[0]!.range?.start.line, 10);
   });
 
   it("materials tree highlights sum-isotope nuclides missing in AW.LIB", () => {

@@ -27,6 +27,7 @@ function mockAst(partial: {
     uri: "test",
     constants: [],
     materials: [],
+    cpmBlocks: [],
     zones: [],
     lattices: [],
     statements: [],

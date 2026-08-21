@@ -1,6 +1,44 @@
 /** Дерево навигации для Webview sidebar (данные из LSP getIndex). */
 
+import * as fs from "fs";
+import * as path from "path";
+import { pathToFileURL } from "url";
 import { isGeoBodyLabel } from "./catalogBridge";
+
+type DbmCatalogApi = {
+  listDbmCatalog: (libRoot: string) => Array<{
+    library: string;
+    fsPath: string;
+    materials: Array<{
+      library: string;
+      code: string;
+      nuclideCount: number;
+      densType: 1 | 2;
+      headerLine: number;
+      fsPath: string;
+      nuclidesPreview: string;
+    }>;
+  }>;
+  buildMatrDbmInsertSnippet: (
+    libraryName: string,
+    materialCode: string,
+    suggestedNumber?: number
+  ) => string;
+};
+
+function loadDbmCatalogApi(): DbmCatalogApi | null {
+  const candidates = [
+    path.join(__dirname, "..", "vendor", "mcu-language", "dbmLib.js"),
+    path.join(__dirname, "..", "..", "packages", "mcu-language", "dist", "dbmLib.js"),
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      return require(p) as DbmCatalogApi;
+    }
+  }
+  return null;
+}
 
 export interface SourceRange {
   start: { line: number; character: number };
@@ -31,6 +69,9 @@ export interface NavTreeNode {
     command: string;
     args?: unknown;
   };
+  /** Текст для drag-and-drop / клика (как в каталоге карт). */
+  insertText?: string;
+  insertFormat?: "snippet" | "plain";
 }
 
 export interface IndexPayload {
@@ -93,6 +134,17 @@ export interface IndexPayload {
       number: number;
       group?: string;
       temperature?: number;
+      nameLib?: string;
+      libMaterialName?: string;
+      libMaterialRange?: SourceRange;
+      dbm?: {
+        library: string;
+        material: string;
+        uri?: string;
+        fsPath?: string;
+        exists: boolean;
+        range: SourceRange;
+      };
       nuclideCount: number;
       usedNuclideCount?: number;
       sumIsotopeCount?: number;
@@ -112,6 +164,13 @@ export interface IndexPayload {
       }>;
       range: SourceRange;
       uri?: string;
+      /** CPM…CPMEND: размноженные номера и range карты CPM (клик в sidebar). */
+      cpm?: {
+        repetitions: number;
+        expandedNumbers: number[];
+        range: SourceRange;
+        uri?: string;
+      };
     }>;
     zones: Array<{
       name: string;
@@ -243,7 +302,34 @@ const FRAGMENT_META = {
   burnup: { label: "BURN", title: "Выгорание" },
 } as const;
 
-const MATR_BLOCK_STOP_LABELS = new Set(["MATR", "END", "FINISH", "DEF", "TEMPR", "PIN"]);
+const MATR_BLOCK_STOP_LABELS = new Set(["MATR", "END", "FINISH", "DEF", "TEMPR", "PIN", "CPM", "CPMEND"]);
+
+/** Диапазон/список номеров CPM для label в sidebar (зеркало mcu-language/cpmBlocks). */
+export function formatCpmNumberRange(numbers: readonly number[]): string {
+  if (numbers.length === 0) return "";
+  if (numbers.length === 1) return String(numbers[0]);
+  const sorted = [...numbers].sort((a, b) => a - b);
+  let contiguous = true;
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i]! !== sorted[i - 1]! + 1) {
+      contiguous = false;
+      break;
+    }
+  }
+  if (contiguous) return `${sorted[0]}–${sorted[sorted.length - 1]}`;
+  const step = sorted[1]! - sorted[0]!;
+  let arithmetic = step > 0;
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i]! - sorted[i - 1]! !== step) {
+      arithmetic = false;
+      break;
+    }
+  }
+  if (arithmetic && sorted.length > 3) {
+    return `${sorted[0]},${sorted[1]},…,${sorted[sorted.length - 1]}`;
+  }
+  return sorted.join(",");
+}
 
 function formatBodyScope(scope?: string): string {
   if (!scope || scope === "global") return "Общие";
@@ -561,13 +647,20 @@ export function buildFragmentsTree(index: IndexPayload, uri: string): NavTreeNod
 export function buildMaterialsTree(
   index: IndexPayload,
   uri: string,
-  suggestSumIsotope?: ReadonlySet<string>
+  suggestSumIsotope?: ReadonlySet<string>,
+  constantsLibPath?: string
 ): NavTreeNode[] {
-  return index.summaries.materials.map((m) => {
+  const libRoot = (constantsLibPath ?? "").trim();
+
+  const buildMatNode = (m: IndexPayload["summaries"]["materials"][number]): NavTreeNode => {
     const rho = formatMaterialDensity(m.massDensityGcm3);
     const vol = formatBodyVolume(m.volumeCm3);
     const mass = formatMaterialMass(m.massG);
     const parts = formatMaterialNuclideCounts(m);
+    if (m.cpm) parts.unshift(`CPM ×${m.cpm.repetitions}`);
+    if (m.libMaterialName) parts.unshift(m.libMaterialName);
+    if (m.dbm?.library) parts.push(`${m.dbm.library}.DBM`);
+    else if (m.nameLib && m.libMaterialName) parts.push(`${m.nameLib}.DBM`);
     if (rho) parts.push(rho);
     if (m.volumeCm3 != null && vol) parts.push(vol);
     if (mass) parts.push(mass);
@@ -576,10 +669,85 @@ export function buildMaterialsTree(
     }
     const badges: string[] = [];
     if (rho) badges.push(rho.replace("ρ≈", "ρ "));
+    if (m.libMaterialName) badges.push("DBM");
     const titleParts: string[] = [];
     if (m.group) titleParts.push(`[${m.group}]`);
+    if (m.cpm?.expandedNumbers?.length) {
+      titleParts.push(formatCpmNumberRange(m.cpm.expandedNumbers));
+    }
+    if (m.libMaterialName) {
+      if (!m.cpm?.expandedNumbers?.length) titleParts.push(String(m.number));
+      titleParts.push(m.libMaterialName);
+    }
     if (m.temperature != null) titleParts.push(`T=${m.temperature}`);
-    const click = sidebarClickTarget(index, uri, m.uri, m.range);
+    // CPM: клик по карточке материала → карта CPM; иначе → MATR.
+    const clickTargetUri = m.cpm?.uri ?? m.uri;
+    const clickTargetRange = m.cpm?.range ?? m.range;
+    const click = sidebarClickTarget(index, uri, clickTargetUri, clickTargetRange);
+
+    const dbmOpen = m.libMaterialName ? resolveDbmOpenTarget(m, libRoot) : null;
+    const children: NavTreeNode[] = [];
+    if (m.libMaterialName && dbmOpen) {
+      children.push({
+        id: `mat-${m.number}-code`,
+        label: m.libMaterialName,
+        description: dbmOpen.exists
+          ? `библиотека ${dbmOpen.library}.DBM`
+          : dbmOpen.library
+            ? `${dbmOpen.library}.DBM не найден`
+            : "кодовое имя .DBM",
+        muted: !dbmOpen.exists,
+        warning: Boolean(dbmOpen.library) && !dbmOpen.exists,
+        tooltip: dbmOpen.fsPath || undefined,
+        uri: dbmOpen.uri ?? (m.libMaterialRange ? click.uri : undefined),
+        range: dbmOpen.uri
+          ? dbmOpen.range
+          : m.libMaterialRange
+            ? sidebarClickTarget(index, uri, m.uri, m.libMaterialRange).range
+            : click.range,
+      });
+    }
+    for (const [i, n] of m.nuclides.entries()) {
+      const suggestKey = `${n.range.start.line}:${n.name.toUpperCase()}`;
+      const suggest = Boolean(suggestSumIsotope?.has(suggestKey)) && !n.sumIsotope;
+      const sumMissingAw = n.sumIsotope?.inAwLib === false;
+      const sumInAw = Boolean(n.sumIsotope) && n.sumIsotope?.inAwLib !== false;
+      const nClick = sidebarClickTarget(index, uri, n.uri ?? m.uri, n.range);
+      const openDbm = Boolean(m.libMaterialName && dbmOpen?.uri);
+      const child: NavTreeNode = {
+        id: `mat-${m.number}-n-${i}`,
+        label: sumMissingAw ? `Σ! ${n.name}` : sumInAw ? `Σ ${n.name}` : n.name,
+        description: sumMissingAw
+          ? `нет в AW.LIB · ${n.concentration} яд/см³`
+          : sumInAw
+            ? `в суммарном изотопе · ${n.concentration} яд/см³`
+            : `${n.concentration} яд/см³`,
+        muted: sumInAw || Boolean(m.libMaterialName),
+        warning: sumMissingAw,
+        tooltip: m.libMaterialName
+          ? `из ${m.nameLib ?? m.dbm?.library}.DBM`
+          : sumMissingAw
+            ? ["нет в AW.LIB", ...(n.sumIsotope?.reasons ?? [])].join("; ")
+            : n.sumIsotope?.reasons?.join("; "),
+        uri: openDbm ? dbmOpen!.uri : nClick.uri,
+        range: openDbm ? dbmOpen!.range : nClick.range,
+      };
+      if (suggest) {
+        child.action = {
+          id: "add-to-si",
+          label: "В SI",
+          title: "Добавить в суммарный изотоп",
+          command: "mcuhelper.addToSumIsotope",
+          args: {
+            uri: n.uri ?? m.uri ?? uri,
+            line: n.range.start.line,
+            nuclideName: n.name,
+          },
+        };
+      }
+      children.push(child);
+    }
+
     return {
       id: `mat-${m.number}`,
       label: titleParts.length > 0 ? titleParts.join(" ") : `MATR ${m.number}`,
@@ -587,45 +755,167 @@ export function buildMaterialsTree(
       badges: badges.length ? badges : undefined,
       uri: click.uri,
       range: click.range,
-      children: m.nuclides.map((n, i) => {
-        const suggestKey = `${n.range.start.line}:${n.name.toUpperCase()}`;
-        const suggest = Boolean(suggestSumIsotope?.has(suggestKey)) && !n.sumIsotope;
-        const sumMissingAw = n.sumIsotope?.inAwLib === false;
-        const sumInAw = Boolean(n.sumIsotope) && n.sumIsotope?.inAwLib !== false;
-        const nClick = sidebarClickTarget(index, uri, n.uri ?? m.uri, n.range);
-        const child: NavTreeNode = {
-          id: `mat-${m.number}-n-${i}`,
-          label: sumMissingAw ? `Σ! ${n.name}` : sumInAw ? `Σ ${n.name}` : n.name,
-          description: sumMissingAw
-            ? `нет в AW.LIB · ${n.concentration} яд/см³`
-            : sumInAw
-              ? `в суммарном изотопе · ${n.concentration} яд/см³`
-              : `${n.concentration} яд/см³`,
-          muted: sumInAw,
-          warning: sumMissingAw,
-          tooltip: sumMissingAw
-            ? ["нет в AW.LIB", ...(n.sumIsotope?.reasons ?? [])].join("; ")
-            : n.sumIsotope?.reasons?.join("; "),
-          uri: nClick.uri,
-          range: nClick.range,
-        };
-        if (suggest) {
-          child.action = {
-            id: "add-to-si",
-            label: "В SI",
-            title: "Добавить в суммарный изотоп",
-            command: "mcuhelper.addToSumIsotope",
-            args: {
-              uri: n.uri ?? m.uri ?? uri,
-              line: n.range.start.line,
-              nuclideName: n.name,
-            },
-          };
-        }
-        return child;
-      }),
+      tooltip: m.cpm
+        ? `CPM ×${m.cpm.repetitions}: номера ${formatCpmNumberRange(m.cpm.expandedNumbers)}`
+        : m.libMaterialName
+          ? `Кодовое имя из ${(m.nameLib ?? m.dbm?.library) || "?"}.DBM (UserGuide §8.11)`
+          : undefined,
+      children,
     };
-  });
+  };
+
+  const all = index.summaries.materials;
+  const dbmMats = all.filter((m) => Boolean(m.libMaterialName));
+  const plainMats = all.filter((m) => !m.libMaterialName);
+
+  let roots: NavTreeNode[];
+  // Отдельная группа только если есть материалы из .DBM.
+  if (dbmMats.length === 0) {
+    roots = all.map(buildMatNode);
+  } else {
+    roots = [];
+    if (plainMats.length > 0) {
+      roots.push({
+        id: "mat-group-compose",
+        label: "Состав",
+        description: `${plainMats.length}`,
+        children: plainMats.map(buildMatNode),
+      });
+    }
+    roots.push({
+      id: "mat-group-dbm",
+      label: "Кодовые имена (.DBM)",
+      description: `${dbmMats.length}`,
+      children: dbmMats.map(buildMatNode),
+    });
+  }
+
+  const catalog = buildDbmLibraryCatalogTree(libRoot, nextSuggestedMatrNumber(all));
+  if (catalog) roots.push(catalog);
+  return roots;
+}
+
+function nextSuggestedMatrNumber(
+  materials: IndexPayload["summaries"]["materials"]
+): number {
+  let max = 0;
+  for (const m of materials) {
+    max = Math.max(max, m.number || 0);
+    for (const n of m.cpm?.expandedNumbers ?? []) {
+      max = Math.max(max, n);
+    }
+  }
+  return max > 0 ? max + 1 : 1;
+}
+
+/** Каталог всех материалов из *.DBM в MDBNR — drag/клик вставляет `MATR N NAME=lib` + код. */
+function buildDbmLibraryCatalogTree(
+  libRoot: string,
+  suggestedNumber: number
+): NavTreeNode | null {
+  const root = libRoot?.trim();
+  if (!root) return null;
+  const api = loadDbmCatalogApi();
+  if (!api?.listDbmCatalog || !api.buildMatrDbmInsertSnippet) return null;
+
+  let catalog;
+  try {
+    catalog = api.listDbmCatalog(root);
+  } catch {
+    return null;
+  }
+  if (!catalog.length) return null;
+
+  const libNodes: NavTreeNode[] = [];
+  let totalMats = 0;
+  for (const lib of catalog) {
+    totalMats += lib.materials.length;
+    const uri = pathToFileURL(lib.fsPath).href;
+    libNodes.push({
+      id: `dbm-catalog-${lib.library}`,
+      label: `${lib.library}.DBM`,
+      description: `${lib.materials.length}`,
+      tooltip: lib.fsPath,
+      children: lib.materials.map((mat) => {
+        const range: SourceRange = {
+          start: { line: mat.headerLine, character: 0 },
+          end: { line: mat.headerLine, character: Math.max(mat.code.length, 1) },
+        };
+        const densLabel = mat.densType === 1 ? "A" : "W";
+        return {
+          id: `dbm-catalog-${lib.library}-${mat.code}`,
+          label: mat.code,
+          description: `${mat.nuclideCount} нукл. · dens ${densLabel}`,
+          tooltip: [
+            `Перетащите или кликните — вставить:`,
+            `MATR N NAME=${lib.library}`,
+            mat.code,
+            mat.nuclidesPreview ? `нуклиды: ${mat.nuclidesPreview}` : "",
+            lib.fsPath,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+          insertText: api.buildMatrDbmInsertSnippet(lib.library, mat.code, suggestedNumber),
+          insertFormat: "snippet" as const,
+          action: {
+            id: "open-dbm",
+            label: "↗",
+            title: `Открыть ${lib.library}.DBM`,
+            command: "mcuhelper.revealEditorRange",
+            args: [uri, range],
+          },
+        };
+      }),
+    });
+  }
+
+  return {
+    id: "mat-group-dbm-catalog",
+    label: "Библиотека MDBNR (.DBM)",
+    description: `${totalMats}`,
+    tooltip: "Материалы из *.DBM в корне MDBNR — перетащите в редактор",
+    children: libNodes,
+  };
+}
+
+function resolveDbmOpenTarget(
+  m: IndexPayload["summaries"]["materials"][number],
+  libRoot: string
+): {
+  library: string;
+  fsPath?: string;
+  uri?: string;
+  exists: boolean;
+  range: SourceRange;
+} {
+  const library = m.dbm?.library ?? m.nameLib ?? "";
+  const range = m.dbm?.range ?? {
+    start: { line: 0, character: 0 },
+    end: { line: 0, character: 0 },
+  };
+  if (m.dbm?.uri && m.dbm.exists) {
+    return { library, fsPath: m.dbm.fsPath, uri: m.dbm.uri, exists: true, range };
+  }
+  let fsPath = m.dbm?.fsPath;
+  let exists = Boolean(m.dbm?.exists);
+  if (libRoot && library) {
+    const preferred = path.join(libRoot, `${library}.DBM`);
+    if (fs.existsSync(preferred)) {
+      fsPath = preferred;
+      exists = true;
+    } else {
+      const lower = path.join(libRoot, `${library}.dbm`);
+      if (fs.existsSync(lower)) {
+        fsPath = lower;
+        exists = true;
+      } else if (!fsPath) {
+        fsPath = preferred;
+        exists = false;
+      }
+    }
+  }
+  const uri = fsPath && exists ? pathToFileURL(fsPath).href : undefined;
+  return { library, fsPath, uri, exists, range };
 }
 
 /** Хвост фигуры зоны: рег./объектный указатель и номер материала (UserGuide §9.1.4). */
@@ -1034,13 +1324,14 @@ export function buildNavTree(
   viewId: NavViewId,
   index: IndexPayload,
   uri: string,
-  suggestSumIsotope?: ReadonlySet<string>
+  suggestSumIsotope?: ReadonlySet<string>,
+  constantsLibPath?: string
 ): NavTreeNode[] {
   switch (viewId) {
     case "fragments":
       return buildFragmentsTree(index, uri);
     case "materials":
-      return buildMaterialsTree(index, uri, suggestSumIsotope);
+      return buildMaterialsTree(index, uri, suggestSumIsotope, constantsLibPath);
     case "zones":
       return buildZonesTree(index, uri);
     case "objects":

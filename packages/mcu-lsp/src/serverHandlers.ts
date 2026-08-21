@@ -33,7 +33,7 @@ import {
   type IncludeGraphNode,
   type SourceRange,
 } from "@mcuhelper/mcu-language";
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 import { isGeoBodyLabel } from "@mcuhelper/mcu-schema";
 import { buildLiveZonePreview, buildScene, buildSliceGrid, queryPoint } from "@mcuhelper/mcu-geometry";
 import type { SliceAxis } from "@mcuhelper/mcu-geometry";
@@ -141,7 +141,7 @@ export function toLspDiagnostic(d: DiagnosticMessage, documentUri?: string): Dia
 const PROFILE_PARSE = process.env.MCUHELPER_PROFILE === "1";
 
 
-const MATR_BLOCK_STOP_LABELS = new Set(["MATR", "END", "FINISH", "DEF", "TEMPR", "PIN"]);
+const MATR_BLOCK_STOP_LABELS = new Set(["MATR", "END", "FINISH", "DEF", "TEMPR", "PIN", "CPM", "CPMEND"]);
 
 function isDataRowLabel(label: string): boolean {
   return (
@@ -327,7 +327,47 @@ export function projectNavMaterials(
         },
       };
     });
-    out.push({ ...mapped, nuclides });
+    let cpm = m.cpm;
+    if (cpm) {
+      const cloc = rangeToEditorLocation(index, cpm.range);
+      if (cloc) {
+        cpm = {
+          ...cpm,
+          uri: cloc.uri,
+          range: {
+            ...cpm.range,
+            start: cloc.range.start,
+            end: cloc.range.end,
+          },
+        };
+      }
+    }
+    let dbm = m.dbm;
+    if (dbm?.fsPath && dbm.exists && !dbm.uri) {
+      try {
+        dbm = { ...dbm, uri: pathToFileURL(dbm.fsPath).href };
+      } catch {
+        /* ignore */
+      }
+    }
+    let libMaterialRange = m.libMaterialRange;
+    if (libMaterialRange) {
+      const lloc = rangeToEditorLocation(index, libMaterialRange);
+      if (lloc) {
+        libMaterialRange = {
+          ...libMaterialRange,
+          start: lloc.range.start,
+          end: lloc.range.end,
+        };
+      }
+    }
+    out.push({
+      ...mapped,
+      nuclides,
+      ...(cpm ? { cpm } : {}),
+      ...(dbm ? { dbm } : {}),
+      ...(libMaterialRange ? { libMaterialRange } : {}),
+    });
   }
   return out;
 }
@@ -1048,7 +1088,7 @@ export function buildDocumentSymbols(index: DocumentIndex, uri: string): SymbolI
   return symbols;
 }
 
-const MATERIAL_BLOCK_STOP_LABELS = new Set(["MATR", "END", "FINISH", "DEF", "TEMPR", "PIN"]);
+const MATERIAL_BLOCK_STOP_LABELS = new Set(["MATR", "END", "FINISH", "DEF", "TEMPR", "PIN", "CPM", "CPMEND"]);
 
 /** Конец блока LATT (не LISTEL/PARM/LFIXSO и не строки /n картограммы). */
 const LATT_BLOCK_STOP_LABELS = new Set([

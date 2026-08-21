@@ -1,3 +1,5 @@
+import * as fs from "fs";
+import * as path from "path";
 import * as vscode from "vscode";
 import { formatMaterialNuclideCounts, type IndexPayload } from "./navData";
 
@@ -140,6 +142,7 @@ export function buildMatrCodeLenses(
     if (!title) continue;
 
     const tipParts = [`MATR ${m.number}`];
+    if (m.libMaterialName) tipParts.push(m.libMaterialName);
     if (m.nuclidesPreview) tipParts.push(m.nuclidesPreview);
     lenses.push(
       new vscode.CodeLens(range, {
@@ -156,7 +159,81 @@ export function buildMatrCodeLenses(
       })
     );
   }
+
+  // Как у #include: на кодовом имени — ↗ Открыть LIB.DBM
+  for (const m of materials) {
+    if (!m.libMaterialName) continue;
+    if (m.uri && !sameDocumentUri(m.uri, documentUri)) continue;
+    const codeLine = findLibMaterialCodeLine(document, m, lineCount);
+    if (codeLine < 0) continue;
+    const open = resolveDbmOpenLens(m, codeLine, document);
+    if (open) lenses.push(open);
+  }
+
   return lenses;
+}
+
+function findLibMaterialCodeLine(
+  document: vscode.TextDocument,
+  m: MatrLensMaterial,
+  lineCount: number
+): number {
+  const want = m.libMaterialName!.toUpperCase();
+  const hinted = m.libMaterialRange?.start.line;
+  if (hinted != null && hinted >= 0 && hinted < lineCount) {
+    if (document.lineAt(hinted).text.trim().toUpperCase() === want) return hinted;
+  }
+  const from = Math.max(0, m.range.start.line);
+  const to = Math.min(lineCount - 1, m.range.start.line + 12);
+  for (let L = from; L <= to; L++) {
+    if (document.lineAt(L).text.trim().toUpperCase() === want) return L;
+  }
+  return -1;
+}
+
+function resolveDbmOpenLens(
+  m: MatrLensMaterial,
+  codeLine: number,
+  document: vscode.TextDocument
+): vscode.CodeLens | null {
+  const library = m.dbm?.library ?? m.nameLib;
+  if (!library) return null;
+  const lineText = document.lineAt(codeLine).text;
+  const range = new vscode.Range(codeLine, 0, codeLine, lineText.length);
+  const fileLabel = `${library}.DBM`;
+
+  let targetUri = m.dbm?.uri;
+  if (!targetUri && m.dbm?.fsPath && m.dbm.exists) {
+    targetUri = vscode.Uri.file(m.dbm.fsPath).toString();
+  }
+  if (!targetUri) {
+    const libRoot = (vscode.workspace.getConfiguration("mcuhelper").get<string>("mcuConstantsLibPath") ?? "").trim();
+    if (libRoot) {
+      const preferred = path.join(libRoot, `${library}.DBM`);
+      const lower = path.join(libRoot, `${library}.dbm`);
+      const fsPath = fs.existsSync(preferred) ? preferred : fs.existsSync(lower) ? lower : "";
+      if (fsPath) targetUri = vscode.Uri.file(fsPath).toString();
+    }
+  }
+
+  const jumpRange = m.dbm?.range ?? {
+    start: { line: 0, character: 0 },
+    end: { line: 0, character: 0 },
+  };
+
+  if (targetUri) {
+    return new vscode.CodeLens(range, {
+      title: `↗ Открыть ${fileLabel}`,
+      tooltip: `Материал ${m.libMaterialName} из ${fileLabel}`,
+      command: "mcuhelper.revealEditorRange",
+      arguments: [targetUri, jumpRange],
+    });
+  }
+  return new vscode.CodeLens(range, {
+    title: `⚠ ${fileLabel} не найден`,
+    tooltip: `Ожидается ${fileLabel} в корне MDBNR (mcuhelper.mcuConstantsLibPath)`,
+    command: "mcuhelper.configureSolver",
+  });
 }
 
 class MatrCodeLensProvider implements vscode.CodeLensProvider {

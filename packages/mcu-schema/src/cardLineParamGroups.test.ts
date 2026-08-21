@@ -35,8 +35,10 @@ describe("cardLineParamGroups", () => {
     assert.ok(siden![0].documentation.includes("суммарный изотоп"));
   });
 
-  it("SI and SINOT have list param for sum isotope", () => {
+  it("SI/SINOT/ICE/ICENOT have list param groups", () => {
     assert.strictEqual(getCardLineParamGroups("SI")?.[0].label, "list");
     assert.strictEqual(getCardLineParamGroups("SINOT")?.[0].label, "list");
+    assert.strictEqual(getCardLineParamGroups("ICE")?.[0].label, "list");
+    assert.strictEqual(getCardLineParamGroups("ICENOT")?.[0].label, "list");
   });
 });

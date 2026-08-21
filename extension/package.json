@@ -140,6 +140,11 @@
           "default": true,
           "description": "Живое превью сечений при редактировании строки тела в варианте. Закрытая панель сама не откроется снова, пока не вызовете команду «Превью тела»."
         },
+        "mcuhelper.liveLatticeGenerator": {
+          "type": "boolean",
+          "default": true,
+          "description": "Автоматически открывать конструктор GLTL, когда курсор попадает в блок LATT GLTL. Закрытая панель сама не откроется снова, пока не вызовете команду «Конструктор решётки»."
+        },
         "mcuhelper.autoDetectLanguage": {
           "type": "boolean",
           "default": true,
@@ -291,6 +296,11 @@
         "icon": "$(symbol-misc)"
       },
       {
+        "command": "mcuhelper.latticeGenerator",
+        "title": "MCU-NR: Конструктор решётки GLTL",
+        "icon": "$(table)"
+      },
+      {
         "command": "mcuhelper.bodyLivePreview",
         "title": "MCU-NR: Превью тела",
         "icon": "$(eye)"
@@ -386,6 +396,11 @@
         "icon": "$(add)"
       },
       {
+        "command": "mcuhelper.sendMaterialToDbm",
+        "title": "MCU-NR: Отправить в DBM",
+        "icon": "$(export)"
+      },
+      {
         "command": "mcuhelper.revealEditorRange",
         "title": "MCU-NR: Перейти к фрагменту",
         "icon": "$(go-to-file)"
@@ -401,6 +416,14 @@
       {
         "command": "mcuhelper.openIncludeFile",
         "title": "MCU-NR: Открыть файл #include"
+      },
+      {
+        "command": "mcuhelper.expandDbmInline",
+        "title": "MCU-NR: Развернуть материал .DBM inline"
+      },
+      {
+        "command": "mcuhelper.collapseDbmInline",
+        "title": "MCU-NR: Свернуть материал .DBM"
       },
       {
         "command": "mcuhelper.insertTemplate",
@@ -512,6 +535,11 @@
           "group": "navigation@2"
         },
         {
+          "command": "mcuhelper.sendMaterialToDbm",
+          "when": "view == mcuhelper.materials",
+          "group": "navigation@3"
+        },
+        {
           "command": "mcuhelper.bodyGenerator",
           "when": "view == mcuhelper.bodies",
           "group": "navigation@1"
@@ -520,9 +548,19 @@
           "command": "mcuhelper.bodyLivePreview",
           "when": "view == mcuhelper.bodies",
           "group": "navigation@2"
+        },
+        {
+          "command": "mcuhelper.latticeGenerator",
+          "when": "view == mcuhelper.lattices",
+          "group": "navigation@1"
         }
       ],
       "editor/context": [
+        {
+          "command": "mcuhelper.sendMaterialToDbm",
+          "when": "editorLangId == mcunr",
+          "group": "mcuhelper@1"
+        },
         {
           "command": "mcuhelper.nextDiagnostic",
           "when": "editorLangId == mcunr",

@@ -43,12 +43,34 @@ export interface MaterialNode {
   label: string;
   temperature?: number;
   group?: string;
+  /**
+   * NAME= на MATR: MCU|ZA (формат имён) или имя файла .DBM ≤6 символов в корне MDBNR (§8.11).
+   */
   nameLib?: string;
+  /**
+   * Кодовое имя материала из библиотеки .DBM (единственная строка состава при NAME≠MCU|ZA).
+   */
+  libMaterialName?: string;
+  /** Диапазон строки с кодовым именем (в координатах документа). */
+  libMaterialRange?: SourceRange;
   densParam?: string;
   /** Значение DENSAA/DENSWA/DENSAW/DENSWW с карты MATR. */
   densValue?: number;
   nuclides: NuclideEntry[];
   range: SourceRange;
+}
+
+/** Блок размножения материалов CPM…CPMEND (UserGuide §8.8). */
+export interface CpmBlockNode {
+  kind: "cpmBlock";
+  /** Число повторений блока из карты `CPM n`. */
+  repetitions: number;
+  range: SourceRange;
+  endRange?: SourceRange;
+  /** Индексы в `DocumentAst.materials`. */
+  materialIndexes: number[];
+  /** Все номера материалов после размножения (уникальные, по возрастанию). */
+  expandedNumbers: number[];
 }
 
 export interface BodyNode {
@@ -224,6 +246,8 @@ export interface DocumentAst {
   uri: string;
   statements: StatementNode[];
   materials: MaterialNode[];
+  /** Блоки CPM…CPMEND в физическом модуле (UserGuide §8.8). */
+  cpmBlocks: CpmBlockNode[];
   bodies: BodyNode[];
   zones: ZoneNode[];
   constants: ConstantNode[];
@@ -256,6 +280,23 @@ export interface MaterialSummary {
   number: number;
   group?: string;
   temperature?: number;
+  /** NAME=MCU|ZA|.DBM (как в AST). */
+  nameLib?: string;
+  /** Кодовое имя из .DBM (§8.11). */
+  libMaterialName?: string;
+  libMaterialRange?: SourceRange;
+  /**
+   * Ссылка на файл .DBM в MDBNR (для клика в sidebar как у #include).
+   * Заполняется при известном корне библиотеки.
+   */
+  dbm?: {
+    library: string;
+    material: string;
+    uri?: string;
+    fsPath?: string;
+    exists: boolean;
+    range: SourceRange;
+  };
   nuclideCount: number;
   /** Сколько нуклидов реально пошло в расчёт ρ текущего материала. */
   usedNuclideCount: number;
@@ -287,6 +328,16 @@ export interface MaterialSummary {
   range: SourceRange;
   /** URI файла MATR (main или `#include`); задаёт getIndex для CodeLens. */
   uri?: string;
+  /**
+   * Материал внутри CPM…CPMEND: размноженные номера и карта CPM для клика в sidebar.
+   * UserGuide §8.8.
+   */
+  cpm?: {
+    repetitions: number;
+    expandedNumbers: number[];
+    range: SourceRange;
+    uri?: string;
+  };
 }
 
 export interface ZoneSummary {

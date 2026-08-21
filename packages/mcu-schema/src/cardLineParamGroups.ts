@@ -39,7 +39,11 @@ export const CARD_LINE_PARAM_GROUPS: Record<string, CardLineParamHint[]> = {
       documentation:
         "Произвольное символьное имя группы (напр. fuel, MOD, clad). Материалы с одной GROUP задаются в геометрии по имени группы; номер MATR внутри группы — внутренний.",
     },
-    { label: "NAME=MCU|ZA", documentation: "Формат имён нуклидов: MCU (по умолчанию) или ZA" },
+    {
+      label: "NAME=MCU|ZA|lib",
+      documentation:
+        "MCU|ZA — формат имён нуклидов; иначе имя файла .DBM (≤6 символов) в корне MDBNR (§8.11), состав — одно кодовое имя",
+    },
     { label: "DENSAA=…", documentation: "Ядерная плотность материала, режим атомных долей (яд/см³)" },
     { label: "DENSWA=…", documentation: "Плотность материала, г/см³, режим атомных долей" },
     { label: "DENSAW=…", documentation: "Ядерная плотность, режим весовых долей" },
@@ -72,6 +76,19 @@ export const CARD_LINE_PARAM_GROUPS: Record<string, CardLineParamHint[]> = {
       label: "value",
       documentation:
         "Порог ядерной плотности: нуклиды с плотностью меньше value входят в суммарный изотоп (UserGuide §8.5)",
+    },
+  ],
+  ICE: [
+    {
+      label: "list",
+      documentation: "Список элементов, подлежащих разложению на изотопы (UserGuide §8.7)",
+    },
+  ],
+  ICENOT: [
+    {
+      label: "list",
+      documentation:
+        "Список элементов, не подлежащих разложению на изотопы; пустой список / AAAA — разложение отключено (UserGuide §8.7)",
     },
   ],
 };

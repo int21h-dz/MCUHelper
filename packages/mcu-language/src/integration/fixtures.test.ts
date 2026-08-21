@@ -1371,10 +1371,17 @@ describe("MATR card validation", () => {
   });
 
   it("reports invalid NAME value", () => {
-    const text = `${pin}MATR 1 NAME=FOO\nU235 1.E-3\nFINISH`;
+    const text = `${pin}MATR 1 NAME=TOOLONG\nU235 1.E-3\nFINISH`;
     const ast = parseDocument(text, { uri: "pin.mcu" });
     const diags = analyzeSemantics(ast).filter((d) => d.code === "matr-param-value");
-    assert.ok(diags.some((d) => d.message.includes("NAME=FOO")));
+    assert.ok(diags.some((d) => d.message.includes("NAME=TOOLONG")));
+  });
+
+  it("rejects nuclides mixed with NAME=.DBM library", () => {
+    const text = `${pin}MATR 1 NAME=FOO\nU235 1.E-3\nFINISH`;
+    const ast = parseDocument(text, { uri: "pin.mcu" });
+    const diags = analyzeSemantics(ast);
+    assert.ok(diags.some((d) => d.code === "matr-dbm-mixed" || d.code === "matr-dbm-code"));
   });
 
   it("accepts valid MATR header", () => {

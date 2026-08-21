@@ -867,4 +867,62 @@ stop
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("hides ICE expand button when natural element is listed in ICENOT", () => {
+    const text = [
+      "PIN",
+      "ICENOT N O",
+      "MATR 1 T=480",
+      "N     4.994E-5",
+      "U     1.0E-3",
+      "FINISH",
+    ].join("\n");
+    const { doc, index, uri } = openText(text);
+    const nLine = text.split(/\r?\n/).findIndex((l) => /^\s*N\s+/.test(l));
+    const uLine = text.split(/\r?\n/).findIndex((l) => /^\s*U\s+/.test(l));
+    assert.ok(nLine >= 0 && uLine >= 0);
+
+    const hoverN = getHoverContent(
+      doc,
+      { line: nLine, character: 0 },
+      index,
+      { enableIaeaNuclide: false },
+      uri
+    );
+    assert.ok(hoverN?.includes("Нуклид **N**"), hoverN ?? "(null)");
+    assert.ok(!hoverN?.includes("Разложить на изотопы"), hoverN ?? "(null)");
+
+    const hoverU = getHoverContent(
+      doc,
+      { line: uLine, character: 0 },
+      index,
+      { enableIaeaNuclide: false },
+      uri
+    );
+    assert.ok(hoverU?.includes("Нуклид **U**"), hoverU ?? "(null)");
+    assert.ok(hoverU?.includes("Разложить на изотопы"), hoverU ?? "(null)");
+  });
+
+  it("ICE/ICENOT list tokens and card hover mirror SI/SINOT", () => {
+    const text = ["PIN", "ICE Fe U", "ICENOT N", "MATR 1", "Fe 1e-2", "FINISH"].join("\n");
+    const { doc, index, uri } = openText(text);
+
+    const hoverFe = getHoverContent(doc, { line: 1, character: 4 }, index, { enableIaeaNuclide: false }, uri);
+    assert.ok(hoverFe?.includes("списке карты ICE"), hoverFe ?? "(null)");
+
+    const hoverIce = getHoverContent(doc, { line: 1, character: 0 }, index, { enableIaeaNuclide: false }, uri);
+    assert.ok(hoverIce?.includes("<summary>Элементы в карте ICE (2)</summary>"), hoverIce ?? "(null)");
+
+    const hoverIcenot = getHoverContent(doc, { line: 2, character: 0 }, index, { enableIaeaNuclide: false }, uri);
+    assert.ok(hoverIcenot?.includes("<summary>Элементы в карте ICENOT (1)</summary>"), hoverIcenot ?? "(null)");
+  });
+
+  it("ICE outside physical shows wrong-fragment hover like SI", () => {
+    const text = ["HEAD", "ICE Fe", "SI FP1", "FINISH"].join("\n");
+    const { doc, index, uri } = openText(text);
+    const hoverIce = getHover(doc, { line: 1, character: 0 }, index, uri);
+    const hoverSi = getHover(doc, { line: 2, character: 0 }, index, uri);
+    assert.ok(hoverIce?.includes("карта другого модуля"), hoverIce ?? "(null)");
+    assert.ok(hoverSi?.includes("карта другого модуля"), hoverSi ?? "(null)");
+  });
 });

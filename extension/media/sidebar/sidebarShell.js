@@ -110,6 +110,16 @@
         "</div>"
       );
     }
+    if (state.panel === "mcuhelper.lattices") {
+      return (
+        '<div class="mcu-panel-toolbar">' +
+        '<button type="button" class="mcu-panel-tool-btn" data-action="run-command" data-command="mcuhelper.latticeGenerator" data-args="null" title="Графический конструктор решёток GLTL">' +
+        I.getIcon("lattice") +
+        "<span>Конструктор решёток</span>" +
+        "</button>" +
+        "</div>"
+      );
+    }
     return "";
   }
 
@@ -170,7 +180,8 @@
       return '<div class="mcu-diag-meta">' + esc(text) + "</div>";
     }
 
-    const clickable = node.uri && node.range;
+    const hasInsert = Boolean(node.insertText);
+    const clickable = node.uri && node.range && !hasInsert;
     const pill = navPillLabel(node);
     const line = node.description || node.label;
     const copyText = cardCopyText(node);
@@ -204,6 +215,7 @@
     return (
       '<div class="mcu-card mcu-nav-card' +
       (clickable ? " leaf-clickable" : "") +
+      (hasInsert ? " draggable" : "") +
       (node.muted ? " mcu-muted" : "") +
       (node.warning ? " mcu-warning" : "") +
       (actionBtn ? " mcu-nav-card-with-action" : "") +
@@ -215,7 +227,15 @@
       esc(nodeSearchText(node)) +
       '" data-copy="' +
       esc(copyText) +
-      '" title="' +
+      '"' +
+      (hasInsert
+        ? ' data-insert="' +
+          esc(node.insertText) +
+          '" data-insert-format="' +
+          esc(node.insertFormat || "plain") +
+          '"'
+        : "") +
+      ' title="' +
       esc(hoverTitle) +
       '">' +
       '<span class="mcu-card-label">' +
@@ -225,6 +245,7 @@
       esc(line) +
       "</span>" +
       actionBtn +
+      (hasInsert ? I.getIcon("drag") : "") +
       detail +
       "</div>"
     );
@@ -319,6 +340,7 @@
     bindDrag(el, text, format);
     el.addEventListener("click", (e) => {
       if (e.defaultPrevented) return;
+      if (e.target.closest("[data-action=run-command]")) return;
       vscode.postMessage({ type: "insert", text, format: format || "plain" });
     });
   }
@@ -562,9 +584,16 @@
   function bindNavInteractions() {
     bindNavGroups();
 
+    root.querySelectorAll(".mcu-nav-card[data-insert]").forEach((row) => {
+      const text = row.getAttribute("data-insert");
+      const format = row.getAttribute("data-insert-format") || "plain";
+      bindInsert(row, text, format);
+    });
+
     root.querySelectorAll(".mcu-nav-card.leaf-clickable").forEach((row) => {
       row.addEventListener("click", (e) => {
         if (e.target.closest("[data-action=run-command]")) return;
+        if (row.getAttribute("data-insert")) return;
         e.stopPropagation();
         const uri = row.getAttribute("data-uri");
         const rangeStr = row.getAttribute("data-range");

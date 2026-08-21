@@ -18,6 +18,13 @@ import { TRANSF_FORBIDDEN_PROTO_TYPES } from "./constants";
 import { analyzeEnergyGroupStatements } from "./energyGroups";
 import { analyzeBurnupSemantics } from "./burnupSemantics";
 import { analyzeMatrCardParams } from "./matrCardValidation";
+import {
+  getDbmLibRoot,
+  getDbmMaterial,
+  isDbmLibraryName,
+  remapDensParamForType,
+  resolveDbmFilePath,
+} from "./dbmLib";
 import { analyzeNuclideParameterCounts } from "./nuclideParamValidation";
 import { analyzePositiveQuantities } from "./positiveQuantities";
 import { analyzeUndefinedVariables } from "./variableRefs";
@@ -37,6 +44,10 @@ import { collectZoneBodyRefs, isAllSpaceZoneRef } from "./zoneBodyRefs";
 import { formatExpandedLineRef } from "./includeLineMap";
 import { analyzeCrossModuleLinks } from "./crossModuleAudit";
 import { analyzeIdentifierNames } from "./identifierValidation";
+import {
+  cpmBlockByMaterialIndex,
+  expandCpmMaterialNumbers,
+} from "./cpmBlocks";
 
 export function analyzeSemantics(ast: DocumentAst): DiagnosticMessage[] {
   const diags: DiagnosticMessage[] = [...ast.diagnostics];
@@ -127,6 +138,7 @@ export function analyzeSemantics(ast: DocumentAst): DiagnosticMessage[] {
 
   // UserGuide §8.2: number = порядковый номер следования в разделе с 1, пропуски запрещены.
   // GROUP=… — номер внутренний для группы; глобально материал перенумеровывается по порядку.
+  // CPM n … CPMEND (UserGuide §8.8): блок из k материалов повторяется n раз → занимает n·Δ номеров.
   // Ссылка «ранее на …» — через includeLineMap (строка редактора или path:line в `#include`).
   const sumStatesByMat = buildSumIsotopeStatesByOffset(
     ast.statements,
@@ -134,6 +146,9 @@ export function analyzeSemantics(ast: DocumentAst): DiagnosticMessage[] {
     ast.constants
   );
   const matSeen = new Map<string, SourceRange>();
+  const matCpm = cpmBlockByMaterialIndex(ast.cpmBlocks ?? []);
+  const cpmGapDone = new Set<(typeof ast.cpmBlocks)[number]>();
+  let nextExpectedMat = 1;
   for (let i = 0; i < ast.materials.length; i++) {
     const m = ast.materials[i]!;
     const groupKey = (m.group ?? "").toUpperCase();
@@ -152,18 +167,67 @@ export function analyzeSemantics(ast: DocumentAst): DiagnosticMessage[] {
     } else {
       matSeen.set(uniqKey, m.range);
       if (!m.group) {
-        const expected = i + 1;
-        if (m.number !== expected) {
-          diags.push({
-            severity: "error",
-            message: `MATR ${m.number}: номер должен быть равен порядковому номеру следования (${expected})`,
-            code: "matr-gap",
-            range: m.range,
-          });
+        const cpm = matCpm.get(i);
+        if (cpm && !cpmGapDone.has(cpm)) {
+          cpmGapDone.add(cpm);
+          const blockStart = nextExpectedMat;
+          const blockSize = cpm.materialIndexes.length;
+          if (blockSize > 0) {
+            for (let k = 0; k < blockSize; k++) {
+              const idx = cpm.materialIndexes[k]!;
+              const mat = ast.materials[idx]!;
+              if (mat.group) continue;
+              const expected = blockStart + k;
+              if (mat.number !== expected) {
+                diags.push({
+                  severity: "error",
+                  message: `MATR ${mat.number}: номер должен быть равен порядковому номеру следования (${expected}) с учётом CPM`,
+                  code: "matr-gap",
+                  range: mat.range,
+                });
+              }
+            }
+            nextExpectedMat = blockStart + cpm.repetitions * blockSize;
+          }
+        } else if (!cpm) {
+          const expected = nextExpectedMat;
+          if (m.number !== expected) {
+            diags.push({
+              severity: "error",
+              message: `MATR ${m.number}: номер должен быть равен порядковому номеру следования (${expected})`,
+              code: "matr-gap",
+              range: m.range,
+            });
+          }
+          nextExpectedMat = Math.max(nextExpectedMat, m.number) + 1;
         }
       }
       // MCU error :55: пустой материал или все нуклиды ушли в суммарный изотоп (SI/SINOT/SIDEN).
-      if (m.nuclides.length === 0) {
+      // §8.11: материал из .DBM задаётся кодовым именем — не пустой.
+      if (isDbmLibraryName(m.nameLib) && m.libMaterialName) {
+        const libRoot = getDbmLibRoot();
+        if (libRoot) {
+          const resolved = resolveDbmFilePath(libRoot, m.nameLib!);
+          if (!resolved.exists) {
+            diags.push({
+              severity: "warning",
+              message: `MATR ${m.number}: файл ${m.nameLib}.DBM не найден в MDBNR`,
+              code: "matr-dbm-missing",
+              range: m.range,
+            });
+          } else {
+            const entry = getDbmMaterial(m.nameLib!, m.libMaterialName);
+            if (!entry) {
+              diags.push({
+                severity: "warning",
+                message: `MATR ${m.number}: материал «${m.libMaterialName}» отсутствует в ${m.nameLib}.DBM`,
+                code: "matr-dbm-unknown",
+                range: m.libMaterialRange ?? m.range,
+              });
+            }
+          }
+        }
+      } else if (m.nuclides.length === 0) {
         diags.push({
           severity: "error",
           message: `MATR ${m.number}: материал пуст (нет нуклидов)`,
@@ -518,12 +582,36 @@ export function buildSummaries(ast: DocumentAst): {
     ast.materials.map((m) => m.range.offset),
     ast.constants
   );
+  const matCpm = cpmBlockByMaterialIndex(ast.cpmBlocks ?? []);
   /** Полный список нуклидов в summaries раздувает JSON/память на full-core; счётчики оставляем. */
   const totalNuc = ast.materials.reduce((n, m) => n + m.nuclides.length, 0);
   const keepNuclideRows = totalNuc <= 2_000;
-  const materials: MaterialSummary[] = ast.materials.map((m) => {
+  const materials: MaterialSummary[] = ast.materials.map((m, matIndex) => {
     const vars = buildScopedVars(ast.constants, m.range.offset, "global");
-    const density = analyzeMaterialMassDensity(m, vars);
+    const dbmMode = isDbmLibraryName(m.nameLib) && Boolean(m.libMaterialName);
+    const dbmEntry =
+      dbmMode && m.nameLib && m.libMaterialName
+        ? getDbmMaterial(m.nameLib, m.libMaterialName)
+        : null;
+
+    /** Для ρ: состав из .DBM + переименование DENSxY по densType. */
+    let densityMat = m;
+    if (dbmEntry && m.nuclides.length === 0) {
+      const remappedDens =
+        m.densParam != null ? remapDensParamForType(m.densParam, dbmEntry.densType) : undefined;
+      densityMat = {
+        ...m,
+        densParam: remappedDens ?? m.densParam,
+        nuclides: dbmEntry.nuclides.map((n) => ({
+          name: n.name,
+          density: n.density,
+          mods: n.mods === "A" ? undefined : n.mods,
+          range: m.libMaterialRange ?? m.range,
+        })),
+      };
+    }
+
+    const density = analyzeMaterialMassDensity(densityMat, vars);
     const massDensityGcm3 = density.rho;
     const volumeCm3 = materialVolumeCm3(volumes, m.number);
     const massG =
@@ -539,8 +627,21 @@ export function buildSummaries(ast: DocumentAst): {
     let sumIsotopeCount = 0;
     let sumIsotopeUsedCount = 0;
     let sumIsotopeMissingAwLibCount = 0;
+
+    const sourceNuclides =
+      m.nuclides.length > 0
+        ? m.nuclides
+        : dbmEntry
+          ? dbmEntry.nuclides.map((n) => ({
+              name: n.name,
+              density: n.density,
+              mods: n.mods === "A" ? undefined : n.mods,
+              range: m.libMaterialRange ?? m.range,
+            }))
+          : [];
+
     const nuclides = keepNuclideRows
-      ? m.nuclides.map((n) => {
+      ? sourceNuclides.map((n) => {
           const sum = evaluateSumIsotopeMembership(n, sumState, vars);
           const inAwLib = hasAwLib ? Boolean(getAwLibEntry(n.name)) : undefined;
           if (sum.inSum) {
@@ -561,7 +662,7 @@ export function buildSummaries(ast: DocumentAst): {
     if (!keepNuclideRows) {
       const needScan = sumState.listMode === "si" || sumState.siden != null;
       if (needScan) {
-        for (const n of m.nuclides) {
+        for (const n of sourceNuclides) {
           if (!isSumIsotopeMember(n, sumState, vars)) continue;
           sumIsotopeCount++;
           if (hasAwLib) {
@@ -571,27 +672,70 @@ export function buildSummaries(ast: DocumentAst): {
         }
       }
     }
-    const activity = analyzeMaterialActivity(m, vars);
+    const activity = analyzeMaterialActivity(densityMat, vars);
     const activityBqPerG =
       activity.totalBqPerCm3 != null && massDensityGcm3 != null && massDensityGcm3 > 0
         ? activity.totalBqPerCm3 / massDensityGcm3
         : null;
+    const cpm = matCpm.get(matIndex);
+    const cpmSummary = cpm
+      ? {
+          repetitions: cpm.repetitions,
+          expandedNumbers: expandCpmMaterialNumbers(
+            m.number,
+            cpm.materialIndexes.map((idx) => ast.materials[idx]!.number),
+            cpm.repetitions
+          ),
+          range: cpm.range,
+        }
+      : undefined;
+
+    let dbmSummary: MaterialSummary["dbm"] | undefined;
+    if (dbmMode && m.nameLib && m.libMaterialName) {
+      const libRoot = getDbmLibRoot();
+      const resolved = libRoot
+        ? resolveDbmFilePath(libRoot, m.nameLib)
+        : { fsPath: `${m.nameLib}.DBM`, exists: false };
+      const headerLine = dbmEntry?.headerLine ?? 0;
+      dbmSummary = {
+        library: m.nameLib,
+        material: m.libMaterialName,
+        fsPath: resolved.fsPath,
+        exists: resolved.exists,
+        range: {
+          start: { line: headerLine, character: 0 },
+          end: { line: headerLine, character: m.libMaterialName.length },
+          offset: 0,
+          endOffset: 0,
+        },
+      };
+    }
+
     return {
       number: m.number,
       group: m.group,
       temperature: m.temperature,
-      nuclideCount: m.nuclides.length,
+      nameLib: m.nameLib,
+      libMaterialName: m.libMaterialName,
+      libMaterialRange: m.libMaterialRange,
+      ...(dbmSummary ? { dbm: dbmSummary } : {}),
+      nuclideCount: sourceNuclides.length,
       usedNuclideCount,
       sumIsotopeCount,
       sumIsotopeUsedCount,
       sumIsotopeMissingAwLibCount,
-      nuclidesPreview: m.nuclides.map((n) => n.name).slice(0, 5).join(", ") + (m.nuclides.length > 5 ? "…" : ""),
+      nuclidesPreview:
+        (m.libMaterialName
+          ? m.libMaterialName
+          : sourceNuclides.map((n) => n.name).slice(0, 5).join(", ")) +
+        (!m.libMaterialName && sourceNuclides.length > 5 ? "…" : ""),
       massDensityGcm3,
       volumeCm3,
       massG,
       activityBqPerG,
       nuclides,
       range: m.range,
+      ...(cpmSummary ? { cpm: cpmSummary } : {}),
     };
   });
 

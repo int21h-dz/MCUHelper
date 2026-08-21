@@ -302,7 +302,13 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     }
     const suggestSumIsotope =
       navId === "materials" ? collectSumIsotopeSuggestions(editor.document.uri) : undefined;
-    const nodes = buildNavTree(navId, index, uri, suggestSumIsotope);
+    const nodes = buildNavTree(
+      navId,
+      index,
+      uri,
+      suggestSumIsotope,
+      vscode.workspace.getConfiguration("mcuhelper").get<string>("mcuConstantsLibPath") ?? ""
+    );
     webview.postMessage({ type: "tree", panel: this.viewId, nodes });
   }
 
@@ -574,7 +580,13 @@ function collectOnlineMatrConcDiags(
     for (let line = from; line <= to; line++) {
       if (seenLines.has(line)) continue;
       seenLines.add(line);
-      for (const issue of scanNuclideConcentrationLine(doc.lineAt(line).text, line, equ)) {
+      const lineText = doc.lineAt(line).text;
+      // Строки inline .DBM (заголовок CODE n 1|2 или dens + bare A/W) — не MATR.
+      const t = lineText.trim();
+      if (/^\*\*\s+\[mcuhelper\]/i.test(t)) continue;
+      if (/^[A-Za-z][A-Za-z0-9]{0,5}\s+\d+\s+[12]\s*$/.test(t)) continue;
+      if (/^[A-Za-z][A-Za-z0-9]{0,5}\s+\S+\s+[AaWw]\s*$/.test(t)) continue;
+      for (const issue of scanNuclideConcentrationLine(lineText, line, equ)) {
         const d = new vscode.Diagnostic(
           new vscode.Range(issue.line, issue.character, issue.line, issue.endCharacter),
           issue.message,

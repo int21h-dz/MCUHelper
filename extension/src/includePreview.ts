@@ -12,6 +12,10 @@ import {
   type ExpandedIncludeBlock,
 } from "./includePreviewCore";
 
+/** Только блоки `#include` — маркеры `DBM LIB/CODE` обрабатывает dbmPreview. */
+function findIncludeExpandedBlocks(text: string): ExpandedIncludeBlock[] {
+  return findExpandedBlocks(text).filter((b) => /^\s*#include\b/i.test(b.directive));
+}
 const DEFAULT_INLINE_MAX_LINES = 4000;
 
 interface IncludeResolveModule {
@@ -127,7 +131,7 @@ class IncludeCodeLensProvider implements vscode.CodeLensProvider {
       );
     }
 
-    for (const block of findExpandedBlocks(text)) {
+    for (const block of findIncludeExpandedBlocks(text)) {
       const range = new vscode.Range(block.beginLine, 0, block.beginLine, document.lineAt(block.beginLine).text.length);
       lenses.push(
         new vscode.CodeLens(range, {
@@ -212,7 +216,7 @@ async function collapseIncludeInline(uriStr: string, beginLine: number): Promise
   if (!directive) return;
 
   const lines = doc.getText().split(/\r?\n/);
-  const block = findExpandedBlocks(doc.getText()).find((b) => b.beginLine === beginLine);
+  const block = findIncludeExpandedBlocks(doc.getText()).find((b) => b.beginLine === beginLine);
   if (!block) return;
 
   const content = extractExpandedContent(lines, block.beginLine, block.endLine);
@@ -246,7 +250,7 @@ async function collapseIncludeInline(uriStr: string, beginLine: number): Promise
 export function buildCollapseEditsForSave(doc: vscode.TextDocument): vscode.TextEdit[] {
   const text = doc.getText();
   const lines = text.split(/\r?\n/);
-  const blocks = findExpandedBlocks(text);
+  const blocks = findIncludeExpandedBlocks(text);
   if (!blocks.length) return [];
   const baseDir = baseDirForDoc(doc);
   const edits: vscode.TextEdit[] = [];
@@ -341,7 +345,7 @@ export function registerIncludePreview(context: vscode.ExtensionContext): void {
     vscode.workspace.onDidCloseTextDocument(() => refresh()),
     vscode.workspace.onWillSaveTextDocument((e) => {
       if (e.document.languageId !== "mcunr") return;
-      const blocks = findExpandedBlocks(e.document.getText());
+      const blocks = findIncludeExpandedBlocks(e.document.getText());
       if (!blocks.length) return;
       // Авто-свёртка: иначе на диск уйдёт вариант с маркерами вместо #include.
       e.waitUntil(Promise.resolve(buildCollapseEditsForSave(e.document)));
@@ -360,7 +364,7 @@ export function registerIncludePreview(context: vscode.ExtensionContext): void {
 
   const refreshDecorations = (editor: vscode.TextEditor | undefined) => {
     if (!editor || editor.document.languageId !== "mcunr") return;
-    applyIncludeExpandedDecorations(editor, findExpandedBlocks(editor.document.getText()));
+    applyIncludeExpandedDecorations(editor, findIncludeExpandedBlocks(editor.document.getText()));
   };
 
   context.subscriptions.push(

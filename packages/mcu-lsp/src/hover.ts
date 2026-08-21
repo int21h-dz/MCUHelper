@@ -46,6 +46,7 @@ import {
   getDefaultPhyTable,
   formatAtomicWeightAmu,
   sumIsotopeForNuclide,
+  isIceExpandBlockedForMaterial,
   isSumIsotopeCardLine,
   remapRangeToMainDocument,
   rangeCoversEditorLine,
@@ -115,6 +116,7 @@ export function formatMaterialBriefHover(index: DocumentIndex, materialNumber: n
   const meta: string[] = [];
   if (mat.group) meta.push(`GROUP=\`${mat.group}\``);
   if (mat.nameLib) meta.push(`NAME=\`${mat.nameLib}\``);
+  if (mat.libMaterialName) meta.push(`код=\`${mat.libMaterialName}\``);
   if (mat.temperature != null) meta.push(`T=${mat.temperature}`);
   if (density?.rho != null && density.rho > 0) {
     meta.push(`ρ ≈ **${formatMassDensityGcm3(density.rho)}**`);
@@ -122,7 +124,9 @@ export function formatMaterialBriefHover(index: DocumentIndex, materialNumber: n
     meta.push(`${mat.densParam}=${mat.densValue}`);
   }
 
-  const names = mat.nuclides.map((n) => n.name);
+  const names = mat.libMaterialName
+    ? [mat.libMaterialName, ...mat.nuclides.map((n) => n.name)]
+    : mat.nuclides.map((n) => n.name);
   const preview =
     names.length === 0
       ? null
@@ -396,6 +400,8 @@ const BURNUP_LOAD_LABELS = new Set(["POWER", "POWE", "STEP"]);
 const VOL_LABELS = new Set(["VOL"]);
 const SOURCE_SPECTRUM_LABELS = new Set(["EMES", "EPRO"]);
 const SUM_CARD_LABELS = new Set(["SI", "SINOT"]);
+const ICE_CARD_LABELS = new Set(["ICE", "ICENOT"]);
+const LIST_CARD_LABELS = new Set([...SUM_CARD_LABELS, ...ICE_CARD_LABELS]);
 
 function appendBurnupLoadToKeywordHover(base: string, index: DocumentIndex, word: string): string {
   if (!BURNUP_LOAD_LABELS.has(word.toUpperCase())) return base;
@@ -434,7 +440,7 @@ function appendSumCardListToHover(
   line: number,
   editorUri?: string
 ): string {
-  if (!SUM_CARD_LABELS.has(word.toUpperCase())) return base;
+  if (!LIST_CARD_LABELS.has(word.toUpperCase())) return base;
   const lineMap = index.ast.includeLineMap;
   const stmt = index.ast.statements.find((s) => rangeCoversEditorLine(s.range, line, lineMap, editorUri));
   if (!stmt || stmt.fragment !== "physical" || stmt.label.toUpperCase() !== word.toUpperCase()) return base;
@@ -445,12 +451,13 @@ function appendSumCardListToHover(
     .split(/[\s,]+/)
     .filter(Boolean)
     .slice(1);
-  if (!list.length) return `${base}\n\nСписок нуклидов пуст.`;
+  const itemKind = ICE_CARD_LABELS.has(word.toUpperCase()) ? "Элементы" : "Нуклиды";
+  if (!list.length) return `${base}\n\nСписок пуст.`;
   const items = list.map((token) => `- \`${token}\``).join("\n");
   return `${base}
 
 <details>
-<summary>Нуклиды в карте ${word.toUpperCase()} (${list.length})</summary>
+<summary>${itemKind} в карте ${word.toUpperCase()} (${list.length})</summary>
 
 ${items}
 </details>`;
@@ -556,21 +563,21 @@ export interface HoverOptions {
 
 type NuclideHoverSource =
   | { kind: "material"; materialNumber: number; concentration: string }
-  | { kind: "sum-card"; cardLabel: "SI" | "SINOT" };
+  | { kind: "list-card"; cardLabel: "SI" | "SINOT" | "ICE" | "ICENOT" };
 
-function findSumCardNuclideAtPosition(
+function findListCardTokenAtPosition(
   index: DocumentIndex,
   pos: Position,
   rawWord: string,
   editorUri?: string
-): Extract<NuclideHoverSource, { kind: "sum-card" }> | null {
+): Extract<NuclideHoverSource, { kind: "list-card" }> | null {
   const lineMap = index.ast.includeLineMap;
   const stmt = index.ast.statements.find((s) =>
     rangeCoversEditorLine(s.range, pos.line, lineMap, editorUri)
   );
   if (!stmt || stmt.fragment !== "physical") return null;
   const label = stmt.label.toUpperCase();
-  if (label !== "SI" && label !== "SINOT") return null;
+  if (!LIST_CARD_LABELS.has(label)) return null;
   // ⚠ АГЕНТАМ: не считать `SI dens` (кремний) картой суммарного изотопа.
   if (label === "SI" && !isSumIsotopeCardLine(stmt.text)) return null;
   if (isOnStatementKeyword(fullLine({ getText: () => stmt.text }, pos), pos.character, rawWord)) return null;
@@ -579,7 +586,7 @@ function findSumCardNuclideAtPosition(
   if (tokens.length < 2) return null;
   const list = tokens.slice(1);
   if (!list.some((token) => token.toUpperCase() === rawWord.toUpperCase())) return null;
-  return { kind: "sum-card", cardLabel: label };
+  return { kind: "list-card", cardLabel: label as "SI" | "SINOT" | "ICE" | "ICENOT" };
 }
 
 function findNuclideHoverSourceAtPosition(
@@ -596,7 +603,7 @@ function findNuclideHoverSourceAtPosition(
       concentration: materialHit.concentration,
     };
   }
-  return findSumCardNuclideAtPosition(index, pos, rawWord, editorUri);
+  return findListCardTokenAtPosition(index, pos, rawWord, editorUri);
 }
 
 function formatSharePercent(share01: number): string {
@@ -621,7 +628,9 @@ function formatNuclideHoverLocal(
   const lines =
     source.kind === "material"
       ? [`Нуклид **${word}** в материале ${source.materialNumber}`, `Концентрация: **${source.concentration}** яд/см³`]
-      : [`Нуклид **${word}** в списке карты ${source.cardLabel}`];
+      : ICE_CARD_LABELS.has(source.cardLabel)
+        ? [`Элемент **${word}** в списке карты ${source.cardLabel}`]
+        : [`Нуклид **${word}** в списке карты ${source.cardLabel}`];
 
   if (mat && source.kind === "material") {
     const enrichLines: string[] = [];
@@ -780,8 +789,15 @@ export function getHoverContent(
       const base = formatNuclideHoverLocal(nuclName, nuclSource, index);
       // IAEA NDS в hover по нуклидам — всегда (настройка снята).
       const isNatural = mcuNuclideToIaeaElement(nuclName) != null;
+      const matForIce =
+        nuclSource.kind === "material"
+          ? index.ast.materials.find((m) => m.number === nuclSource.materialNumber)
+          : undefined;
+      // ICENOT / пустой ICE|ICENOT — MCU не разлагает; кнопку ICE в hover не показываем.
+      const iceBlocked =
+        Boolean(matForIce) && isIceExpandBlockedForMaterial(index.ast, matForIce!, nuclName);
       const insert: NaturalInsertContext | undefined =
-        nuclSource.kind === "material" && isNatural && documentUri
+        nuclSource.kind === "material" && isNatural && documentUri && !iceBlocked
           ? {
               uri: documentUri,
               line: pos.line,

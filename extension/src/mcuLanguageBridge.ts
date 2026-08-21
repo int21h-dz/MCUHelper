@@ -106,6 +106,107 @@ export function loadBodyGeneratorApi(): {
   return requireLanguage("bodyGenerator");
 }
 
+export type LatticeGeneratorInput = {
+  latticeType: "G2MP" | "G2AR" | "GLTL";
+  zoneName: string;
+  elements: string[];
+  cols: number;
+  rows: number;
+  iMin: number;
+  iMax: number;
+  jMin: number;
+  jMax: number;
+  vectorA: [string, string, string];
+  vectorB: [string, string, string];
+  vectorC: [string, string, string];
+  cartogram: string[][];
+  placements: Array<{ element: string; protoIndex?: number; x: string; y: string; z: string }>;
+  lfixso: string;
+  lblack: string;
+  footprints: Array<{
+    name: string;
+    shapes: Array<
+      | { kind: "rect"; x1: number; y1: number; x2: number; y2: number }
+      | { kind: "circle"; x: number; y: number; r: number }
+      | { kind: "poly"; points: Array<{ x: number; y: number }> }
+    >;
+  }>;
+};
+
+export function loadLatticeGeneratorApi(): {
+  buildLatticeStatement: (input: LatticeGeneratorInput) => {
+    text: string;
+    warnings: string[];
+    okToInsert: boolean;
+  };
+  buildG2mpLatticeStatement: (input: LatticeGeneratorInput) => {
+    text: string;
+    warnings: string[];
+    okToInsert: boolean;
+  };
+  buildG2arLatticeStatement: (input: LatticeGeneratorInput) => {
+    text: string;
+    warnings: string[];
+    okToInsert: boolean;
+  };
+  buildGltlLatticeStatement: (input: LatticeGeneratorInput) => {
+    text: string;
+    warnings: string[];
+    okToInsert: boolean;
+  };
+  buildLcellStub: (name: string) => {
+    text: string;
+    warnings: string[];
+    okToInsert: boolean;
+  };
+  defaultLatticeGeneratorInput: () => LatticeGeneratorInput;
+  emptyCartogram: (cols: number, rows: number, fill?: string) => string[][];
+  resizeCartogram: (prev: string[][], cols: number, rows: number, fill?: string) => string[][];
+  formatG2mpRowLabel: (rowIndex1Based: number) => string;
+  isValidMcuName: (name: string) => boolean;
+  findLatticeBlockAtLine: (
+    lines: readonly string[],
+    line: number
+  ) => { startLine: number; endLine: number } | null;
+  parseLatticeBlockText: (blockText: string) => LatticeGeneratorInput | null;
+  parseLatticeAtLine: (
+    fullText: string,
+    line: number,
+    opts?: { uri?: string }
+  ) => {
+    input: LatticeGeneratorInput;
+    range: { startLine: number; endLine: number };
+  } | null;
+  parseGltlLatticeAtLine: (
+    fullText: string,
+    line: number,
+    opts?: { uri?: string }
+  ) => {
+    input: LatticeGeneratorInput;
+    range: { startLine: number; endLine: number };
+  } | null;
+  findNearestGltlLatticeLine: (fullText: string, preferLine: number) => number | null;
+  rebuildGltlPlacements: (
+    parmText: string,
+    elements: string[]
+  ) => Array<{ element: string; protoIndex?: number; x: string; y: string; z: string }>;
+  ensureLcellFootprints: (
+    fullText: string,
+    elements: string[],
+    existing?: LatticeGeneratorInput["footprints"]
+  ) => LatticeGeneratorInput["footprints"];
+  inferGltlGridSize: (placements: LatticeGeneratorInput["placements"]) => {
+    cols: number;
+    rows: number;
+    layers: number;
+    xs: number[];
+    ys: number[];
+    zs: number[];
+  };
+} {
+  return requireLanguage("latticeGenerator");
+}
+
 export function loadZoneStatementApi(): {
   looksLikeZoneStatement: (text: string) => boolean;
 } {
