@@ -423,7 +423,7 @@ export class BodyLivePreviewPanel {
         params: [transf.A, transf.B, transf.f],
         scenePrimitives: scene?.primitives ?? [],
         sceneBbox: scene?.bbox,
-        nearby: { maxCount: 12, maxGapFactor: 4, excludeName: parsed.name },
+        nearby: { excludeName: parsed.name },
         slicePositions: this.manualSlicePositions,
         transf: {
           protoName: transf.protoName,
@@ -449,7 +449,7 @@ export class BodyLivePreviewPanel {
         params: resolved.nums,
         scenePrimitives: scene?.primitives ?? [],
         sceneBbox: scene?.bbox,
-        nearby: { maxCount: 12, maxGapFactor: 4, excludeName: parsed.name },
+        nearby: { excludeName: parsed.name },
         slicePositions: this.manualSlicePositions,
       };
       draftPreview = this.meshApi.buildDraftBodyPreview(input);
@@ -515,24 +515,29 @@ export class BodyLivePreviewPanel {
   }
 
   private async fetchConstants(uri: vscode.Uri, line: number, character: number): Promise<VisibleConstant[]> {
-    if (
-      this.constCache &&
-      this.constCache.uri === uri.toString() &&
-      Math.abs(this.constCache.line - line) < 8
-    ) {
-      return this.constCache.constants;
-    }
-    if (!this.client) return [];
-    try {
-      const index = await this.client.sendRequest<{
-        summaries?: { constants?: VisibleConstant[] };
-      }>("mcuhelper/getIndex", { uri: uri.toString(), line, character });
-      const constants = index?.summaries?.constants ?? [];
-      this.constCache = { uri: uri.toString(), line, constants };
-      return constants;
-    } catch {
-      return this.constCache?.constants ?? [];
-    }
+    if (!this.client) return this.constCache?.constants ?? [];
+    const merge = (primary: VisibleConstant[], extra: VisibleConstant[]): VisibleConstant[] => {
+      const map = new Map<string, VisibleConstant>();
+      for (const c of extra) map.set(c.name.toUpperCase(), c);
+      for (const c of primary) map.set(c.name.toUpperCase(), c);
+      return [...map.values()];
+    };
+    const request = async (args: { uri: string; line?: number; character?: number }) => {
+      try {
+        const index = await this.client!.sendRequest<{
+          summaries?: { constants?: VisibleConstant[] };
+        }>("mcuhelper/getIndex", args);
+        return index?.summaries?.constants ?? [];
+      } catch {
+        return [] as VisibleConstant[];
+      }
+    };
+    const scoped = await request({ uri: uri.toString(), line, character });
+    // Как в конструкторе тел: если в scope/позиции пусто или мало — добираем все EQU документа.
+    const all = await request({ uri: uri.toString() });
+    const constants = merge(scoped, all);
+    this.constCache = { uri: uri.toString(), line, constants };
+    return constants;
   }
 
   private async fetchScene(
@@ -614,6 +619,11 @@ export class BodyLivePreviewPanel {
         </div>
         <p class="bg-hint bg-slice-hint" id="idleHint"></p>
         <p class="bg-nearest" id="nearestInfo">ближайшее: —</p>
+        <div class="bg-slice-tools" id="sliceToolBar" role="toolbar" aria-label="Инструменты сечения">
+          <button type="button" class="bg-tool-btn is-active" id="btnToolPan" title="Перемещение вида">Перемещение</button>
+          <button type="button" class="bg-tool-btn" id="btnToolRuler" title="Линейка: две точки, прилипание к фигурам и осям">Линейка</button>
+          <span class="bg-cursor-coords" id="cursorCoords" title="Координаты под курсором">—</span>
+        </div>
         <div class="bg-slice-vis" id="sliceVisBar" role="toolbar" aria-label="Видимость сечений">
           <button type="button" class="bg-slice-vis-btn" data-slot="xy" title="Показать/скрыть XY">XY</button>
           <button type="button" class="bg-slice-vis-btn" data-slot="xz" title="Показать/скрыть XZ">XZ</button>

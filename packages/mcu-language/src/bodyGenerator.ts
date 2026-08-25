@@ -705,7 +705,7 @@ export function sanitizeBodyName(raw: string): string {
       out += ch;
     }
   }
-  return out;
+  return out.toUpperCase();
 }
 
 export interface BodyGeneratorInput {
@@ -748,7 +748,7 @@ export function buildBodyStatement(input: BodyGeneratorInput): {
   }
 
   const expected = getBodyParamCount(typeKey);
-  const params = input.params.map((p) => String(p ?? "").trim());
+  const params = input.params.map((p) => String(p ?? "").trim().toUpperCase());
   if (typeof expected === "number" && params.length < expected) {
     warnings.push(`Параметров меньше ожидаемых (${params.length}/${expected}).`);
   }
@@ -797,7 +797,12 @@ export function resolveBodyParamNumbers(
       continue;
     }
     const asNum = Number(raw);
-    if (raw !== "" && Number.isFinite(asNum) && /^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(raw)) {
+    // MCU часто пишет «0.» / «200.» — принимаем как число, не гоняем через EQU-парсер.
+    if (
+      raw !== "" &&
+      Number.isFinite(asNum) &&
+      /^-?\d+(\.\d*)?([eE][+-]?\d+)?$|^-?\.\d+([eE][+-]?\d+)?$/.test(raw)
+    ) {
       nums.push(asNum);
       continue;
     }

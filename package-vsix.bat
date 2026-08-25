@@ -74,8 +74,10 @@ if errorlevel 1 goto :fail
 if not exist "extension\vendor\mcu-geometry" mkdir "extension\vendor\mcu-geometry"
 copy /Y "packages\mcu-geometry\dist\meshPreview.js" "extension\vendor\mcu-geometry\meshPreview.js" >nul
 if errorlevel 1 goto :fail
-rem README + images for VS Code Details (vsce looks next to package.json)
+rem README + LICENSE + images for VS Code Details (vsce looks next to package.json)
 copy /Y "README.md" "extension\README.md" >nul
+if errorlevel 1 goto :fail
+copy /Y "LICENSE" "extension\LICENSE" >nul
 if errorlevel 1 goto :fail
 if not exist "extension\media" mkdir "extension\media"
 copy /Y "media\Promo.gif" "extension\media\Promo.gif" >nul

@@ -31,6 +31,27 @@ export const CARD_LINE_PARAM_GROUPS: Record<string, CardLineParamHint[]> = {
     { label: "trace", documentation: "Трассировка (0/1)" },
     { label: "listSize", documentation: "Размер списка" },
   ],
+  CONT: [
+    {
+      label: "BC…",
+      documentation:
+        "Граничные условия по граням контейнера (B|W|M|C|T; W/M/C с вероятностью в () или []). Число = число граней первого тела.",
+    },
+    {
+      label: "[Sα [rot]]",
+      documentation: "Угол зеркальной симметрии 180|90|60|45|30; опциональный поворот вокруг OZ (градусы).",
+    },
+    {
+      label: "[PRSα [rot]]",
+      documentation: "Парные плоскости симметрии относительно OXZ; угол к OX; опциональный поворот.",
+    },
+  ],
+  CNTAND: [
+    {
+      label: "[0|1]",
+      documentation: "1 — пересечение всех зон с контейнером (по умолчанию); 0 — выкл. Ставить перед CONT.",
+    },
+  ],
   MATR: [
     { label: "number", documentation: "Номер материала (целое, произвольный)" },
     { label: "T=…", documentation: "Температура материала, K (≥ 0; по умолчанию 300)" },

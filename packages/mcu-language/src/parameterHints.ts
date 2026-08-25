@@ -181,12 +181,14 @@ function genericCardSignature(linePrefix: string): ParameterSignatureHelp | null
   const cardLabel = normalizeMcuLabel(tokens[0]);
   // ⚠ АГЕНТАМ: `SI dens` — signature нуклида (nuclideLineSignature выше), не карта SI list.
   if (cardLabel === "SI" && tokens.length >= 2 && /^[+\-.(0-9]/.test(tokens[1]!)) return null;
-  if (cardLabel === "MATR" || getCardArgSpec(cardLabel) || getBodyParamGroups(cardLabel)) return null;
+  if (cardLabel === "MATR" || getBodyParamGroups(cardLabel)) return null;
+
+  const dedicated = getCardLineParamGroups(cardLabel);
+  if (!dedicated && getCardArgSpec(cardLabel)) return null;
 
   const card = getCardByLabel(cardLabel);
   if (!card) return null;
 
-  const dedicated = getCardLineParamGroups(cardLabel);
   const placeholders = dedicated
     ? dedicated.map((p) => p.label)
     : parseSyntaxRequiredPart(card.syntax);

@@ -1,21 +1,25 @@
+import { isKnownMcuLabel } from "./schemaBridge";
+
 /** Зона с булевым выражением и хвостом /reg:mat — даже если имя совпадает с меткой справочника (GRBL, ZRTB…). */
 export function looksLikeZoneStatement(text: string): boolean {
   const t = text.trim();
-  if (/^(PARM|LISTEL|LATT|LFIXSO|LBLACK|BOUN|ROOT|NORM|FUNC)\s/i.test(t)) return false;
+  if (/^(PARM|LISTEL|LATT|LFIXSO|LBLACK|BOUN|ROOT|NORM|FUNC|CNTAND|CONT|HEAD|MIR)\s/i.test(t)) return false;
   if (/^(EQU|SET)\s/i.test(t)) return false;
   if (/^(EQU|SET)\s+\w+\s*=/i.test(t)) return false;
   if (/\s=\s/.test(t)) return false;
   if (hasZoneRegistrationTail(t)) return true;
-  const m = t.match(/^[A-Za-z][A-Za-z0-9]{0,5}\s+(.+)/);
+  const m = t.match(/^([A-Za-z][A-Za-z0-9]{0,5})\s+(.+)/);
   if (!m) return false;
-  let rest = m[1].replace(/;.*/, "").trim();
+  const label = m[1]!.toUpperCase();
+  let rest = m[2]!.replace(/;.*/, "").trim();
   const slashPos = rest.search(/\s+\/(?:-\d+|\d)/);
   if (slashPos >= 0) rest = rest.slice(0, slashPos).trim();
   if (/[*()]|\b(?:COS|SIN|TAN|SQRT|LN)\b/i.test(rest)) return false;
   if (/\d+\s*-\s*\d+/.test(rest)) return true;
   if (/\bU\b/.test(rest)) return true;
   if (/-\s*[A-Za-z][A-Za-z0-9]{0,5}/.test(rest)) return true;
-  if (/^\d+$/.test(rest)) return true;
+  // `CNTAND 1` / `PHOT 1` — карты с числовым аргументом, не зона «имя + одно число».
+  if (/^\d+$/.test(rest)) return !isKnownMcuLabel(label);
   return false;
 }
 

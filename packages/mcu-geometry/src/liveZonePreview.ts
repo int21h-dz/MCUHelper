@@ -7,7 +7,7 @@ import { bboxUnion, buildPrimitive, emptyBbox } from "./primitives";
 import { collectBodyRefs, evalZoneExpr, parseZoneExpression } from "./zoneExpression";
 import { isBodyRefInHits, resolveBodyRef } from "./bodyRefs";
 import { colorForZone } from "./colors";
-import { buildBodySlices, bodyToMeshDescriptor, NEIGHBOR_BODY_COLOR, selectNearbyBodies } from "./meshPreview";
+import { buildBodySlices, bodyToMeshDescriptor, neighborColorByGap, neighborFadeDistance, selectNearbyBodiesWithGap } from "./meshPreview";
 
 export interface LiveZonePreviewSlice extends SliceGrid {
   title: string;
@@ -488,19 +488,29 @@ function buildNeighborZonePolylines(
   position: number,
   zoneBbox: BoundingBox,
   zoneBodyNames: Set<string>,
-  quality: "rough" | "draft" | "full"
-): Array<{ name: string; color: string; closed: boolean; points: Array<{ u: number; v: number }>; highlight?: boolean }> {
+  _quality: "rough" | "draft" | "full"
+): Array<{
+  name: string;
+  color: string;
+  closed: boolean;
+  points: Array<{ u: number; v: number }>;
+  highlight?: boolean;
+  frame?: boolean;
+}> {
   const scenePrimitives = buildContextPrimitives(ctx).filter((p) => !zoneBodyNames.has(p.name));
   if (!scenePrimitives.length) return [];
-  const neighbors = selectNearbyBodies(zoneBbox, scenePrimitives, {
-    maxCount: quality === "rough" ? 3 : quality === "draft" ? 4 : 10,
-    maxGapFactor: quality === "rough" ? 1.4 : quality === "draft" ? 1.8 : 2.5,
-  });
+  // Без лимита count/gap: все тела scope, кроме тел самой зоны; альфа по дистанции.
+  const neighbors = selectNearbyBodiesWithGap(zoneBbox, scenePrimitives, {});
   if (!neighbors.length) return [];
-  let frameBbox = zoneBbox;
-  for (const n of neighbors) frameBbox = bboxUnion(frameBbox, n.bbox);
+  let fadeScale = 0;
+  for (const { body: n } of neighbors) fadeScale = Math.max(fadeScale, neighborFadeDistance(zoneBbox, n));
+  fadeScale = Math.max(fadeScale, 1e-6);
   const meshes = neighbors
-    .map((n) => bodyToMeshDescriptor({ ...n, color: NEIGHBOR_BODY_COLOR }, frameBbox))
+    .map(({ body: n }) => {
+      const color = neighborColorByGap(neighborFadeDistance(zoneBbox, n), fadeScale);
+      const m = bodyToMeshDescriptor({ ...n, color }, zoneBbox);
+      return m ? { ...m, color, frame: false as const } : null;
+    })
     .filter((m): m is NonNullable<typeof m> => !!m);
   if (!meshes.length) return [];
   const focusPoint =
@@ -509,9 +519,9 @@ function buildNeighborZonePolylines(
       : axis === "y"
         ? { min: { x: 0, y: position, z: 0 }, max: { x: 0, y: position, z: 0 } }
         : { min: { x: position, y: 0, z: 0 }, max: { x: position, y: 0, z: 0 } };
-  const slices = buildBodySlices(meshes, "__zone_neighbors__", focusPoint, frameBbox);
+  const slices = buildBodySlices(meshes, "__zone_neighbors__", focusPoint, zoneBbox);
   const picked = slices.find((s) => s.axis === axis);
-  return (picked?.polylines ?? []).map((pl) => ({ ...pl, highlight: false }));
+  return (picked?.polylines ?? []).map((pl) => ({ ...pl, highlight: false, frame: false }));
 }
 
 function buildZoneSlice(

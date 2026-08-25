@@ -57,7 +57,16 @@ describe("completion", () => {
     const text = "HEAD 3 0\nCONT \nFINISH";
     const { doc, index } = openText(text);
     const items = completionItems(doc, { line: 1, character: 5 }, index);
-    assert.ok(items.some((i) => typeof i.label === "string" && i.label.length <= 2));
+    assert.ok(items.some((i) => i.label === "B" || i.label === "T"));
+    assert.ok(items.some((i) => i.label === "W(0.5)"));
+    assert.ok(items.some((i) => i.label === "S90" || i.label === "PRS60"));
+  });
+
+  it("suggests CNTAND 0|1", () => {
+    const text = "HEAD 3 0\nCNTAND \nFINISH";
+    const { doc, index } = openText(text);
+    const items = completionItems(doc, { line: 1, character: 7 }, index);
+    assert.ok(items.some((i) => i.label === "0" || i.label === "1"));
   });
 
   it("suggests hash zone tail properties", () => {

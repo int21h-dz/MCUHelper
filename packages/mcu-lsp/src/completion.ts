@@ -2,6 +2,7 @@ import {
   ALL_CARDS,
   BODY_TYPES,
   BOUNDARY_CODES,
+  CONT_SYMMETRY_SUGGESTIONS,
   MCU_LABEL_ALIASES,
   MODS_VALUES,
   formatCardHover,
@@ -331,11 +332,39 @@ export function getCompletions(
 
   if (/\bCONT\s/i.test(prefix) || trimmed.endsWith("CONT")) {
     for (const bc of BOUNDARY_CODES) {
+      const desc =
+        "description" in bc && typeof (bc as { description?: string }).description === "string"
+          ? (bc as { description: string }).description
+          : "Код граничного условия в карте CONT.";
       items.push({
         label: bc.code,
         kind: CompletionItemKind.Enum,
         detail: bc.title,
-        documentation: { kind: MarkupKind.Markdown, value: `**${bc.title}**\n\nКод граничного условия в карте CONT.` },
+        documentation: { kind: MarkupKind.Markdown, value: `**${bc.title}**\n\n${desc}` },
+      });
+      if (bc.code === "W" || bc.code === "M" || bc.code === "C") {
+        items.push({
+          label: `${bc.code}(0.5)`,
+          kind: CompletionItemKind.Snippet,
+          detail: `${bc.title} с вероятностью`,
+          insertText: `${bc.code}(\${1:0.5})`,
+          insertTextFormat: InsertTextFormat.Snippet,
+          documentation: {
+            kind: MarkupKind.Markdown,
+            value: `**${bc.title}** с вероятностью отражения p∈(0,1).\n\n${desc}`,
+          },
+        });
+      }
+    }
+    for (const sym of CONT_SYMMETRY_SUGGESTIONS) {
+      items.push({
+        label: sym.code,
+        kind: CompletionItemKind.EnumMember,
+        detail: sym.title,
+        documentation: {
+          kind: MarkupKind.Markdown,
+          value: `**${sym.code}** — ${sym.title}\n\nВ карте CONT после списка BC. Можно добавить угол поворота вокруг OZ.`,
+        },
       });
     }
   }

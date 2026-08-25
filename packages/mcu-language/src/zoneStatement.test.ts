@@ -29,6 +29,12 @@ describe("zone names that look like NET pointers (T1, P1, …)", () => {
     assert.ok(!looksLikeZoneStatement("T01 1 2 3 4"));
   });
 
+  it("does not treat CNTAND/PHOT numeric cards as zones", () => {
+    assert.ok(!looksLikeZoneStatement("CNTAND 1"));
+    assert.ok(!looksLikeZoneStatement("PHOT 1"));
+    assert.ok(!looksLikeZoneStatement("NEUT 0"));
+  });
+
   it("parseDocument keeps T1… as zones when expression looks like a zone", () => {
     const ast = parseDocument(
       [

@@ -4,7 +4,7 @@ import { LatticeGeneratorPanel } from "./latticeGeneratorPanel";
 
 let panel: LatticeGeneratorPanel | undefined;
 
-/** Открыть webview-конструктор решётки GLTL. */
+/** Открыть webview-конструктор решётки GLTL / G2AR / G2MP. */
 export async function runLatticeGenerator(
   context: vscode.ExtensionContext,
   client?: LanguageClient
@@ -17,7 +17,7 @@ export async function runLatticeGenerator(
   await panel.show({ fromCommand: true });
 }
 
-/** Следить за курсором: автооткрытие в блоке LATT GLTL (`mcuhelper.liveLatticeGenerator`). */
+/** Следить за курсором: автооткрытие в блоке LATT (`mcuhelper.liveLatticeGenerator`). */
 export function registerLatticeGenerator(
   context: vscode.ExtensionContext,
   client?: LanguageClient

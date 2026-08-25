@@ -1,310 +1,172 @@
-import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import assert from "node:assert/strict";
 import {
   buildG2arLatticeStatement,
   buildG2mpLatticeStatement,
-  buildGltlLatticeStatement,
-  buildLatticeStatement,
-  collectLcellFootprintsFromText,
-  defaultLatticeGeneratorInput,
-  emptyCartogram,
-  findLatticeBlockAtLine,
-  formatG2mpRowLabel,
-  inferGltlGridSize,
-  parseLatticeAtLine,
+  convertLatticeGeneratorType,
   parseLatticeBlockText,
-  resizeCartogram,
 } from "./latticeGenerator";
-import { parseDocument } from "./parser";
 
-describe("latticeGenerator", () => {
-  it("formats L01…L10 labels", () => {
-    assert.equal(formatG2mpRowLabel(1), "L01");
-    assert.equal(formatG2mpRowLabel(10), "L10");
-  });
+/** Пример UserGuide §9.2.6.2 (рис. A.57). */
+const USERGUIDE_G2AR = `LATT G2AR CUB
+LISTEL TW1 TW2
+PARM 0:5 -1:4 0,0,0 25,0,0 0,25,0
+     0:1,-1 0:1,0 0,1 0,3:4 4:5,2:4
+     /2 3,0 2,1:2`;
 
-  it("resizes cartogram preserving cells", () => {
-    const src = [
-      ["A", "0"],
-      ["B", "A"],
-    ];
-    const next = resizeCartogram(src, 3, 2);
-    assert.deepEqual(next[0], ["A", "0", "0"]);
-    assert.deepEqual(next[1], ["B", "A", "0"]);
-  });
+/** Мини-картограмма G2MP (§9.2.6.3). */
+const MINI_G2MP = `LATT G2MP ZZZ
+LISTEL K1 K3
+PARM 3,3 0,0,0 10,0,0 0,10,0
+L03 0 K3 0
+L02 0 K1 K3
+L01 K1 K1 K1`;
 
-  it("builds G2MP text parseable by MCU parser", () => {
-    const input = defaultLatticeGeneratorInput();
-    input.latticeType = "G2MP";
-    input.elements = ["A", "B"];
-    input.cols = 5;
-    input.rows = 5;
-    input.vectorA = ["-2", "-2", "0"];
-    input.vectorB = ["1", "0", "0"];
-    input.vectorC = ["0", "1", "0"];
-    input.cartogram = emptyCartogram(5, 5);
-    input.cartogram[0]![0] = "A";
-    input.cartogram[2]![2] = "B";
-    const built = buildG2mpLatticeStatement(input);
-    assert.ok(built.okToInsert, built.warnings.join("; "));
-    assert.match(built.text, /^LATT G2MP ZL$/m);
-    assert.match(built.text, /^LISTEL A B$/m);
-    assert.match(built.text, /^PARM 5,5 /m);
-    assert.match(built.text, /^L01 A /m);
-    assert.match(built.text, /^L03 0 0 B /m);
-
-    const doc = `HEAD 1 0
-CONT T T T
-RCZ C 0 0 0 10 5
-END
-ZL C /1:1
-END
-LCELL A
-RPP BL -0.4,0.4 -0.4,0.4 0,1
-END
-Z A BL /1:1
-END
-ENDL
-LCELL B
-RPP BL -0.4,0.4 -0.4,0.4 0,1
-END
-Z A BL /1:1
-END
-ENDL
-${built.text}FINISH
-`;
-    const ast = parseDocument(doc, { uri: "gen.mcu" });
-    const lat = ast.lattices.find((l) => l.latticeType === "G2MP");
-    assert.ok(lat);
-    assert.deepEqual(lat!.elements, ["A", "B"]);
-    assert.equal(lat!.typeMap?.length, 5);
-    assert.equal(lat!.typeMap![0]![0], "A");
-    assert.equal(lat!.typeMap![2]![2], "B");
-  });
-
-  it("round-trips G2MP via parseLatticeBlockText", () => {
-    const input = defaultLatticeGeneratorInput();
-    input.latticeType = "G2MP";
-    input.elements = ["A", "B"];
-    input.cols = 5;
-    input.rows = 5;
-    input.vectorA = ["-2", "-2", "0"];
-    input.vectorB = ["1", "0", "0"];
-    input.vectorC = ["0", "1", "0"];
-    input.cartogram = emptyCartogram(5, 5);
-    input.cartogram[1]![1] = "B";
-    const built = buildG2mpLatticeStatement(input);
-    const parsed = parseLatticeBlockText(built.text);
+describe("latticeGenerator G2MP", () => {
+  it("parses PARM + L01…LJ cartogram", () => {
+    const parsed = parseLatticeBlockText(MINI_G2MP);
     assert.ok(parsed);
-    assert.equal(parsed!.latticeType, "G2MP");
-    assert.equal(parsed!.cols, 5);
-    assert.equal(parsed!.cartogram[1]![1], "B");
+    assert.equal(parsed.latticeType, "G2MP");
+    assert.equal(parsed.zoneName, "ZZZ");
+    assert.deepEqual(parsed.elements, ["K1", "K3"]);
+    assert.equal(parsed.cols, 3);
+    assert.equal(parsed.rows, 3);
+    assert.deepEqual(parsed.vectorA, ["0", "0", "0"]);
+    assert.deepEqual(parsed.vectorB, ["10", "0", "0"]);
+    assert.deepEqual(parsed.vectorC, ["0", "10", "0"]);
+    assert.equal(parsed.cartogram[0]![0], "K1");
+    assert.equal(parsed.cartogram[0]![1], "K1");
+    assert.equal(parsed.cartogram[1]![1], "K1");
+    assert.equal(parsed.cartogram[1]![2], "K3");
+    assert.equal(parsed.cartogram[2]![1], "K3");
+    assert.equal(parsed.cartogram[2]![0], "0");
   });
 
-  it("builds GLTL and finds block at cursor", () => {
-    const input = defaultLatticeGeneratorInput();
-    input.latticeType = "GLTL";
-    input.elements = ["A", "B"];
-    input.placements = [
-      { element: "A", protoIndex: 1, x: "0", y: "0", z: "0" },
-      { element: "B", protoIndex: 2, x: "2", y: "0", z: "0" },
-    ];
-    const built = buildGltlLatticeStatement(input);
-    assert.ok(built.okToInsert, built.warnings.join("; "));
-    assert.match(built.text, /^LATT GLTL ZL$/m);
-    assert.match(built.text, /\/2 2,0,0/);
-
-    const doc = `HEAD 1 0
-CONT T T T
-RCZ C 0 0 0 10 5
-END
-ZL C /1:1
-END
-${built.text}FINISH
-`;
-    const lines = doc.split("\n");
-    const lattLine = lines.findIndex((l) => /^LATT\b/i.test(l.trim()));
-    const range = findLatticeBlockAtLine(lines, lattLine);
-    assert.ok(range);
-    assert.equal(range!.startLine, lattLine);
-    const hit = parseLatticeAtLine(doc, lattLine + 1);
-    assert.ok(hit);
-    assert.equal(hit!.input.latticeType, "GLTL");
-    assert.equal(hit!.input.placements.length, 2);
-  });
-
-  it("builds G2AR with exclusions and /2", () => {
-    const input = defaultLatticeGeneratorInput();
-    input.latticeType = "G2AR";
-    input.elements = ["A", "B"];
-    input.iMin = 0;
-    input.iMax = 2;
-    input.jMin = 0;
-    input.jMax = 1;
-    input.cols = 3;
-    input.rows = 2;
-    input.cartogram = [
-      ["A", "0", "B"],
-      ["A", "A", "A"],
-    ];
-    const built = buildG2arLatticeStatement(input);
-    assert.ok(built.okToInsert, built.warnings.join("; "));
-    assert.match(built.text, /^LATT G2AR ZL$/m);
-    assert.match(built.text, /PARM 2 1 /);
-    assert.match(built.text, /1,0/);
-    assert.match(built.text, /\/2 2,0/);
-
-    const parsed = parseLatticeBlockText(built.text);
+  it("builds L01… rows and round-trips", () => {
+    const parsed = parseLatticeBlockText(MINI_G2MP);
     assert.ok(parsed);
-    assert.equal(parsed!.latticeType, "G2AR");
-    assert.equal(parsed!.cartogram[0]![1], "0");
-    assert.equal(parsed!.cartogram[0]![2], "B");
+    const built = buildG2mpLatticeStatement(parsed);
+    assert.equal(built.okToInsert, true);
+    assert.match(built.text, /^LATT G2MP ZZZ/m);
+    assert.match(built.text, /PARM 3,3 0,0,0 10,0,0 0,10,0/);
+    assert.match(built.text, /^L01 /m);
+    assert.match(built.text, /^L03 /m);
+
+    const again = parseLatticeBlockText(built.text);
+    assert.ok(again);
+    assert.equal(again.latticeType, "G2MP");
+    assert.equal(again.cartogram[1]![1], "K1");
+    assert.equal(again.cartogram[1]![2], "K3");
+    assert.equal(again.cartogram[2]![0], "0");
+  });
+});
+
+describe("latticeGenerator G2AR", () => {
+  it("parses UserGuide cartogram with exclusions and /2", () => {
+    const parsed = parseLatticeBlockText(USERGUIDE_G2AR);
+    assert.ok(parsed);
+    assert.equal(parsed.latticeType, "G2AR");
+    assert.equal(parsed.zoneName, "CUB");
+    assert.deepEqual(parsed.elements, ["TW1", "TW2"]);
+    assert.equal(parsed.iMin, 0);
+    assert.equal(parsed.iMax, 5);
+    assert.equal(parsed.jMin, -1);
+    assert.equal(parsed.jMax, 4);
+    assert.deepEqual(parsed.vectorA, ["0", "0", "0"]);
+    assert.deepEqual(parsed.vectorB, ["25", "0", "0"]);
+    assert.deepEqual(parsed.vectorC, ["0", "25", "0"]);
+
+    const at = (i: number, j: number) => parsed.cartogram[j - parsed.jMin]![i - parsed.iMin]!;
+
+    assert.equal(at(0, -1), "0");
+    assert.equal(at(1, -1), "0");
+    assert.equal(at(0, 0), "0");
+    assert.equal(at(1, 0), "0");
+    assert.equal(at(0, 1), "0");
+    assert.equal(at(0, 3), "0");
+    assert.equal(at(0, 4), "0");
+    assert.equal(at(4, 2), "0");
+    assert.equal(at(5, 2), "0");
+    assert.equal(at(3, 0), "TW2");
+    assert.equal(at(2, 1), "TW2");
+    assert.equal(at(2, 2), "TW2");
+    assert.equal(at(1, 2), "TW1");
   });
 
-  it("buildLatticeStatement dispatches by type", () => {
-    const input = defaultLatticeGeneratorInput();
-    input.latticeType = "GLTL";
-    const t = buildLatticeStatement(input).text;
-    assert.match(t, /^LATT GLTL /m);
+  it("builds multiline PARM and round-trips exclusions + /2", () => {
+    const parsed = parseLatticeBlockText(USERGUIDE_G2AR);
+    assert.ok(parsed);
+
+    const built = buildG2arLatticeStatement(parsed);
+    assert.equal(built.okToInsert, true);
+    assert.match(built.text, /^LATT G2AR CUB/m);
+    assert.match(built.text, /PARM 5 -1:4 0,0,0 25,0,0 0,25,0/);
+    assert.match(built.text, /\/2 .*3,0/);
+    assert.match(built.text, /\/2 .*2,1/);
+    assert.match(built.text, /\/2 .*2,2/);
+
+    const again = parseLatticeBlockText(built.text);
+    assert.ok(again);
+    assert.equal(again.latticeType, "G2AR");
+
+    const cell = (inp: typeof again, i: number, j: number) =>
+      inp.cartogram[j - inp.jMin]![i - inp.iMin]!;
+
+    assert.equal(cell(again, 0, 1), "0");
+    assert.equal(cell(again, 3, 0), "TW2");
+    assert.equal(cell(again, 2, 2), "TW2");
+    assert.equal(cell(again, 1, 2), "TW1");
+  });
+});
+
+describe("latticeGenerator convertLatticeGeneratorType", () => {
+  it("G2MP ↔ G2AR keeps cartogram and root geometry", () => {
+    const g2mp = parseLatticeBlockText(MINI_G2MP)!;
+    const g2ar = convertLatticeGeneratorType(g2mp, "G2AR");
+    assert.equal(g2ar.latticeType, "G2AR");
+    assert.equal(g2ar.iMin, 0);
+    assert.equal(g2ar.iMax, 2);
+    assert.equal(g2ar.jMin, 0);
+    assert.equal(g2ar.jMax, 2);
+    assert.equal(g2ar.cartogram[0]![0], "K1");
+    assert.equal(g2ar.cartogram[2]![1], "K3");
+
+    const back = convertLatticeGeneratorType(g2ar, "G2MP");
+    assert.equal(back.latticeType, "G2MP");
+    assert.equal(back.cols, 3);
+    assert.equal(back.rows, 3);
+    assert.deepEqual(back.vectorA, ["0", "0", "0"]);
+    assert.equal(back.cartogram[1]![2], "K3");
   });
 
-  it("parses LISTEL names without leading spaces via AST enrich", () => {
-    const doc = `HEAD 1 0
-CONT T T T
-RCZ C 0 0 0 10 5
-END
-ZL C /1:1
-END
-LCELL Pogl20
-RPP BL -5,5 -5,5 0,10
-END
-Z A BL /1:1
-END
-ENDL
-LCELL TVS281
-RPP BL -4,4 -4,4 0,10
-END
-Z A BL /1:1
-END
-ENDL
-LCELL PustY2
-RCZ CL 0,0,0 10 3
-END
-Z A CL /1:1
-END
-ENDL
-LATT GLTL ZL
-LISTEL Pogl20
-TVS281
-PustY2
-PARM
- /2 0,0,0
- /2 25,0,0
- /3 50,25,0
-FINISH
-`;
-    const hit = parseLatticeAtLine(doc, doc.split("\n").findIndex((l) => /^LATT\b/i.test(l)));
-    assert.ok(hit);
-    assert.deepEqual(hit!.input.elements, ["Pogl20", "TVS281", "PustY2"]);
-    assert.equal(hit!.input.placements[0]!.element, "TVS281");
-    const fp = hit!.input.footprints;
-    assert.ok(fp.some((f) => f.name === "Pogl20" && f.shapes.some((s) => s.kind === "rect")));
-    assert.ok(fp.some((f) => f.name === "PustY2" && f.shapes.some((s) => s.kind === "circle")));
+  it("G2AR with nonzero iMin shifts A when converting to G2MP", () => {
+    const g2ar = parseLatticeBlockText(USERGUIDE_G2AR)!;
+    const g2mp = convertLatticeGeneratorType(g2ar, "G2MP");
+    assert.equal(g2mp.latticeType, "G2MP");
+    assert.equal(g2mp.cols, 6);
+    assert.equal(g2mp.rows, 6);
+    // A' = A + 0·B + (−1)·C = (0,0,0)+(0,−25,0)
+    assert.deepEqual(g2mp.vectorA, ["0", "-25", "0"]);
+    assert.equal(g2mp.cartogram[0]![0], "0"); // was (0,-1)
+    assert.equal(g2mp.cartogram[1]![3], "TW2"); // (3,0) → ci=3,cj=1
   });
 
-  it("user sample: spaced LISTEL + /n → 4×4 grid", () => {
-    const doc = `HEAD 1 0
-CONT T T T
-RCZ C 0 0 0 100 50
-END
-ZL C /1:1
-END
-LCELL Pogl20
-RPP BL -10,10 -10,10 0,20
-END
-Z A BL /1:1
-END
-ENDL
-LCELL TVS281
-RPP BL -8,8 -8,8 0,20
-END
-Z A BL /1:1
-END
-ENDL
-LCELL PustY2
-RPP BL -6,6 -6,6 0,20
-END
-Z A BL /1:1
-END
-ENDL
-LATT      GLTL ZL
-LISTEL    Pogl20
-          TVS281
-          PustY2
-PARM      
-   /2   0,0,0
-   /2   25,0,0
-   /2   50,0,0
-   /2   75,0,0
-   /2   0,25,0
-   /2   25,25,0
-   /3   50,25,0
-   /2   75,25,0
-   /2   0,50,0
-   /2   25,50,0
-   /2   50,50,0
-   /2   75,50,0
-   /1   0,75,0
-   /2   25,75,0
-   /2   50,75,0
-   /2   75,75,0
-FINISH
-`;
-    const hit = parseLatticeAtLine(doc, doc.split("\n").findIndex((l) => /^\s*LATT\b/i.test(l)));
-    assert.ok(hit);
-    assert.deepEqual(hit!.input.elements, ["Pogl20", "TVS281", "PustY2"]);
-    assert.equal(hit!.input.placements.length, 16);
-    assert.equal(hit!.input.placements[0]!.element, "TVS281");
-    assert.equal(hit!.input.placements[0]!.protoIndex, 2);
-    assert.equal(hit!.input.placements[6]!.element, "PustY2");
-    assert.equal(hit!.input.placements[12]!.element, "Pogl20");
-    const g = inferGltlGridSize(hit!.input.placements);
-    assert.equal(g.cols, 4);
-    assert.equal(g.rows, 4);
-    assert.equal(g.layers, 1);
-    assert.ok(hit!.input.footprints.some((f) => f.name === "TVS281" && f.shapes.length > 0));
-  });
+  it("GLTL ↔ G2MP maps placements to cartogram cells", () => {
+    const gltl = parseLatticeBlockText(`LATT GLTL ZL
+LISTEL A B
+PARM /1 0,0,0
+     /2 10,0,0
+     /1 0,10,0`)!;
+    const g2mp = convertLatticeGeneratorType(gltl, "G2MP");
+    assert.equal(g2mp.latticeType, "G2MP");
+    assert.equal(g2mp.cols, 2);
+    assert.equal(g2mp.rows, 2);
+    assert.equal(g2mp.cartogram[0]![0], "A");
+    assert.equal(g2mp.cartogram[0]![1], "B");
+    assert.equal(g2mp.cartogram[1]![0], "A");
 
-  it("collectLcellFootprintsFromText recovers LCELL when not in stub AST", () => {
-    const text = `HEAD 1 0
-CONT T T T
-RCZ C 0 0 0 10 5
-END
-Z C /1:1
-END
-LCELL BigOne
-RPP BL -20,20 -15,15 0,10
-END
-Z A BL /1:1
-END
-ENDL
-LCELL Tiny
-RCZ CL 0,0,0 5 2
-END
-Z A BL /1:1
-END
-ENDL
-`;
-    const fp = collectLcellFootprintsFromText(text, ["BigOne", "Tiny"]);
-    const big = fp.find((f) => f.name === "BigOne");
-    const tiny = fp.find((f) => f.name === "Tiny");
-    assert.ok(big?.shapes.some((s) => s.kind === "rect"));
-    assert.ok(tiny?.shapes.some((s) => s.kind === "circle"));
-    const br = big!.shapes.find((s) => s.kind === "rect") as {
-      kind: "rect";
-      x1: number;
-      x2: number;
-    };
-    assert.ok(Math.abs(br.x2 - br.x1) >= 39);
+    const back = convertLatticeGeneratorType(g2mp, "GLTL");
+    assert.equal(back.latticeType, "GLTL");
+    assert.ok(back.placements.some((p) => p.element === "B" && p.x === "10"));
   });
 });

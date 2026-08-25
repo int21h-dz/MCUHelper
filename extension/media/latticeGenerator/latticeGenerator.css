@@ -121,8 +121,16 @@ legend {
   gap: 8px;
 }
 
-.lg-dims4 .lg-row {
-  grid-template-columns: 28px 1fr;
+.lg-dims2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+
+.lg-dims4 .lg-row,
+.lg-dims2 .lg-row {
+  grid-template-columns: 72px 1fr;
   margin: 0;
 }
 
@@ -510,6 +518,117 @@ textarea:focus {
 .lg-cell.empty {
   background: var(--lg-empty);
   color: var(--lg-muted);
+}
+
+.lg-cell.excluded {
+  background: var(--lg-empty);
+  color: var(--lg-muted);
+  border: 1px dashed var(--lg-border);
+  stroke-dasharray: 3 2;
+}
+
+.lg-cell.excluded:hover {
+  outline-color: var(--lg-warn);
+}
+
+.lg-cartogram-wrap {
+  overflow: auto;
+  max-height: 42vh;
+  margin-top: 8px;
+  padding: 4px;
+  border: 1px solid var(--lg-border);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--lg-fg) 3%, var(--lg-bg));
+}
+
+.lg-cartogram {
+  border-collapse: collapse;
+  margin: 0 auto;
+  font-family: var(--lg-font);
+}
+
+.lg-cartogram caption {
+  caption-side: top;
+  padding: 4px 0 8px;
+  font-size: 11px;
+  color: var(--lg-muted);
+  text-align: center;
+}
+
+.lg-cartogram th,
+.lg-cartogram td {
+  padding: 1px;
+}
+
+.lg-brush-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 8px 0;
+}
+
+.lg-brush {
+  cursor: pointer;
+  border: 1px solid var(--lg-border);
+  font: inherit;
+}
+
+.lg-brush.active {
+  box-shadow: 0 0 0 2px var(--lg-accent);
+  border-color: var(--lg-accent);
+}
+
+.lg-brush-exclude {
+  background: var(--lg-empty);
+  color: var(--lg-muted);
+  border-style: dashed;
+}
+
+.lg-type-toggle {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.lg-type-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 4px 10px;
+  border: 1px solid var(--lg-border);
+  border-radius: 4px;
+  user-select: none;
+  font-weight: 500;
+}
+
+.lg-type-opt:has(input:checked) {
+  border-color: var(--lg-accent);
+  background: var(--lg-accent-soft);
+  color: var(--lg-accent);
+}
+
+.lg-type-opt-disabled,
+.lg-type-opt:has(input:disabled) {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.lg-type-opt input {
+  width: auto;
+  margin: 0;
+}
+
+.lg-plot-palette-brush {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.lg-plot-g2ar .lg-proto-g2ar {
+  cursor: default;
 }
 
 .lg-cell:hover {

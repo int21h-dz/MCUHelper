@@ -3,6 +3,7 @@ import * as vscode from "vscode";
 import type { LanguageClient } from "vscode-languageclient/node";
 import { isMcunrDocument } from "./contentDetect";
 import {
+  loadBodyArrayGeneratorApi,
   loadBodyGeneratorApi,
   type BodyGeneratorInput,
   type BodyTypeOption,
@@ -21,11 +22,18 @@ type VisibleConstant = {
   scope: string;
 };
 
+type PatternState = {
+  group: "none" | "array" | "curve" | "mirror";
+  mode: string;
+  values: Record<string, number | string>;
+  excludedIndices?: number[];
+};
+
 type FormState = {
   bodyType: string;
   name: string;
   params: string[];
-  nearbyCount: number;
+  pattern?: PatternState;
 };
 
 type GeometrySceneLike = {
@@ -47,6 +55,7 @@ type MeshPreviewApi = {
     scenePrimitives: NonNullable<GeometrySceneLike["primitives"]>;
     sceneBbox?: GeometrySceneLike["bbox"];
     nearby?: { maxCount?: number; maxGapFactor?: number; excludeName?: string };
+    extraBodies?: Array<{ name: string; bodyType: string; params: number[]; excluded?: boolean }>;
     slicePositions?: Partial<{ x: number; y: number; z: number }>;
     transf?: { protoName: string; mode: string; A: number; B: number; f: number };
   }) => {
@@ -74,6 +83,16 @@ type MeshPreviewApi = {
       }>;
     }>;
   };
+  translateBodyParams: (bodyType: string, params: number[], dx: number, dy: number, dz: number) => number[] | null;
+  applyTransfToBodyParams: (
+    bodyType: string,
+    params: number[],
+    mode: "M" | "R",
+    A: number,
+    B: number,
+    f: number
+  ) => number[] | null;
+  bodyAnchorPoint: (bodyType: string, params: number[]) => { x: number; y: number; z: number } | null;
 };
 
 function loadMeshPreviewApi(): MeshPreviewApi | null {
@@ -92,18 +111,65 @@ function loadMeshPreviewApi(): MeshPreviewApi | null {
   return null;
 }
 
+const DEFAULT_PATTERN: PatternState = {
+  group: "none",
+  mode: "linear",
+  excludedIndices: [],
+  values: {
+    count: 3,
+    stepMode: "vector",
+    sx: 2,
+    sy: 0,
+    sz: 0,
+    length: 2,
+    dirX: 1,
+    dirY: 0,
+    dirZ: 0,
+    n1: 2,
+    n2: 3,
+    ux: 2,
+    uy: 0,
+    uz: 0,
+    vx: 0,
+    vy: 2,
+    vz: 0,
+    rings: 1,
+    pitch: 2,
+    x0: 0,
+    y0: 0,
+    z0: 0,
+    x1: 6,
+    y1: 0,
+    z1: 0,
+    cx: 0,
+    cy: 0,
+    f0: 0,
+    phi: 0,
+    size: 4,
+    sizeMode: "flat",
+    perimeterRef: "center",
+    A: 0,
+    B: 0,
+    f: 90,
+  },
+};
+
 const DEFAULT_FORM: FormState = {
   bodyType: "RCZ",
   name: "*",
   params: ["0", "0", "0", "1", "1"],
-  nearbyCount: 12,
+  pattern: { ...DEFAULT_PATTERN, values: { ...DEFAULT_PATTERN.values } },
 };
 
 /** Webview-конструктор геометрических тел с превью и EQU. */
 export class BodyGeneratorPanel {
   private panel: vscode.WebviewPanel | undefined;
   private client: LanguageClient | undefined;
-  private form: FormState = { ...DEFAULT_FORM, params: [...DEFAULT_FORM.params] };
+  private form: FormState = {
+    ...DEFAULT_FORM,
+    params: [...DEFAULT_FORM.params],
+    pattern: { ...DEFAULT_PATTERN, values: { ...DEFAULT_PATTERN.values } },
+  };
   private meshApi = loadMeshPreviewApi();
   private types: BodyTypeOption[] = [];
   private lastUri: vscode.Uri | undefined;
@@ -168,6 +234,7 @@ export class BodyGeneratorPanel {
   private async onMessage(msg: {
     type?: string;
     form?: Partial<FormState>;
+    pattern?: PatternState;
     positions?: Partial<{ x: number; y: number; z: number }>;
   }): Promise<void> {
     if (!this.panel) return;
@@ -180,6 +247,7 @@ export class BodyGeneratorPanel {
           this.applyForm(msg.form);
           this.manualSlicePositions = undefined;
         }
+        if (msg.pattern) this.applyPattern(msg.pattern);
         this.postPreview();
         break;
       case "slicePlanesChanged":
@@ -201,6 +269,7 @@ export class BodyGeneratorPanel {
       }
       case "insert":
         if (msg.form) this.applyForm(msg.form);
+        if (msg.pattern) this.applyPattern(msg.pattern);
         await this.insertIntoEditor();
         break;
       case "refresh":
@@ -217,9 +286,23 @@ export class BodyGeneratorPanel {
       this.form.name = loadBodyGeneratorApi().sanitizeBodyName(partial.name);
     }
     if (partial.params) this.form.params = [...partial.params];
-    if (partial.nearbyCount != null && Number.isFinite(partial.nearbyCount)) {
-      this.form.nearbyCount = Math.max(1, Math.min(40, Math.floor(partial.nearbyCount)));
-    }
+    if (partial.pattern) this.applyPattern(partial.pattern);
+  }
+
+  private applyPattern(partial: PatternState): void {
+    const group = partial.group === "array" || partial.group === "curve" || partial.group === "mirror" ? partial.group : "none";
+    const excluded =
+      group === "none"
+        ? []
+        : Array.isArray(partial.excludedIndices)
+          ? [...partial.excludedIndices]
+          : [...(this.form.pattern?.excludedIndices ?? [])];
+    this.form.pattern = {
+      group,
+      mode: String(partial.mode || this.form.pattern?.mode || "linear"),
+      excludedIndices: excluded,
+      values: { ...(this.form.pattern?.values ?? DEFAULT_PATTERN.values), ...(partial.values ?? {}) },
+    };
   }
 
   private rememberEditor(editor?: vscode.TextEditor): void {
@@ -385,6 +468,120 @@ export class BodyGeneratorPanel {
     void this.runPreview();
   }
 
+  private fmtParamNum(n: number): string {
+    if (!Number.isFinite(n)) return "0";
+    return Number(n.toFixed(9)).toString();
+  }
+
+  /** Развёртка позы → строковые параметры с сохранением EQU исходника. */
+  private poseToParamStrings(
+    bodyType: string,
+    seedParams: string[],
+    resolvedNums: number[],
+    pose: {
+      kind: string;
+      dx?: number | string;
+      dy?: number | string;
+      dz?: number | string;
+      A?: number | string;
+      B?: number | string;
+      f?: number | string;
+    }
+  ): string[] | null {
+    const arr = loadBodyArrayGeneratorApi();
+    const kind = this.poseKind(pose);
+    if (kind === "T") {
+      return arr.applyTranslateToBodyParamStrings(
+        bodyType,
+        seedParams,
+        Number(pose.dx ?? 0),
+        Number(pose.dy ?? 0),
+        Number(pose.dz ?? 0)
+      );
+    }
+    const next = this.applyPoseToParams(bodyType, resolvedNums, pose);
+    if (!next) return null;
+    return arr.mergePreservedParamStrings(seedParams, resolvedNums, next);
+  }
+
+  private applyPoseToParams(
+    bodyType: string,
+    params: number[],
+    pose: {
+    kind: string;
+    dx?: number | string;
+    dy?: number | string;
+    dz?: number | string;
+    A?: number | string;
+    B?: number | string;
+    f?: number | string;
+  }
+  ): number[] | null {
+    if (!this.meshApi) return null;
+    const kind = this.poseKind(pose);
+    if (kind === "T") {
+      return this.meshApi.translateBodyParams(
+        bodyType,
+        params,
+        Number(pose.dx ?? 0),
+        Number(pose.dy ?? 0),
+        Number(pose.dz ?? 0)
+      );
+    }
+    if (kind === "R" || kind === "M") {
+      return this.meshApi.applyTransfToBodyParams(
+        bodyType,
+        params,
+        kind,
+        Number(pose.A ?? 0),
+        Number(pose.B ?? 0),
+        Number(pose.f ?? 0)
+      );
+    }
+    return null;
+  }
+
+  private resolvePatternValues(
+    values: Record<string, number | string>,
+    vars: Map<string, number>
+  ): { values: Record<string, number | string>; warnings: string[]; ok: boolean } {
+    const api = loadBodyGeneratorApi();
+    const out: Record<string, number | string> = { ...values };
+    const warnings: string[] = [];
+    let ok = true;
+    for (const [key, raw] of Object.entries(values)) {
+      if (key === "stepMode" || key === "sizeMode" || key === "perimeterRef") continue;
+      const text = String(raw ?? "").trim();
+      if (!text) continue;
+      const r = api.resolveBodyParamNumbers([text], vars);
+      for (const w of r.warnings) {
+        warnings.push(`Массив «${key}»: ${w.replace(/^Параметр #\d+\s*/, "").replace(/^Параметр #\d+ /, "")}`);
+      }
+      const n = r.nums[0];
+      if (!Number.isFinite(n)) ok = false;
+      else out[key] = n;
+    }
+    return { values: out, warnings, ok };
+  }
+
+  private currentPattern(): PatternState {
+    return this.form.pattern ?? { ...DEFAULT_PATTERN, values: { ...DEFAULT_PATTERN.values } };
+  }
+
+  private async existingBodyNames(): Promise<string[]> {
+    const index = await this.fetchIndexPayload();
+    const scope = index?.editorContext?.scope ?? "global";
+    return (index?.summaries?.bodies ?? [])
+      .filter((b) => (b.scope ?? "global") === scope)
+      .map((b) => b.name);
+  }
+
+  private poseKind(pose: { kind: string }): "T" | "R" | "M" | null {
+    const k = String(pose.kind || "").toUpperCase();
+    if (k === "T" || k === "R" || k === "M") return k;
+    return null;
+  }
+
   private async runPreview(): Promise<void> {
     if (!this.panel) return;
     const gen = ++this.previewGeneration;
@@ -426,6 +623,145 @@ export class BodyGeneratorPanel {
         }
       }
 
+      const pattern = this.currentPattern();
+      const patternActive = pattern.group !== "none";
+      const numsOk = !isTransf && resolved.nums.length > 0 && resolved.nums.every(Number.isFinite);
+      let previewSeedParams = resolved.nums;
+      const extraBodies: Array<{ name: string; bodyType: string; params: number[]; excluded?: boolean }> = [];
+      let previewText = built.text;
+      let insertOk = built.okToInsert;
+      let patternStatus: {
+        summary: string;
+        hint: string;
+        radiusText: string;
+        okToInsert: boolean;
+        excludedCount?: number;
+        instanceCount?: number;
+        excludedIndices?: number[];
+      } = {
+        summary: `Будет вставлено: 1×${this.form.bodyType.toUpperCase()}`,
+        hint: "",
+        radiusText: "",
+        okToInsert: insertOk,
+      };
+
+      let arrayInstances: Array<{ index: number; name: string; excluded: boolean }> = [];
+      let patternExcludedIndices: number[] = [];
+
+      if (patternActive) {
+        const arr = loadBodyArrayGeneratorApi();
+        const patVals = this.resolvePatternValues(pattern.values, vars);
+        warnings.push(...patVals.warnings);
+        if (!patVals.ok) insertOk = false;
+        const anchor = numsOk && this.meshApi ? this.meshApi.bodyAnchorPoint(this.form.bodyType, resolved.nums) : null;
+        const builtPat = arr.buildPatternInstances({
+          group: pattern.group,
+          mode: pattern.mode,
+          values: patVals.values,
+          seedAnchor: anchor ?? undefined,
+        });
+        warnings.push(...builtPat.warnings);
+        const can = arr.patternCanUseTransf(this.form.bodyType, builtPat.useTransfCandidate);
+        const expand = !can.ok;
+        const excludedSet = new Set(arr.pruneExcludedIndices(pattern.excludedIndices, builtPat.instances.length));
+        const excluded = [...excludedSet].sort((a, b) => a - b);
+        patternExcludedIndices = excluded;
+        this.form.pattern = { ...this.currentPattern(), excludedIndices: excluded };
+        const excludedResult = arr.applyPatternExclusions(builtPat.instances, excluded);
+        warnings.push(...excludedResult.warnings);
+        if (!excludedResult.ok) insertOk = false;
+        const activeInstances = excludedResult.instances;
+        if (pattern.mode === "hexRings") {
+          const rings = Number(patVals.values.rings);
+          if (Number.isFinite(rings) && rings >= 0) {
+            const n = arr.hexLatticeInstanceCount(rings);
+            patternStatus.hint = `Гексагональная упаковка: ${n} позиций (R=${Math.round(rings)}).`;
+          } else {
+            patternStatus.hint = "Гексагональная упаковка со сдвигом рядов 60° (как на ТВС).";
+          }
+        }
+        if (pattern.mode === "ring") {
+          patternStatus.hint = "f0 поворачивает всё кольцо, включая исходник (как TRANSF R).";
+          const cx = Number(patVals.values.cx);
+          const cy = Number(patVals.values.cy);
+          if (anchor && Number.isFinite(cx) && Number.isFinite(cy)) {
+            const r = Math.hypot(anchor.x - cx, anchor.y - cy);
+            patternStatus.radiusText = `R ≈ ${Number(r.toFixed(4))}`;
+          }
+        }
+        if (pattern.mode === "segment") {
+          patternStatus.hint = "Начало отрезка — центр исходника; P1 — конец в координатах сцены.";
+        }
+        if (pattern.mode === "trianglePerimeter" || pattern.mode === "hexPerimeter") {
+          const ref = String(patVals.values.perimeterRef || "center");
+          patternStatus.hint =
+            ref === "seed"
+              ? "Исходник на контуре: образующая проходит через центр прототипа."
+              : "Центр (cx, cy): исходник переносится на контур, копии по периметру.";
+        }
+        if (!numsOk) {
+          warnings.push("Массив: не удалось вычислить числовые параметры исходника (EQU).");
+          insertOk = false;
+        }
+        const existing = await this.existingBodyNames();
+        if (gen !== this.previewGeneration || !this.panel) return;
+        const emitInput = {
+          seed: { bodyType: this.form.bodyType, name: insertName, params: this.form.params },
+          expand,
+          canUseTransf: can.ok,
+          existingNames: existing,
+          transformExpanded: (pose: { kind: string; [k: string]: number | string }) =>
+            this.poseToParamStrings(this.form.bodyType, this.form.params, resolved.nums, pose),
+        };
+        const pickEmit =
+          numsOk && patVals.ok && builtPat.ok
+            ? arr.emitBodyArray({ ...emitInput, instances: builtPat.instances })
+            : null;
+        arrayInstances =
+          pickEmit?.names.map((name, index) => ({ index, name, excluded: excludedSet.has(index) })) ?? [];
+        const emit =
+          numsOk && patVals.ok && excludedResult.ok
+            ? arr.emitBodyArray({ ...emitInput, instances: activeInstances })
+            : { text: "", warnings: [], okToInsert: false, summary: "", names: [insertName] };
+        warnings.push(...emit.warnings);
+        insertOk = insertOk && builtPat.ok && excludedResult.ok && emit.okToInsert && numsOk && patVals.ok;
+        previewText = emit.text || built.text;
+        const excludedHint =
+          excludedResult.excludedCount > 0
+            ? `исключено ${excludedResult.excludedCount} · вставка ${activeInstances.length}`
+            : "";
+        patternStatus = {
+          ...patternStatus,
+          summary: `Будет вставлено: ${emit.summary || builtPat.summary} · N=${activeInstances.length}${excludedHint ? ` · ${excludedHint}` : ""}`,
+          okToInsert: insertOk,
+          excludedCount: excludedResult.excludedCount,
+          instanceCount: builtPat.instances.length,
+          excludedIndices: excluded,
+        };
+        if (numsOk && this.meshApi) {
+          const pose0 = builtPat.instances[0]?.pose;
+          if (pose0) {
+            const moved = this.applyPoseToParams(this.form.bodyType, resolved.nums, pose0);
+            if (moved) previewSeedParams = moved;
+          }
+          for (let i = 1; i < builtPat.instances.length; i++) {
+            const inst = builtPat.instances[i];
+            if (!inst) continue;
+            const next = this.applyPoseToParams(this.form.bodyType, resolved.nums, inst.pose);
+            if (!next) {
+              warnings.push(`Превью копии ${i}: не удалось преобразовать параметры.`);
+              continue;
+            }
+            extraBodies.push({
+              name: pickEmit?.names[i] ?? `C${i}`,
+              bodyType: this.form.bodyType,
+              params: next,
+              excluded: excludedSet.has(i),
+            });
+          }
+        }
+      }
+
       let draftPreview: ReturnType<MeshPreviewApi["buildDraftBodyPreview"]> | null = null;
       if (this.meshApi && isTransf && transf?.ok) {
         draftPreview = this.meshApi.buildDraftBodyPreview({
@@ -434,7 +770,8 @@ export class BodyGeneratorPanel {
           params: [transf.A, transf.B, transf.f],
           scenePrimitives: scene?.primitives ?? [],
           sceneBbox: scene?.bbox,
-          nearby: { maxCount: this.form.nearbyCount, maxGapFactor: 4 },
+          nearby: {},
+          extraBodies,
           slicePositions: this.manualSlicePositions,
           transf: {
             protoName: transf.protoName,
@@ -445,14 +782,15 @@ export class BodyGeneratorPanel {
           },
         });
         warnings.push(...(draftPreview.warnings ?? []));
-      } else if (this.meshApi && !isTransf && resolved.nums.length > 0 && resolved.nums.every(Number.isFinite)) {
+      } else if (this.meshApi && numsOk) {
         draftPreview = this.meshApi.buildDraftBodyPreview({
           bodyType: this.form.bodyType,
           name: insertName,
-          params: resolved.nums,
+          params: previewSeedParams,
           scenePrimitives: scene?.primitives ?? [],
           sceneBbox: scene?.bbox,
-          nearby: { maxCount: this.form.nearbyCount, maxGapFactor: 4 },
+          nearby: {},
+          extraBodies,
           slicePositions: this.manualSlicePositions,
         });
         warnings.push(...(draftPreview.warnings ?? []));
@@ -461,11 +799,14 @@ export class BodyGeneratorPanel {
       if (gen !== this.previewGeneration || !this.panel) return;
       void this.panel.webview.postMessage({
         type: "preview",
-        text: built.text,
+        text: previewText,
         warnings,
         constants: constsForEval,
         draftPreview,
         autoName: this.form.name === "*" ? insertName : null,
+        patternStatus,
+        arrayInstances,
+        patternExcludedIndices: patternActive ? patternExcludedIndices : undefined,
       });
     } catch (e) {
       if (gen !== this.previewGeneration || !this.panel) return;
@@ -501,7 +842,51 @@ export class BodyGeneratorPanel {
       return;
     }
     const insertName = await this.resolveInsertName();
-    const built = buildBodyStatement({ ...this.toInput(), name: insertName });
+    const pattern = this.currentPattern();
+    let built = buildBodyStatement({ ...this.toInput(), name: insertName });
+    if (pattern.group !== "none") {
+      const api = loadBodyGeneratorApi();
+      const arr = loadBodyArrayGeneratorApi();
+      const vars = api.constantsToVarMap(await this.fetchConstants());
+      const resolved = api.resolveBodyParamNumbers(this.form.params, vars);
+      if (!resolved.nums.length || resolved.nums.some((n) => !Number.isFinite(n))) {
+        vscode.window.showWarningMessage("Не удалось вычислить параметры исходника (EQU) для массива.");
+        return;
+      }
+      const patVals = this.resolvePatternValues(pattern.values, vars);
+      if (!patVals.ok) {
+        vscode.window.showWarningMessage(patVals.warnings[0] ?? "Не удалось вычислить параметры массива (EQU).");
+        return;
+      }
+      const anchor = this.meshApi?.bodyAnchorPoint(this.form.bodyType, resolved.nums) ?? undefined;
+      const builtPat = arr.buildPatternInstances({
+        group: pattern.group,
+        mode: pattern.mode,
+        values: patVals.values,
+        seedAnchor: anchor,
+      });
+      if (!builtPat.ok) {
+        vscode.window.showWarningMessage(builtPat.warnings[0] ?? "Исправьте параметры массива перед вставкой.");
+        return;
+      }
+      const excluded = arr.pruneExcludedIndices(pattern.excludedIndices, builtPat.instances.length);
+      const excludedResult = arr.applyPatternExclusions(builtPat.instances, excluded);
+      if (!excludedResult.ok) {
+        vscode.window.showWarningMessage(excludedResult.warnings[0] ?? "Исключения массива некорректны.");
+        return;
+      }
+      const can = arr.patternCanUseTransf(this.form.bodyType, builtPat.useTransfCandidate);
+      const emit = arr.emitBodyArray({
+        seed: { bodyType: this.form.bodyType, name: insertName, params: this.form.params },
+        instances: excludedResult.instances,
+        expand: !can.ok,
+        canUseTransf: can.ok,
+        existingNames: await this.existingBodyNames(),
+        transformExpanded: (pose) =>
+          this.poseToParamStrings(this.form.bodyType, this.form.params, resolved.nums, pose),
+      });
+      built = { text: emit.text, warnings: [...builtPat.warnings, ...emit.warnings], okToInsert: emit.okToInsert };
+    }
     if (!built.okToInsert) {
       vscode.window.showWarningMessage(built.warnings[0] ?? "Исправьте параметры перед вставкой.");
       return;
@@ -523,10 +908,13 @@ export class BodyGeneratorPanel {
       vscode.window.showErrorMessage("Не удалось вставить тело");
       return;
     }
+    const nLines = built.text.trim().split(/\n+/).filter(Boolean).length;
     vscode.window.showInformationMessage(
-      insertName !== this.form.name && this.form.name === "*"
-        ? `Тело вставлено как «${insertName}» (можно Undo).`
-        : "Тело вставлено (можно Undo)."
+      nLines > 1
+        ? `Вставлено ${nLines} тел (можно Undo).`
+        : insertName !== this.form.name && this.form.name === "*"
+          ? `Тело вставлено как «${insertName}» (можно Undo).`
+          : "Тело вставлено (можно Undo)."
     );
     await this.pushState();
   }
@@ -634,15 +1022,32 @@ export class BodyGeneratorPanel {
           <p class="bg-hint">Число, имя EQU/SET (список подсказок) или выражение, например <code>12.5+LG2</code>.</p>
         </fieldset>
 
+        <fieldset class="bg-pattern">
+          <legend>Массив / копии</legend>
+          <div class="bg-pattern-groups" role="radiogroup" aria-label="Группа массива">
+            <label><input type="radio" name="patternGroup" value="none" checked /> Нет</label>
+            <label><input type="radio" name="patternGroup" value="array" /> Массив</label>
+            <label><input type="radio" name="patternGroup" value="curve" /> По кривой</label>
+            <label><input type="radio" name="patternGroup" value="mirror" /> Зеркало</label>
+          </div>
+          <div id="patternFields" hidden>
+            <label class="bg-field">
+              <span>Режим</span>
+              <select id="patternMode"></select>
+            </label>
+            <div class="bg-presets" id="patternPresets"></div>
+            <div id="patternModeFields" class="bg-params bg-pattern-mode-fields"></div>
+            <p class="bg-hint" id="patternModeHint"></p>
+            <p class="bg-pattern-status" id="patternStatus">Будет вставлено: 1×RCZ</p>
+            <p class="bg-hint" id="patternExcludeHint" hidden>На сечении: инструмент «Исключить» — клик по копии убирает её из вставки (исходник остаётся).</p>
+            <button type="button" class="bg-preset" id="btnResetExclusions" hidden title="Показать все элементы массива">Сбросить исключения</button>
+          </div>
+        </fieldset>
+
         <fieldset>
           <legend>Окружение</legend>
-          <div class="bg-nearby-row">
-            <label class="bg-field">
-              <span>Ближайших тел (серым)</span>
-              <input type="number" id="nearbyCount" min="1" max="40" value="${this.form.nearbyCount}" />
-            </label>
-            <p class="bg-nearest" id="nearestInfo">ближайшее: —</p>
-          </div>
+          <p class="bg-hint">Все соседние тела на сечении; яркость линии падает с расстоянием до черновика.</p>
+          <p class="bg-nearest" id="nearestInfo">ближайшее: —</p>
         </fieldset>
 
         <div class="bg-actions">
@@ -656,7 +1061,15 @@ export class BodyGeneratorPanel {
           <h2>Сечения</h2>
           <span class="bg-muted" id="neighborInfo"></span>
         </div>
-        <p class="bg-hint bg-slice-hint">колесо — зум · перетаскивание — сдвиг · двойной клик — вписать</p>
+        <p class="bg-hint bg-slice-hint">палитра → клик на сечении · или клик по телу / кнопка Правка → ручки · при правке вид не авто-зумится · колесо — зум</p>
+        <div class="bg-prim-palette" id="primPalette" role="toolbar" aria-label="Примитивы"></div>
+        <div class="bg-slice-tools" id="sliceToolBar" role="toolbar" aria-label="Инструменты сечения">
+          <button type="button" class="bg-tool-btn is-active" id="btnToolPan" title="Перемещение вида">Перемещение</button>
+          <button type="button" class="bg-tool-btn" id="btnToolEdit" title="Правка тела: перенос, размер, поворот за характерные точки">Правка</button>
+          <button type="button" class="bg-tool-btn" id="btnToolExclude" hidden title="Клик по копии массива — исключить/вернуть в вставку">Исключить</button>
+          <button type="button" class="bg-tool-btn" id="btnToolRuler" title="Линейка: две точки, прилипание к фигурам и осям">Линейка</button>
+          <span class="bg-cursor-coords" id="cursorCoords" title="Координаты под курсором">—</span>
+        </div>
         <div class="bg-slice-vis" id="sliceVisBar" role="toolbar" aria-label="Видимость сечений">
           <button type="button" class="bg-slice-vis-btn" data-slot="xy" title="Показать/скрыть XY">XY</button>
           <button type="button" class="bg-slice-vis-btn" data-slot="xz" title="Показать/скрыть XZ">XZ</button>

@@ -66,6 +66,14 @@ export const CARD_ARG_SPECS: Record<string, CardArgSpec> = {
   FISZON: { kind: "materialNumbers", title: "Делящийся материал (тип F)" },
   FISZ: { kind: "materialNumbers", title: "Делящийся материал (тип F)" },
   PBUR: { kind: "enum", multi: false, values: [{ value: "FST", title: "Быстрая система (fast)" }] },
+  CNTAND: {
+    kind: "enum",
+    multi: false,
+    values: [
+      { value: "1", title: "Включено — пересечение всех зон с контейнером" },
+      { value: "0", title: "Выключено" },
+    ],
+  },
 };
 
 export function getCardArgSpec(cardLabel: string): CardArgSpec | undefined {

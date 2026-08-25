@@ -290,7 +290,35 @@ function expandIndexPairToken(tok: string): Array<[number, number]> {
 }
 
 function compactPairs(pairs: Array<[number, number]>): string {
-  return pairs.map(([i, j]) => `${i},${j}`).join(" ");
+  if (!pairs.length) return "";
+  // Горизонтальные прогоны: a:b,j (как в UserGuide §9.2.6.2)
+  const byJ = new Map<number, number[]>();
+  for (const [i, j] of pairs) {
+    const list = byJ.get(j) ?? [];
+    list.push(i);
+    byJ.set(j, list);
+  }
+  const tokens: string[] = [];
+  for (const j of [...byJ.keys()].sort((a, b) => a - b)) {
+    const uniq = [...new Set(byJ.get(j)!)].sort((a, b) => a - b);
+    let start = uniq[0]!;
+    let prev = uniq[0]!;
+    const flush = (from: number, to: number) => {
+      tokens.push(from === to ? `${from},${j}` : `${from}:${to},${j}`);
+    };
+    for (let k = 1; k < uniq.length; k++) {
+      const cur = uniq[k]!;
+      if (cur === prev + 1) {
+        prev = cur;
+      } else {
+        flush(start, prev);
+        start = cur;
+        prev = cur;
+      }
+    }
+    flush(start, prev);
+  }
+  return tokens.join(" ");
 }
 
 export function buildG2arLatticeStatement(input: LatticeGeneratorInput): LatticeGeneratorResult {
@@ -344,24 +372,23 @@ export function buildG2arLatticeStatement(input: LatticeGeneratorInput): Lattice
     }
   }
 
-  const parmParts = [
-    formatIndexBound(iMin, iMax),
-    formatIndexBound(jMin, jMax),
-    vecLine(input.vectorA),
-    vecLine(input.vectorB),
-    vecLine(input.vectorC),
-  ];
-  if (exclusions.length) parmParts.push(compactPairs(exclusions));
-  const typeChunks: string[] = [];
-  for (const [n, pairs] of [...byType.entries()].sort((a, b) => a[0] - b[0])) {
-    typeChunks.push(`/${n} ${compactPairs(pairs)}`);
-  }
+  const listelLines =
+    elements.length <= 1
+      ? [`LISTEL ${elements[0] ?? ""}`]
+      : [`LISTEL ${elements[0]}`, ...elements.slice(1).map((e) => `          ${e}`)];
 
+  // Как в рис. А.57: размерность+векторы, затем исключения, затем /n списки
   const lines: string[] = [
     `LATT G2AR ${zoneName}`,
-    `LISTEL ${elements.join(" ")}`,
-    `PARM ${parmParts.join(" ")}${typeChunks.length ? ` ${typeChunks.join(" ")}` : ""}`,
+    ...listelLines,
+    `PARM ${formatIndexBound(iMin, iMax)} ${formatIndexBound(jMin, jMax)} ${vecLine(input.vectorA)} ${vecLine(input.vectorB)} ${vecLine(input.vectorC)}`,
   ];
+  if (exclusions.length) {
+    lines.push(`     ${compactPairs(exclusions)}`);
+  }
+  for (const [n, pairs] of [...byType.entries()].sort((a, b) => a[0] - b[0])) {
+    lines.push(`     /${n} ${compactPairs(pairs)}`);
+  }
   appendSourceOpts(lines, input);
   lines.push("");
   return { text: lines.join("\n"), warnings, okToInsert: true };
@@ -421,6 +448,302 @@ export function buildLatticeStatement(input: LatticeGeneratorInput): LatticeGene
   if (t === "GLTL") return buildGltlLatticeStatement(input);
   if (t === "G2AR") return buildG2arLatticeStatement(input);
   return buildG2mpLatticeStatement({ ...input, latticeType: "G2MP" });
+}
+
+function parseCoordNum(raw: string): number | null {
+  const v = parseFloat(String(raw ?? "").replace(/,/g, ".").trim());
+  return Number.isFinite(v) ? v : null;
+}
+
+function fmtCoordNum(n: number): string {
+  if (!Number.isFinite(n)) return "0";
+  if (Math.abs(n - Math.round(n)) < 1e-9) return String(Math.round(n));
+  const r = Math.round(n * 1e6) / 1e6;
+  return String(r);
+}
+
+/** A + k·B + m·C покомпонентно (числа → число; иначе выражение). */
+function combineRootVector(
+  a: [string, string, string],
+  k: number,
+  b: [string, string, string],
+  m: number,
+  c: [string, string, string]
+): [string, string, string] {
+  if (k === 0 && m === 0) return [...a] as [string, string, string];
+  const out: [string, string, string] = ["0", "0", "0"];
+  for (let i = 0; i < 3; i++) {
+    const av = a[i] ?? "0";
+    const bv = b[i] ?? "0";
+    const cv = c[i] ?? "0";
+    const an = parseCoordNum(av);
+    const bn = parseCoordNum(bv);
+    const cn = parseCoordNum(cv);
+    if (an != null && bn != null && cn != null) {
+      out[i] = fmtCoordNum(an + k * bn + m * cn);
+      continue;
+    }
+    const parts: string[] = [av.trim() || "0"];
+    if (k !== 0) {
+      parts.push(k === 1 ? `(${bv})` : `(${k})*(${bv})`);
+    }
+    if (m !== 0) {
+      parts.push(m === 1 ? `(${cv})` : `(${m})*(${cv})`);
+    }
+    out[i] = parts.join("+");
+  }
+  return out;
+}
+
+function cartogramWorldPosG2ar(
+  i: number,
+  j: number,
+  a: [string, string, string],
+  b: [string, string, string],
+  c: [string, string, string]
+): { x: number; y: number; z: number } | null {
+  const va = a.map(parseCoordNum);
+  const vb = b.map(parseCoordNum);
+  const vc = c.map(parseCoordNum);
+  if (va.some((v) => v == null) || vb.some((v) => v == null) || vc.some((v) => v == null)) {
+    return null;
+  }
+  return {
+    x: va[0]! + i * vb[0]! + j * vc[0]!,
+    y: va[1]! + i * vb[1]! + j * vc[1]!,
+    z: va[2]! + i * vb[2]! + j * vc[2]!,
+  };
+}
+
+function cartogramWorldPosG2mp(
+  i1: number,
+  j1: number,
+  a: [string, string, string],
+  b: [string, string, string],
+  c: [string, string, string]
+): { x: number; y: number; z: number } | null {
+  return cartogramWorldPosG2ar(i1 - 1, j1 - 1, a, b, c);
+}
+
+function g2arBoundsOf(input: LatticeGeneratorInput): {
+  iMin: number;
+  iMax: number;
+  jMin: number;
+  jMax: number;
+  cols: number;
+  rows: number;
+} {
+  let iMin = Math.floor(input.iMin);
+  let iMax = Math.floor(input.iMax);
+  let jMin = Math.floor(input.jMin);
+  let jMax = Math.floor(input.jMax);
+  if (iMax < iMin) [iMin, iMax] = [iMax, iMin];
+  if (jMax < jMin) [jMin, jMax] = [jMax, jMin];
+  return {
+    iMin,
+    iMax,
+    jMin,
+    jMax,
+    cols: Math.max(1, iMax - iMin + 1),
+    rows: Math.max(1, jMax - jMin + 1),
+  };
+}
+
+function cloneInput(input: LatticeGeneratorInput): LatticeGeneratorInput {
+  return {
+    ...input,
+    elements: [...input.elements],
+    vectorA: [...input.vectorA] as [string, string, string],
+    vectorB: [...input.vectorB] as [string, string, string],
+    vectorC: [...input.vectorC] as [string, string, string],
+    cartogram: (input.cartogram ?? []).map((r) => [...r]),
+    placements: (input.placements ?? []).map((p) => ({ ...p })),
+    footprints: input.footprints ?? [],
+  };
+}
+
+function toG2arFromG2mp(input: LatticeGeneratorInput): LatticeGeneratorInput {
+  const out = cloneInput(input);
+  const cols = Math.max(1, Math.floor(input.cols) || 1);
+  const rows = Math.max(1, Math.floor(input.rows) || 1);
+  out.latticeType = "G2AR";
+  out.iMin = 0;
+  out.iMax = cols - 1;
+  out.jMin = 0;
+  out.jMax = rows - 1;
+  out.cols = cols;
+  out.rows = rows;
+  out.cartogram = resizeCartogram(input.cartogram ?? [], cols, rows, "0");
+  out.placements = [];
+  return out;
+}
+
+function toG2mpFromG2ar(input: LatticeGeneratorInput): LatticeGeneratorInput {
+  const out = cloneInput(input);
+  const b = g2arBoundsOf(input);
+  out.latticeType = "G2MP";
+  out.cols = b.cols;
+  out.rows = b.rows;
+  out.iMin = 0;
+  out.iMax = b.cols - 1;
+  out.jMin = 0;
+  out.jMax = b.rows - 1;
+  // G2MP A — корень (1,1) ≡ G2AR (iMin,jMin)
+  out.vectorA = combineRootVector(
+    input.vectorA,
+    b.iMin,
+    input.vectorB,
+    b.jMin,
+    input.vectorC
+  );
+  out.cartogram = resizeCartogram(input.cartogram ?? [], b.cols, b.rows, "0");
+  out.placements = [];
+  return out;
+}
+
+function cartogramToGltlPlacements(
+  cartogram: string[][],
+  elements: string[],
+  worldAt: (ci: number, cj: number) => { x: number; y: number; z: number } | null
+): GltlPlacement[] {
+  const placements: GltlPlacement[] = [];
+  for (let cj = 0; cj < cartogram.length; cj++) {
+    const row = cartogram[cj] ?? [];
+    for (let ci = 0; ci < row.length; ci++) {
+      const cell = String(row[ci] ?? "0").trim() || "0";
+      if (cell === "0") continue;
+      const w = worldAt(ci, cj);
+      if (!w) continue;
+      const pi = Math.max(1, elements.indexOf(cell) + 1);
+      placements.push({
+        element: cell,
+        protoIndex: pi,
+        x: fmtCoordNum(w.x),
+        y: fmtCoordNum(w.y),
+        z: fmtCoordNum(w.z),
+      });
+    }
+  }
+  return placements;
+}
+
+function toGltlFromCartogram(input: LatticeGeneratorInput, asG2mp: boolean): LatticeGeneratorInput {
+  const out = cloneInput(input);
+  out.latticeType = "GLTL";
+  const els = out.elements.length ? out.elements : ["A"];
+  if (asG2mp) {
+    const cols = Math.max(1, Math.floor(input.cols) || 1);
+    const rows = Math.max(1, Math.floor(input.rows) || 1);
+    const map = resizeCartogram(input.cartogram ?? [], cols, rows, "0");
+    out.placements = cartogramToGltlPlacements(map, els, (ci, cj) =>
+      cartogramWorldPosG2mp(ci + 1, cj + 1, input.vectorA, input.vectorB, input.vectorC)
+    );
+  } else {
+    const b = g2arBoundsOf(input);
+    const map = resizeCartogram(input.cartogram ?? [], b.cols, b.rows, "0");
+    out.placements = cartogramToGltlPlacements(map, els, (ci, cj) =>
+      cartogramWorldPosG2ar(b.iMin + ci, b.jMin + cj, input.vectorA, input.vectorB, input.vectorC)
+    );
+  }
+  if (!out.placements.length) {
+    out.placements = [{ element: els[0]!, protoIndex: 1, x: "0", y: "0", z: "0" }];
+  }
+  out.cartogram = [];
+  return out;
+}
+
+function toCartogramFromGltl(
+  input: LatticeGeneratorInput,
+  target: "G2AR" | "G2MP"
+): LatticeGeneratorInput {
+  const out = cloneInput(input);
+  const els = out.elements.length ? out.elements : ["A"];
+  const grid = inferGltlGridSize(input.placements ?? []);
+  const xs = grid.xs.length ? grid.xs : [0];
+  const ys = grid.ys.length ? grid.ys : [0];
+  const cols = Math.max(1, xs.length);
+  const rows = Math.max(1, ys.length);
+  const dx = cols > 1 ? xs[1]! - xs[0]! : 25;
+  const dy = rows > 1 ? ys[1]! - ys[0]! : 25;
+  const pitchX = Math.abs(dx) > 1e-9 ? dx : 25;
+  const pitchY = Math.abs(dy) > 1e-9 ? dy : 25;
+  const a: [string, string, string] = [
+    fmtCoordNum(xs[0]!),
+    fmtCoordNum(ys[0]!),
+    fmtCoordNum(grid.zs[0] ?? 0),
+  ];
+  const bVec: [string, string, string] = [fmtCoordNum(pitchX), "0", "0"];
+  const cVec: [string, string, string] = ["0", fmtCoordNum(pitchY), "0"];
+  const map = emptyCartogram(cols, rows, "0");
+
+  for (const p of input.placements ?? []) {
+    const x = parseCoordNum(p.x);
+    const y = parseCoordNum(p.y);
+    if (x == null || y == null) continue;
+    let bestI = 0;
+    let bestJ = 0;
+    let bestD = Infinity;
+    for (let j = 0; j < rows; j++) {
+      for (let i = 0; i < cols; i++) {
+        const d = Math.hypot(x - xs[i]!, y - ys[j]!);
+        if (d < bestD) {
+          bestD = d;
+          bestI = i;
+          bestJ = j;
+        }
+      }
+    }
+    const tol = 0.55 * Math.max(Math.abs(pitchX), Math.abs(pitchY), 1);
+    if (bestD > tol) continue;
+    const pi =
+      p.protoIndex && p.protoIndex >= 1
+        ? p.protoIndex
+        : Math.max(1, els.indexOf(p.element) + 1);
+    map[bestJ]![bestI] = els[pi - 1] ?? p.element ?? els[0]!;
+  }
+
+  out.vectorA = a;
+  out.vectorB = bVec;
+  out.vectorC = cVec;
+  out.cartogram = map;
+  out.cols = cols;
+  out.rows = rows;
+  out.placements = [];
+  if (target === "G2MP") {
+    out.latticeType = "G2MP";
+    out.iMin = 0;
+    out.iMax = cols - 1;
+    out.jMin = 0;
+    out.jMax = rows - 1;
+  } else {
+    out.latticeType = "G2AR";
+    out.iMin = 0;
+    out.iMax = cols - 1;
+    out.jMin = 0;
+    out.jMax = rows - 1;
+  }
+  return out;
+}
+
+/**
+ * Автоконвертация формы PARM при смене генератора (GLTL ↔ G2AR ↔ G2MP).
+ * G2AR↔G2MP: картограмма + сдвиг корня A; GLTL↔*: сетка по уникальным X/Y.
+ */
+export function convertLatticeGeneratorType(
+  input: LatticeGeneratorInput,
+  target: LatticeType
+): LatticeGeneratorInput {
+  const from = (input.latticeType || "GLTL").toUpperCase() as LatticeType;
+  const to = target.toUpperCase() as LatticeType;
+  if (from === to) return cloneInput({ ...input, latticeType: to });
+  if (from === "G2MP" && to === "G2AR") return toG2arFromG2mp(input);
+  if (from === "G2AR" && to === "G2MP") return toG2mpFromG2ar(input);
+  if (from === "G2MP" && to === "GLTL") return toGltlFromCartogram(input, true);
+  if (from === "G2AR" && to === "GLTL") return toGltlFromCartogram(input, false);
+  if (from === "GLTL" && (to === "G2AR" || to === "G2MP")) {
+    return toCartogramFromGltl(input, to);
+  }
+  return cloneInput({ ...input, latticeType: to });
 }
 
 export function buildLcellStub(name: string): LatticeGeneratorResult {
@@ -659,11 +982,39 @@ export function inferGltlGridSize(placements: readonly GltlPlacement[]): {
   };
 }
 
+type G2mpCartogramRow = { row: number; cells: string[] };
+
+function parseG2mpRowLabel(raw: string): number | null {
+  const m = raw.trim().match(/^L(\d{2,})$/i);
+  if (!m) return null;
+  const n = parseInt(m[1]!, 10);
+  return Number.isFinite(n) && n >= 1 ? n : null;
+}
+
+function cartogramFromLabeledRows(
+  entries: readonly G2mpCartogramRow[],
+  colsHint: number,
+  rowsHint: number
+): { cols: number; rows: number; cartogram: string[][] } {
+  const maxRow = Math.max(rowsHint, ...entries.map((e) => e.row), 1);
+  const cols = Math.max(colsHint, ...entries.map((e) => e.cells.length), 1);
+  const cartogram = emptyCartogram(cols, maxRow);
+  for (const { row, cells } of entries) {
+    if (row < 1 || row > maxRow) continue;
+    for (let i = 0; i < cols; i++) {
+      const v = cells[i];
+      if (v !== undefined && v !== "") cartogram[row - 1]![i] = v;
+    }
+  }
+  return { cols, rows: maxRow, cartogram };
+}
+
 function extractCardLines(blockLines: string[]): {
   latt: string;
   listel: string;
   parm: string;
   cartogramRows: string[][];
+  g2mpCartogramRows: G2mpCartogramRow[];
   lfixso: string;
   lblack: string;
 } {
@@ -673,6 +1024,7 @@ function extractCardLines(blockLines: string[]): {
   let lfixso = "";
   let lblack = "";
   const cartogramRows: string[][] = [];
+  const g2mpCartogramRows: G2mpCartogramRow[] = [];
   /** После LISTEL/PARM до следующей карты — дописываем продолжения (в т.ч. без ведущего пробела). */
   let mode: "none" | "listel" | "parm" = "none";
 
@@ -724,8 +1076,11 @@ function extractCardLines(blockLines: string[]): {
       mode = "none";
       continue;
     }
-    if (/^L\d{2}$/i.test(lab)) {
-      cartogramRows.push(t.split(/\s+/).slice(1));
+    if (/^L\d{2,}$/i.test(lab)) {
+      const cells = t.split(/\s+/).slice(1);
+      cartogramRows.push(cells);
+      const row = parseG2mpRowLabel(lab);
+      if (row != null) g2mpCartogramRows.push({ row, cells });
       mode = "none";
       continue;
     }
@@ -752,13 +1107,14 @@ function extractCardLines(blockLines: string[]): {
       parm += ` ${t}`;
     }
   }
-  return { latt, listel, parm, cartogramRows, lfixso, lblack };
+  return { latt, listel, parm, cartogramRows, g2mpCartogramRows, lfixso, lblack };
 }
 
 /** Разбор текстового блока LATT… в форму конструктора. */
 export function parseLatticeBlockText(blockText: string): LatticeGeneratorInput | null {
   const blockLines = blockText.replace(/\r\n/g, "\n").split("\n");
-  const { latt, listel, parm, cartogramRows, lfixso, lblack } = extractCardLines(blockLines);
+  const { latt, listel, parm, cartogramRows, g2mpCartogramRows, lfixso, lblack } =
+    extractCardLines(blockLines);
   if (!latt) return null;
   const lattParts = latt.split(/\s+/);
   const latticeType = (lattParts[1] || "G2MP").toUpperCase() as LatticeType;
@@ -779,7 +1135,12 @@ export function parseLatticeBlockText(blockText: string): LatticeGeneratorInput 
   if (base.latticeType === "G2MP") {
     const p = parseG2mpParm(tokens);
     if (p) Object.assign(base, p);
-    if (cartogramRows.length) {
+    if (g2mpCartogramRows.length) {
+      const mapped = cartogramFromLabeledRows(g2mpCartogramRows, base.cols, base.rows);
+      base.cols = mapped.cols;
+      base.rows = mapped.rows;
+      base.cartogram = mapped.cartogram;
+    } else if (cartogramRows.length) {
       const cols = Math.max(base.cols, ...cartogramRows.map((r) => r.length));
       const rows = cartogramRows.length;
       base.cols = cols;
@@ -1057,16 +1418,20 @@ function inputFromAstLattice(
   if (base.latticeType === "G2MP") {
     const p = parseG2mpParm(tokens);
     if (p) Object.assign(base, p);
-    if (lat.typeMap?.length) {
-      const cols = Math.max(base.cols, ...lat.typeMap.map((r) => r.length), 1);
-      const rows = lat.typeMap.length;
-      base.cols = cols;
-      base.rows = rows;
-      base.cartogram = resizeCartogram(lat.typeMap, cols, rows);
-    } else if (textFallback?.cartogram?.length) {
+    // Текст блока (метки L01…) надёжнее порядка typeMap в AST при L15…L01.
+    if (textFallback?.cartogram?.length) {
       base.cartogram = textFallback.cartogram;
       base.cols = textFallback.cols;
       base.rows = textFallback.rows;
+      if (textFallback.vectorA) base.vectorA = textFallback.vectorA;
+      if (textFallback.vectorB) base.vectorB = textFallback.vectorB;
+      if (textFallback.vectorC) base.vectorC = textFallback.vectorC;
+    } else if (lat.typeMap?.length) {
+      const cols = Math.max(base.cols, ...lat.typeMap.map((r) => r.length), 1);
+      const rows = Math.max(base.rows, lat.typeMap.length, 1);
+      base.cols = cols;
+      base.rows = rows;
+      base.cartogram = resizeCartogram(lat.typeMap, cols, rows);
     }
   } else if (base.latticeType === "G2AR") {
     const p = parseG2arParm(tokens, base.elements);
@@ -1178,8 +1543,37 @@ export function parseGltlLatticeAtLine(
   return hit;
 }
 
-/** Найти ближайший блок LATT GLTL в файле (если курсор не на LATT). */
-export function findNearestGltlLatticeLine(fullText: string, preferLine: number): number | null {
+/** Только G2AR (§9.2.6.2). */
+export function parseG2arLatticeAtLine(
+  fullText: string,
+  line: number,
+  opts?: { uri?: string }
+): { input: LatticeGeneratorInput; range: LatticeBlockRange } | null {
+  const hit = parseLatticeAtLine(fullText, line, opts);
+  if (!hit) return null;
+  if (hit.input.latticeType !== "G2AR") return null;
+  return hit;
+}
+
+/** Только G2MP (§9.2.6.3). */
+export function parseG2mpLatticeAtLine(
+  fullText: string,
+  line: number,
+  opts?: { uri?: string }
+): { input: LatticeGeneratorInput; range: LatticeBlockRange } | null {
+  const hit = parseLatticeAtLine(fullText, line, opts);
+  if (!hit) return null;
+  if (hit.input.latticeType !== "G2MP") return null;
+  return hit;
+}
+
+/** Найти ближайший блок LATT с указанными генераторами. */
+export function findNearestLatticeLine(
+  fullText: string,
+  preferLine: number,
+  types: readonly LatticeType[] = ["GLTL", "G2AR", "G2MP"]
+): number | null {
+  const want = new Set(types.map((t) => t.toUpperCase()));
   const lines = fullText.replace(/\r\n/g, "\n").split("\n");
   let best: number | null = null;
   let bestDist = Infinity;
@@ -1187,7 +1581,7 @@ export function findNearestGltlLatticeLine(fullText: string, preferLine: number)
     if (lineLabel(lines[i]!) !== "LATT") continue;
     const parts = lines[i]!.trim().split(/\s+/);
     const gen = (parts[1] || "").toUpperCase();
-    if (gen !== "GLTL") continue;
+    if (!want.has(gen)) continue;
     const d = Math.abs(i - preferLine);
     if (d < bestDist) {
       bestDist = d;
@@ -1195,6 +1589,11 @@ export function findNearestGltlLatticeLine(fullText: string, preferLine: number)
     }
   }
   return best;
+}
+
+/** Найти ближайший блок LATT GLTL в файле (если курсор не на LATT). */
+export function findNearestGltlLatticeLine(fullText: string, preferLine: number): number | null {
+  return findNearestLatticeLine(fullText, preferLine, ["GLTL"]);
 }
 
 export function defaultLatticeGeneratorInput(): LatticeGeneratorInput {

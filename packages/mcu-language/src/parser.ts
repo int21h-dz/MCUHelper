@@ -787,7 +787,12 @@ export function parseDocument(text: string, options: ParseOptions): DocumentAst 
       const vals = stmt.text.split(/\s+/).slice(1);
       const last = lattices[lattices.length - 1]!;
       if (!last.typeMap) last.typeMap = [];
-      last.typeMap.push(vals);
+      const m = label.match(/^L(\d+)$/i);
+      const rowIdx = m ? parseInt(m[1]!, 10) - 1 : last.typeMap.length;
+      if (Number.isFinite(rowIdx) && rowIdx >= 0) {
+        while (last.typeMap.length <= rowIdx) last.typeMap.push([]);
+        last.typeMap[rowIdx] = vals;
+      }
     }
 
     if (

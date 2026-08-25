@@ -1,4 +1,4 @@
-/* Webview: конструктор LATT GLTL (UserGuide §9.2.6.1) */
+/* Webview: конструктор LATT GLTL / G2AR / G2MP (UserGuide §9.2.6.1–3) */
 (function () {
   const vscode = acquireVsCodeApi();
 
@@ -24,8 +24,129 @@
   let preview = { text: "", warnings: [], okToInsert: false, canReplace: false };
   let debounceTimer = null;
   let plotTimer = null;
+  /** G2AR/G2MP: «0» = исключение / пустая ячейка, иначе имя LISTEL. */
+  let paintBrush = "0";
 
   const root = document.getElementById("root");
+
+  function latticeType() {
+    return String(form?.latticeType || "GLTL").toUpperCase();
+  }
+
+  function isG2ar() {
+    return latticeType() === "G2AR";
+  }
+
+  function isG2mp() {
+    return latticeType() === "G2MP";
+  }
+
+  function isCartogram() {
+    return isG2ar() || isG2mp();
+  }
+
+  function isGltl() {
+    return latticeType() === "GLTL";
+  }
+
+  function formatG2mpRowLabel(row1) {
+    return "L" + String(row1).padStart(2, "0");
+  }
+
+  function g2arBounds() {
+    let iMin = parseInt(String(form?.iMin ?? 0), 10);
+    let iMax = parseInt(String(form?.iMax ?? 3), 10);
+    let jMin = parseInt(String(form?.jMin ?? 0), 10);
+    let jMax = parseInt(String(form?.jMax ?? 3), 10);
+    if (!Number.isFinite(iMin)) iMin = 0;
+    if (!Number.isFinite(iMax)) iMax = 3;
+    if (!Number.isFinite(jMin)) jMin = 0;
+    if (!Number.isFinite(jMax)) jMax = 3;
+    if (iMax < iMin) {
+      const t = iMin;
+      iMin = iMax;
+      iMax = t;
+    }
+    if (jMax < jMin) {
+      const t = jMin;
+      jMin = jMax;
+      jMax = t;
+    }
+    const cols = Math.max(1, iMax - iMin + 1);
+    const rows = Math.max(1, jMax - jMin + 1);
+    return { iMin, iMax, jMin, jMax, cols, rows };
+  }
+
+  function emptyCartogramLocal(cols, rows, fill) {
+    const c = Math.max(1, cols);
+    const r = Math.max(1, rows);
+    return Array.from({ length: r }, () => Array.from({ length: c }, () => fill));
+  }
+
+  function resizeCartogramLocal(prev, cols, rows, fill) {
+    const next = emptyCartogramLocal(cols, rows, fill);
+    for (let j = 0; j < next.length; j++) {
+      const src = prev[j];
+      if (!src) continue;
+      for (let i = 0; i < next[j].length; i++) {
+        const v = src[i];
+        if (v !== undefined && v !== "") next[j][i] = v;
+      }
+    }
+    return next;
+  }
+
+  function ensureG2arCartogram() {
+    if (!form) return;
+    const { cols, rows } = g2arBounds();
+    const fill = form.elements[0] || "A";
+    form.cartogram = resizeCartogramLocal(form.cartogram || [], cols, rows, fill);
+    form.cols = cols;
+    form.rows = rows;
+  }
+
+  function g2mpDims() {
+    let cols = parseInt(String(form?.cols ?? 4), 10);
+    let rows = parseInt(String(form?.rows ?? 4), 10);
+    if (!Number.isFinite(cols)) cols = 4;
+    if (!Number.isFinite(rows)) rows = 4;
+    cols = Math.max(1, Math.min(99, cols));
+    rows = Math.max(1, Math.min(99, rows));
+    return { cols, rows };
+  }
+
+  function ensureG2mpCartogram() {
+    if (!form) return;
+    const { cols, rows } = g2mpDims();
+    form.cartogram = resizeCartogramLocal(form.cartogram || [], cols, rows, "0");
+    form.cols = cols;
+    form.rows = rows;
+  }
+
+  function ensureCartogram() {
+    if (isG2mp()) ensureG2mpCartogram();
+    else if (isG2ar()) ensureG2arCartogram();
+  }
+
+  function g2arCell(i, j) {
+    const { iMin, jMin } = g2arBounds();
+    return form.cartogram[j - jMin]?.[i - iMin] ?? form.elements[0] ?? "A";
+  }
+
+  function setG2arCell(i, j, val) {
+    ensureG2arCartogram();
+    const { iMin, jMin } = g2arBounds();
+    form.cartogram[j - jMin][i - iMin] = val;
+  }
+
+  function g2mpCell(i, j) {
+    return form.cartogram[j - 1]?.[i - 1] ?? "0";
+  }
+
+  function setG2mpCell(i, j, val) {
+    ensureG2mpCartogram();
+    form.cartogram[j - 1][i - 1] = val;
+  }
 
   function colorFor(name) {
     if (!name) return "#888";
@@ -55,10 +176,60 @@
 
   function readFormFromDom() {
     if (!form) return;
-    form.latticeType = "GLTL";
+    const typeEl = root.querySelector('input[name="latticeType"]:checked');
+    const tv = typeEl?.value;
+    form.latticeType = tv === "G2AR" ? "G2AR" : tv === "G2MP" ? "G2MP" : "GLTL";
     form.zoneName = root.querySelector("#zoneName")?.value?.trim() || "ZL";
     form.lfixso = root.querySelector("#lfixso")?.value?.trim() || "";
     form.lblack = root.querySelector("#lblack")?.value?.trim() || "";
+
+    if (isG2mp()) {
+      form.cols = parseInt(root.querySelector("#g2mpCols")?.value ?? "4", 10) || 4;
+      form.rows = parseInt(root.querySelector("#g2mpRows")?.value ?? "4", 10) || 4;
+      form.vectorA = [
+        root.querySelector("#vaX")?.value ?? "0",
+        root.querySelector("#vaY")?.value ?? "0",
+        root.querySelector("#vaZ")?.value ?? "0",
+      ];
+      form.vectorB = [
+        root.querySelector("#vbX")?.value ?? "25",
+        root.querySelector("#vbY")?.value ?? "0",
+        root.querySelector("#vbZ")?.value ?? "0",
+      ];
+      form.vectorC = [
+        root.querySelector("#vcX")?.value ?? "0",
+        root.querySelector("#vcY")?.value ?? "25",
+        root.querySelector("#vcZ")?.value ?? "0",
+      ];
+      ensureG2mpCartogram();
+      form.placements = [];
+      return;
+    }
+
+    if (isG2ar()) {
+      form.iMin = parseInt(root.querySelector("#iMin")?.value ?? "0", 10) || 0;
+      form.iMax = parseInt(root.querySelector("#iMax")?.value ?? "3", 10) || 0;
+      form.jMin = parseInt(root.querySelector("#jMin")?.value ?? "0", 10) || 0;
+      form.jMax = parseInt(root.querySelector("#jMax")?.value ?? "3", 10) || 0;
+      form.vectorA = [
+        root.querySelector("#vaX")?.value ?? "0",
+        root.querySelector("#vaY")?.value ?? "0",
+        root.querySelector("#vaZ")?.value ?? "0",
+      ];
+      form.vectorB = [
+        root.querySelector("#vbX")?.value ?? "25",
+        root.querySelector("#vbY")?.value ?? "0",
+        root.querySelector("#vbZ")?.value ?? "0",
+      ];
+      form.vectorC = [
+        root.querySelector("#vcX")?.value ?? "0",
+        root.querySelector("#vcY")?.value ?? "25",
+        root.querySelector("#vcZ")?.value ?? "0",
+      ];
+      ensureG2arCartogram();
+      form.placements = [];
+      return;
+    }
 
     const rows = root.querySelectorAll(".lg-place-row");
     form.placements = [];
@@ -73,6 +244,7 @@
         z: row.querySelector(".pl-z")?.value || "0",
       });
     });
+    form.cartogram = [];
   }
 
   function schedulePush() {
@@ -94,6 +266,9 @@
     const n = String(name || "").trim();
     if (!n) return;
     if (!form.elements.includes(n)) form.elements.push(n);
+    if (isCartogram() && paintBrush === "0" && form.elements.length === 1) {
+      paintBrush = n;
+    }
     render();
     schedulePush();
   }
@@ -112,6 +287,16 @@
         element: form.elements[pi - 1] || form.elements[0] || "",
       };
     });
+    // G2AR/G2MP: ячейки картограммы хранят имя прототипа — убрать удалённый LISTEL.
+    if (Array.isArray(form.cartogram)) {
+      const fallback = isG2mp() ? "0" : form.elements[0] || "0";
+      form.cartogram = form.cartogram.map((row) =>
+        Array.isArray(row) ? row.map((cell) => (cell === name ? fallback : cell)) : row
+      );
+    }
+    if (paintBrush === name) {
+      paintBrush = form.elements[0] || "0";
+    }
     render();
     schedulePush();
   }
@@ -193,6 +378,229 @@
       rows +
       "</div>" +
       '<button type="button" class="lg-btn secondary" id="btnAddPlace">+ экземпляр</button>'
+    );
+  }
+
+  function typeSelectorHtml() {
+    const gltlChk = isGltl() ? " checked" : "";
+    const g2arChk = isG2ar() ? " checked" : "";
+    const g2mpChk = isG2mp() ? " checked" : "";
+    // Пока переключение на G2AR/G2MP вручную отключено (загрузка из контекста работает).
+    return (
+      "<fieldset><legend>Тип</legend>" +
+      '<div class="lg-type-toggle">' +
+      '<label class="lg-type-opt"><input type="radio" name="latticeType" value="GLTL"' +
+      gltlChk +
+      " /> GLTL</label>" +
+      '<label class="lg-type-opt lg-type-opt-disabled" title="Переключение временно отключено">' +
+      '<input type="radio" name="latticeType" value="G2AR"' +
+      g2arChk +
+      " disabled /> G2AR</label>" +
+      '<label class="lg-type-opt lg-type-opt-disabled" title="Переключение временно отключено">' +
+      '<input type="radio" name="latticeType" value="G2MP"' +
+      g2mpChk +
+      " disabled /> G2MP</label>" +
+      "</div>" +
+      '<p class="lg-hint">GLTL — явные сдвиги. G2AR/G2MP: только из контекста (переключатель пока выключен).</p>' +
+      "</fieldset>"
+    );
+  }
+
+  function vecRowHtml(label, idPrefix, vec) {
+    const v = vec || ["0", "0", "0"];
+    return (
+      '<div class="lg-vec">' +
+      "<span>" +
+      label +
+      "</span>" +
+      '<input id="' +
+      idPrefix +
+      'X" type="text" value="' +
+      escapeHtml(v[0]) +
+      '" title="X" />' +
+      '<input id="' +
+      idPrefix +
+      'Y" type="text" value="' +
+      escapeHtml(v[1]) +
+      '" title="Y" />' +
+      '<input id="' +
+      idPrefix +
+      'Z" type="text" value="' +
+      escapeHtml(v[2]) +
+      '" title="Z" />' +
+      "</div>"
+    );
+  }
+
+  function brushChipHtml(val, label, active) {
+    const isEx = val === "0";
+    const col = isEx ? "transparent" : colorFor(val);
+    const cls =
+      "lg-chip lg-brush" +
+      (active ? " active" : "") +
+      (isEx ? " lg-brush-exclude" : "");
+    return (
+      '<button type="button" class="' +
+      cls +
+      '" data-brush="' +
+      escapeHtml(val) +
+      '" draggable="true" data-drag-proto="' +
+      escapeHtml(val) +
+      '" style="' +
+      (isEx ? "" : "background:" + col + ";color:#111") +
+      '" title="Клик — кисть; перетащите на поле">' +
+      escapeHtml(label) +
+      "</button>"
+    );
+  }
+
+  function cartogramBrushHtml() {
+    const emptyLabel = isG2mp() ? "пусто (0)" : "исключить (0)";
+    const chips = [brushChipHtml("0", emptyLabel, paintBrush === "0")];
+    form.elements.forEach((e, i) => {
+      chips.push(brushChipHtml(e, "/" + (i + 1) + " " + e, paintBrush === e));
+    });
+    return (
+      '<div class="lg-brush-row">' +
+      '<span class="lg-toolbar-label">Кисть</span>' +
+      chips.join("") +
+      "</div>"
+    );
+  }
+
+  function g2arBrushHtml() {
+    return cartogramBrushHtml();
+  }
+
+  function g2arFormHtml() {
+    ensureG2arCartogram();
+    const b = g2arBounds();
+    let table =
+      '<table class="lg-cartogram"><caption>i: ' +
+      b.iMin +
+      "…" +
+      b.iMax +
+      ", j: " +
+      b.jMin +
+      "…" +
+      b.jMax +
+      "</caption><thead><tr><th></th>";
+    for (let i = b.iMin; i <= b.iMax; i++) {
+      table += '<th class="lg-col-lab">' + i + "</th>";
+    }
+    table += "</tr></thead><tbody>";
+    for (let j = b.jMax; j >= b.jMin; j--) {
+      table += '<tr><th class="lg-row-lab">' + j + "</th>";
+      for (let i = b.iMin; i <= b.iMax; i++) {
+        const val = g2arCell(i, j);
+        const excluded = val === "0";
+        const col = excluded ? "" : colorFor(val);
+        table +=
+          '<td><button type="button" class="lg-cell' +
+          (excluded ? " excluded empty" : "") +
+          '" data-i="' +
+          i +
+          '" data-j="' +
+          j +
+          '"' +
+          (excluded ? "" : ' style="background:' + col + ';color:#111"') +
+          ' title="i=' +
+          i +
+          ", j=" +
+          j +
+          '">' +
+          (excluded ? "·" : escapeHtml(val.length > 5 ? val.slice(0, 4) + "…" : val)) +
+          "</button></td>";
+      }
+      table += "</tr>";
+    }
+    table += "</tbody></table>";
+
+    return (
+      "<fieldset><legend>PARM — картограмма G2AR</legend>" +
+      '<p class="lg-hint">Индексы i,j и векторы A,B,C; клик по ячейке — кисть.</p>' +
+      '<div class="lg-dims4">' +
+      '<div class="lg-row"><label for="iMin">iMin</label><input id="iMin" type="number" value="' +
+      b.iMin +
+      '" /></div>' +
+      '<div class="lg-row"><label for="iMax">iMax</label><input id="iMax" type="number" value="' +
+      b.iMax +
+      '" /></div>' +
+      '<div class="lg-row"><label for="jMin">jMin</label><input id="jMin" type="number" value="' +
+      b.jMin +
+      '" /></div>' +
+      '<div class="lg-row"><label for="jMax">jMax</label><input id="jMax" type="number" value="' +
+      b.jMax +
+      '" /></div>' +
+      "</div>" +
+      vecRowHtml("A", "va", form.vectorA) +
+      vecRowHtml("B", "vb", form.vectorB) +
+      vecRowHtml("C", "vc", form.vectorC) +
+      g2arBrushHtml() +
+      '<div class="lg-cartogram-wrap">' +
+      table +
+      "</div></fieldset>"
+    );
+  }
+
+  function g2mpFormHtml() {
+    ensureG2mpCartogram();
+    const { cols, rows } = g2mpDims();
+    let table =
+      '<table class="lg-cartogram lg-cartogram-g2mp"><caption>I×J: ' +
+      cols +
+      "×" +
+      rows +
+      " · A+(i−1)B+(j−1)C</caption><thead><tr><th></th>";
+    for (let i = 1; i <= cols; i++) {
+      table += '<th class="lg-col-lab">' + i + "</th>";
+    }
+    table += "</tr></thead><tbody>";
+    for (let j = rows; j >= 1; j--) {
+      table += '<tr><th class="lg-row-lab">' + formatG2mpRowLabel(j) + "</th>";
+      for (let i = 1; i <= cols; i++) {
+        const val = g2mpCell(i, j);
+        const excluded = val === "0";
+        const col = excluded ? "" : colorFor(val);
+        table +=
+          '<td><button type="button" class="lg-cell' +
+          (excluded ? " excluded empty" : "") +
+          '" data-g2mp-i="' +
+          i +
+          '" data-g2mp-j="' +
+          j +
+          '"' +
+          (excluded ? "" : ' style="background:' + col + ';color:#111"') +
+          ' title="i=' +
+          i +
+          ", j=" +
+          j +
+          '">' +
+          (excluded ? "·" : escapeHtml(val.length > 5 ? val.slice(0, 4) + "…" : val)) +
+          "</button></td>";
+      }
+      table += "</tr>";
+    }
+    table += "</tbody></table>";
+
+    return (
+      "<fieldset><legend>PARM — картограмма G2MP</legend>" +
+      '<p class="lg-hint">Столбцы I, строки J; строки L01…LJ; «0» — пустая ячейка.</p>' +
+      '<div class="lg-dims4">' +
+      '<div class="lg-row"><label for="g2mpCols">столбцы I</label><input id="g2mpCols" type="number" min="1" max="99" value="' +
+      cols +
+      '" /></div>' +
+      '<div class="lg-row"><label for="g2mpRows">строки J</label><input id="g2mpRows" type="number" min="1" max="99" value="' +
+      rows +
+      '" /></div>' +
+      "</div>" +
+      vecRowHtml("A", "va", form.vectorA) +
+      vecRowHtml("B", "vb", form.vectorB) +
+      vecRowHtml("C", "vc", form.vectorC) +
+      cartogramBrushHtml() +
+      '<div class="lg-cartogram-wrap">' +
+      table +
+      "</div></fieldset>"
     );
   }
 
@@ -570,15 +978,19 @@
   function renderPlotOnly() {
     const wrap = root.querySelector(".lg-grid-wrap");
     if (!wrap) return;
-    wrap.innerHTML = plotHtml();
-    if (!dragState) bindPlot();
-    else {
-      const g = wrap.querySelector('.lg-proto[data-idx="' + dragState.idx + '"]');
-      if (g) g.classList.add("dragging");
-      const snapEl = wrap.querySelector("#lgSnapToggle");
-      if (snapEl) snapEl.checked = snapEnabled;
+    wrap.innerHTML = mainPlotHtml();
+    if (isGltl()) {
+      if (!dragState) bindPlot();
+      else {
+        const g = wrap.querySelector('.lg-proto[data-idx="' + dragState.idx + '"]');
+        if (g) g.classList.add("dragging");
+        const snapEl = wrap.querySelector("#lgSnapToggle");
+        if (snapEl) snapEl.checked = snapEnabled;
+      }
+      syncPlacementRowInputs();
+    } else {
+      bindCartogramPlotBrush();
     }
-    syncPlacementRowInputs();
   }
 
   function schedulePlotRefresh() {
@@ -604,6 +1016,388 @@
     const x = plotView.minX + (sx - plotView.ox) / plotView.scale;
     const y = plotView.minY + (plotView.H - plotView.oy - sy) / plotView.scale;
     return { x: x, y: y };
+  }
+
+  /** Превью G2AR: позиции A + i·B + j·C. */
+  function g2arWorldPos(i, j) {
+    const va = (form.vectorA || ["0", "0", "0"]).map(parseCoord);
+    const vb = (form.vectorB || ["1", "0", "0"]).map(parseCoord);
+    const vc = (form.vectorC || ["0", "1", "0"]).map(parseCoord);
+    const vbUsed = vb.some((v) => v !== 0);
+    const vcUsed = vc.some((v) => v !== 0);
+    if (!vbUsed && !vcUsed) {
+      return { x: i, y: j, z: va[2] || 0 };
+    }
+    return {
+      x: va[0] + i * vb[0] + j * vc[0],
+      y: va[1] + i * vb[1] + j * vc[1],
+      z: va[2] + i * vb[2] + j * vc[2],
+    };
+  }
+
+  function g2arPlotPts() {
+    ensureG2arCartogram();
+    const b = g2arBounds();
+    const pts = [];
+    for (let j = b.jMin; j <= b.jMax; j++) {
+      for (let i = b.iMin; i <= b.iMax; i++) {
+        const cell = g2arCell(i, j);
+        if (cell === "0") continue;
+        const w = g2arWorldPos(i, j);
+        const pi = Math.max(1, form.elements.indexOf(cell) + 1);
+        pts.push({
+          idx: pts.length,
+          i: i,
+          j: j,
+          x: w.x,
+          y: w.y,
+          z: w.z,
+          protoIndex: pi,
+          element: cell,
+        });
+      }
+    }
+    return pts;
+  }
+
+  /** Превью G2MP: A + (i−1)·B + (j−1)·C, i,j с 1. */
+  function g2mpWorldPos(i, j) {
+    const va = (form.vectorA || ["0", "0", "0"]).map(parseCoord);
+    const vb = (form.vectorB || ["1", "0", "0"]).map(parseCoord);
+    const vc = (form.vectorC || ["0", "1", "0"]).map(parseCoord);
+    const im = i - 1;
+    const jm = j - 1;
+    return {
+      x: va[0] + im * vb[0] + jm * vc[0],
+      y: va[1] + im * vb[1] + jm * vc[1],
+      z: va[2] + im * vb[2] + jm * vc[2],
+    };
+  }
+
+  function g2mpPlotPts() {
+    ensureG2mpCartogram();
+    const { cols, rows } = g2mpDims();
+    const pts = [];
+    for (let j = 1; j <= rows; j++) {
+      for (let i = 1; i <= cols; i++) {
+        const cell = g2mpCell(i, j);
+        if (cell === "0") continue;
+        const w = g2mpWorldPos(i, j);
+        const pi = Math.max(1, form.elements.indexOf(cell) + 1);
+        pts.push({
+          idx: pts.length,
+          i: i,
+          j: j,
+          x: w.x,
+          y: w.y,
+          z: w.z,
+          protoIndex: pi,
+          element: cell,
+        });
+      }
+    }
+    return pts;
+  }
+
+  function cartogramPlotPts() {
+    return isG2mp() ? g2mpPlotPts() : g2arPlotPts();
+  }
+
+  function drawProtoBodies(sx, sy, scale, pts, pitch) {
+    let bodies = "";
+    const shapeArea = (sh) => {
+      if (sh.kind === "rect") return Math.abs((sh.x2 - sh.x1) * (sh.y2 - sh.y1));
+      if (sh.kind === "circle") return Math.PI * sh.r * sh.r;
+      if (sh.kind === "poly" && sh.points && sh.points.length >= 3) {
+        let a = 0;
+        const poly = sh.points;
+        for (let i = 0; i < poly.length; i++) {
+          const q = poly[i];
+          const r = poly[(i + 1) % poly.length];
+          a += q.x * r.y - r.x * q.y;
+        }
+        return Math.abs(a) * 0.5;
+      }
+      return 0;
+    };
+
+    pts.forEach((p) => {
+      const col = colorFor(p.element);
+      const ext = protoExtent(p.element, pitch);
+      const ox1 = sx(p.x + ext.minX);
+      const oy1 = sy(p.y + ext.minY);
+      const ox2 = sx(p.x + ext.maxX);
+      const oy2 = sy(p.y + ext.maxY);
+      const left = Math.min(ox1, ox2);
+      const top = Math.min(oy1, oy2);
+      const rw = Math.abs(ox2 - ox1);
+      const rh = Math.abs(oy2 - oy1);
+      const labelX = left + rw / 2;
+      const labelY = top + Math.min(14, Math.max(10, rh * 0.18));
+
+      const drawShape = (sh, fillA, strokeW, cls) => {
+        if (sh.kind === "rect") {
+          const x1 = sx(p.x + sh.x1);
+          const y1 = sy(p.y + sh.y1);
+          const x2 = sx(p.x + sh.x2);
+          const y2 = sy(p.y + sh.y2);
+          return (
+            '<rect class="' +
+            cls +
+            '" x="' +
+            Math.min(x1, x2).toFixed(1) +
+            '" y="' +
+            Math.min(y1, y2).toFixed(1) +
+            '" width="' +
+            Math.abs(x2 - x1).toFixed(1) +
+            '" height="' +
+            Math.abs(y2 - y1).toFixed(1) +
+            '" fill="' +
+            col +
+            fillA +
+            '" stroke="' +
+            col +
+            '" stroke-width="' +
+            strokeW +
+            '" pointer-events="none"/>'
+          );
+        }
+        if (sh.kind === "circle") {
+          return (
+            '<circle class="' +
+            cls +
+            '" cx="' +
+            sx(p.x + sh.x).toFixed(1) +
+            '" cy="' +
+            sy(p.y + sh.y).toFixed(1) +
+            '" r="' +
+            Math.abs(sh.r * scale).toFixed(1) +
+            '" fill="' +
+            col +
+            fillA +
+            '" stroke="' +
+            col +
+            '" stroke-width="' +
+            strokeW +
+            '" pointer-events="none"/>'
+          );
+        }
+        if (sh.kind === "poly" && sh.points) {
+          return (
+            '<polygon class="' +
+            cls +
+            '" points="' +
+            sh.points
+              .map((q) => sx(p.x + q.x).toFixed(1) + "," + sy(p.y + q.y).toFixed(1))
+              .join(" ") +
+            '" fill="' +
+            col +
+            fillA +
+            '" stroke="' +
+            col +
+            '" stroke-width="' +
+            strokeW +
+            '" pointer-events="none"/>'
+          );
+        }
+        return "";
+      };
+
+      bodies += '<g class="lg-proto lg-proto-g2ar" data-idx="' + p.idx + '">';
+      const shapes = (ext.shapes || []).slice().sort((a, b) => shapeArea(b) - shapeArea(a));
+      if (shapes.length) {
+        bodies += drawShape(shapes[0], "33", 2.2, "lg-proto-shell");
+        for (let si = 1; si < shapes.length; si++) {
+          bodies += drawShape(shapes[si], "44", 1, "lg-proto-inner");
+        }
+      } else {
+        bodies +=
+          '<rect class="lg-proto-shell" x="' +
+          left.toFixed(1) +
+          '" y="' +
+          top.toFixed(1) +
+          '" width="' +
+          rw.toFixed(1) +
+          '" height="' +
+          rh.toFixed(1) +
+          '" fill="' +
+          col +
+          '55" stroke="' +
+          col +
+          '" stroke-width="1.4" stroke-dasharray="4 3" pointer-events="none"/>';
+      }
+
+      const cx = sx(p.x);
+      const cy = sy(p.y);
+      bodies +=
+        '<text x="' +
+        labelX.toFixed(1) +
+        '" y="' +
+        labelY.toFixed(1) +
+        '" text-anchor="middle" dominant-baseline="hanging" class="lg-proto-lbl">' +
+        (p.i !== undefined ? "[" + p.i + "," + p.j + "] " : "") +
+        "/" +
+        p.protoIndex +
+        " " +
+        escapeHtml(p.element) +
+        "</text>";
+      bodies += "</g>";
+    });
+    return bodies;
+  }
+
+  function g2arPlotHtml() {
+    const pitch = estimatePitchFromVectors();
+    const pts = cartogramPlotPts();
+    const pad = 40;
+    const W = 560;
+    const H = 440;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    const expandPt = (x, y, el) => {
+      const ext = el ? protoExtent(el, pitch) : { minX: -pitch * 0.2, maxX: pitch * 0.2, minY: -pitch * 0.2, maxY: pitch * 0.2 };
+      minX = Math.min(minX, x + ext.minX);
+      maxX = Math.max(maxX, x + ext.maxX);
+      minY = Math.min(minY, y + ext.minY);
+      maxY = Math.max(maxY, y + ext.maxY);
+    };
+    // всегда учитываем всю сетку индексов (в т.ч. пустые) — иначе DnD на пустом поле ломается
+    if (isG2mp()) {
+      const { cols, rows } = g2mpDims();
+      for (let j = 1; j <= rows; j++) {
+        for (let i = 1; i <= cols; i++) {
+          const w = g2mpWorldPos(i, j);
+          expandPt(w.x, w.y, g2mpCell(i, j) === "0" ? null : g2mpCell(i, j));
+        }
+      }
+    } else {
+      const b = g2arBounds();
+      for (let j = b.jMin; j <= b.jMax; j++) {
+        for (let i = b.iMin; i <= b.iMax; i++) {
+          const w = g2arWorldPos(i, j);
+          const cell = g2arCell(i, j);
+          expandPt(w.x, w.y, cell === "0" ? null : cell);
+        }
+      }
+    }
+    if (!Number.isFinite(minX)) {
+      minX = 0;
+      maxX = pitch * 2;
+      minY = 0;
+      maxY = pitch * 2;
+    }
+    {
+      const mx = (maxX - minX) * 0.08 || pitch * 0.2;
+      const my = (maxY - minY) * 0.08 || pitch * 0.2;
+      minX -= mx;
+      maxX += mx;
+      minY -= my;
+      maxY += my;
+    }
+    const spanX = Math.max(1e-6, maxX - minX);
+    const spanY = Math.max(1e-6, maxY - minY);
+    const scale = Math.min((W - 2 * pad) / spanX, (H - 2 * pad) / spanY);
+    const ox = pad + ((W - 2 * pad) - spanX * scale) / 2;
+    const oy = pad + ((H - 2 * pad) - spanY * scale) / 2;
+    const sx = (x) => ox + (x - minX) * scale;
+    const sy = (y) => H - oy - (y - minY) * scale;
+
+    plotView = { W, H, pad, minX, minY, maxX, maxY, scale, ox, oy, pitch };
+
+    const palette = cartogramBrushHtml();
+    let bodies = "";
+    const axisY0 = sy(Math.min(Math.max(0, minY), maxY));
+    const axisX0 = sx(Math.min(Math.max(0, minX), maxX));
+    bodies +=
+      '<line x1="' +
+      pad +
+      '" y1="' +
+      axisY0.toFixed(1) +
+      '" x2="' +
+      (W - pad) +
+      '" y2="' +
+      axisY0.toFixed(1) +
+      '" class="lg-plot-axis"/>';
+    bodies +=
+      '<line x1="' +
+      axisX0.toFixed(1) +
+      '" y1="' +
+      pad +
+      '" x2="' +
+      axisX0.toFixed(1) +
+      '" y2="' +
+      (H - pad) +
+      '" class="lg-plot-axis"/>';
+
+    // маркеры пустых узлов решётки (цели для DnD)
+    const emptySlots = [];
+    if (isG2mp()) {
+      const { cols, rows } = g2mpDims();
+      for (let j = 1; j <= rows; j++) {
+        for (let i = 1; i <= cols; i++) {
+          if (g2mpCell(i, j) !== "0") continue;
+          const w = g2mpWorldPos(i, j);
+          emptySlots.push({ i, j, x: w.x, y: w.y });
+        }
+      }
+    } else {
+      const b = g2arBounds();
+      for (let j = b.jMin; j <= b.jMax; j++) {
+        for (let i = b.iMin; i <= b.iMax; i++) {
+          if (g2arCell(i, j) !== "0") continue;
+          const w = g2arWorldPos(i, j);
+          emptySlots.push({ i, j, x: w.x, y: w.y });
+        }
+      }
+    }
+    emptySlots.forEach((s) => {
+      bodies +=
+        '<circle class="lg-slot" cx="' +
+        sx(s.x).toFixed(1) +
+        '" cy="' +
+        sy(s.y).toFixed(1) +
+        '" r="4" fill="transparent" stroke="var(--vscode-descriptionForeground, #888)" stroke-width="1" stroke-dasharray="2 2" pointer-events="none"/>';
+    });
+
+    bodies += drawProtoBodies(sx, sy, scale, pts, pitch);
+
+    return (
+      '<div class="lg-plot lg-plot-g2ar">' +
+      '<div class="lg-plot-palette lg-plot-palette-brush" title="Клик — кисть; перетащите на узел решётки">' +
+      palette +
+      "</div>" +
+      '<svg class="lg-plot-svg" viewBox="0 0 ' +
+      W +
+      " " +
+      H +
+      '" preserveAspectRatio="xMidYMid meet">' +
+      '<rect class="lg-plot-drop" x="0" y="0" width="' +
+      W +
+      '" height="' +
+      H +
+      '" fill="transparent"/>' +
+      bodies +
+      (pts.length
+        ? ""
+        : '<text x="' +
+          W / 2 +
+          '" y="' +
+          H / 2 +
+          '" text-anchor="middle" class="lg-plot-lbl">Перетащите прототип на узел</text>') +
+      "</svg></div>"
+    );
+  }
+
+  function estimatePitchFromVectors() {
+    const vb = (form.vectorB || ["25", "0", "0"]).map(parseCoord);
+    const vc = (form.vectorC || ["0", "25", "0"]).map(parseCoord);
+    return Math.max(Math.hypot(vb[0], vb[1]), Math.hypot(vc[0], vc[1]), 1);
+  }
+
+  function mainPlotHtml() {
+    return isGltl() ? plotHtml() : g2arPlotHtml();
   }
 
   /** Превью в мировых координатах PARM + DnD / snap. */
@@ -961,6 +1755,92 @@
     );
   }
 
+  function nearestCartogramIndex(wx, wy) {
+    const pitch = estimatePitchFromVectors();
+    const tol = Math.max(pitch * 0.55, 1);
+    let best = null;
+    let bestD = Infinity;
+    if (isG2mp()) {
+      const { cols, rows } = g2mpDims();
+      for (let j = 1; j <= rows; j++) {
+        for (let i = 1; i <= cols; i++) {
+          const w = g2mpWorldPos(i, j);
+          const d = Math.hypot(wx - w.x, wy - w.y);
+          if (d < bestD) {
+            bestD = d;
+            best = { i, j, d };
+          }
+        }
+      }
+    } else {
+      const b = g2arBounds();
+      for (let j = b.jMin; j <= b.jMax; j++) {
+        for (let i = b.iMin; i <= b.iMax; i++) {
+          const w = g2arWorldPos(i, j);
+          const d = Math.hypot(wx - w.x, wy - w.y);
+          if (d < bestD) {
+            bestD = d;
+            best = { i, j, d };
+          }
+        }
+      }
+    }
+    if (!best || best.d > tol) return null;
+    return best;
+  }
+
+  function paintCartogramAt(i, j, val) {
+    if (isG2mp()) setG2mpCell(i, j, val);
+    else setG2arCell(i, j, val);
+  }
+
+  function bindCartogramPlotBrush() {
+    root.querySelectorAll(".lg-brush[data-brush]").forEach((btn) => {
+      btn.onclick = () => {
+        paintBrush = btn.getAttribute("data-brush") || "0";
+        root.querySelectorAll(".lg-brush").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        renderPlotOnly();
+      };
+      btn.ondragstart = (ev) => {
+        const val = btn.getAttribute("data-brush") || "0";
+        paintBrush = val;
+        ev.dataTransfer.setData("text/lg-proto", val + "\t0");
+        ev.dataTransfer.effectAllowed = "copy";
+      };
+    });
+
+    const svg = root.querySelector(".lg-plot-svg");
+    if (!svg) return;
+
+    svg.ondragover = (ev) => {
+      ev.preventDefault();
+      ev.dataTransfer.dropEffect = "copy";
+      svg.classList.add("lg-plot-dragover");
+    };
+    svg.ondragleave = () => svg.classList.remove("lg-plot-dragover");
+    svg.ondrop = (ev) => {
+      ev.preventDefault();
+      svg.classList.remove("lg-plot-dragover");
+      const raw = ev.dataTransfer.getData("text/lg-proto");
+      if (!raw) return;
+      const name = raw.split("\t")[0];
+      if (name === undefined || name === "") return;
+      const loc = svgPointFromEvent(svg, ev);
+      const w = worldFromSvgXY(loc.x, loc.y);
+      const hit = nearestCartogramIndex(w.x, w.y);
+      if (!hit) return;
+      paintBrush = name;
+      paintCartogramAt(hit.i, hit.j, name);
+      onChange();
+      render();
+    };
+  }
+
+  function bindG2arPlotBrush() {
+    bindCartogramPlotBrush();
+  }
+
   function bindPlot() {
     const svg = root.querySelector(".lg-plot-svg");
     if (!svg) return;
@@ -1089,8 +1969,8 @@
     root.innerHTML =
       '<header class="lg-header">' +
       "<div>" +
-      "<h1>Решётка GLTL</h1>" +
-      '<p class="lg-sub">§9.2.6.1 · курсор на LATT GLTL → «Из контекста»</p>' +
+      "<h1>Решётка MCU-NR</h1>" +
+      '<p class="lg-sub">§9.2.6 · GLTL / G2AR / G2MP · курсор на LATT → «Из контекста»</p>' +
       (context.boundLabel
         ? '<p class="lg-bound">Привязка: ' + escapeHtml(context.boundLabel) + "</p>"
         : '<p class="lg-bound lg-bound-warn">Нет привязки к файлу — нажмите «Из контекста»</p>') +
@@ -1101,6 +1981,7 @@
       "</header>" +
       '<div class="lg-layout">' +
       '<aside class="lg-form">' +
+      typeSelectorHtml() +
       "<fieldset><legend>Зона-носитель</legend>" +
       '<div class="lg-row"><label for="zoneName">Зона</label>' +
       '<input id="zoneName" list="zoneList" type="text" value="' +
@@ -1110,7 +1991,9 @@
       zoneOpts +
       "</datalist></div></fieldset>" +
       "<fieldset><legend>LISTEL — прототипы</legend>" +
-      '<p class="lg-hint">Порядок = номер /n. Перетаскивание — из панели над графикой.</p>' +
+      '<p class="lg-hint">Порядок = номер /n.' +
+      (isGltl() ? " Перетаскивание — из панели над графикой." : " Кисть — для картограммы.") +
+      "</p>" +
       '<div class="lg-add-row">' +
       '<input id="newEl" type="text" placeholder="имя LCELL" maxlength="6" />' +
       '<button type="button" class="lg-btn secondary" id="btnAddEl">+</button>' +
@@ -1139,10 +2022,14 @@
           "</p>"
         : "") +
       "</fieldset>" +
-      "<fieldset><legend>PARM — сдвиги</legend>" +
-      '<p class="lg-hint">[/n] действует только на следующий вектор (X,Y,Z).</p>' +
-      placementsHtml() +
-      "</fieldset>" +
+      (isG2mp()
+        ? g2mpFormHtml()
+        : isG2ar()
+        ? g2arFormHtml()
+        : "<fieldset><legend>PARM — сдвиги</legend>" +
+          '<p class="lg-hint">[/n] действует только на следующий вектор (X,Y,Z).</p>' +
+          placementsHtml() +
+          "</fieldset>") +
       "<fieldset><legend>Опции</legend>" +
       '<div class="lg-row"><label for="lfixso">LFIXSO</label>' +
       '<input id="lfixso" type="text" value="' +
@@ -1154,18 +2041,18 @@
       '" placeholder="0,1" /></div>' +
       "</fieldset>" +
       '<div class="lg-actions">' +
-      '<button type="button" class="lg-btn primary" id="btnFromCtx" title="Взять LISTEL и PARM из LATT под курсором в редакторе">Из контекста</button>' +
+      '<button type="button" class="lg-btn primary" id="btnFromCtx" title="Взять LATT из редактора">Из контекста</button>' +
       '<button type="button" class="lg-btn secondary" id="btnClearCtx">Сбросить привязку</button>' +
       '<button type="button" class="lg-btn" id="btnInsert">Вставить</button>' +
       '<button type="button" class="lg-btn" id="btnReplace"' +
       (canReplace ? "" : " disabled") +
       ">Заменить</button>" +
       "</div>" +
-      '<p class="lg-hint">Контекст: клик по LATT в сайдбаре «Решётки» (курсор на блоке) → эта кнопка, либо откройте конструктор с вкладки Решётки.</p>' +
+      '<p class="lg-hint">Контекст: курсор на LATT GLTL/G2AR/G2MP в редакторе → «Из контекста».</p>' +
       "</aside>" +
       '<main class="lg-main">' +
       '<div class="lg-grid-wrap lg-gltl-pad">' +
-      plotHtml() +
+      mainPlotHtml() +
       "</div>" +
       '<section class="lg-preview">' +
       "<h2>MCU текст</h2>" +
@@ -1185,10 +2072,66 @@
   }
 
   function bind() {
-    bindPlot();
+    if (isGltl()) bindPlot();
+    else bindCartogramPlotBrush();
+    root.querySelectorAll('input[name="latticeType"]').forEach((el) => {
+      el.addEventListener("change", () => {
+        const v = el.value;
+        const next = v === "G2AR" ? "G2AR" : v === "G2MP" ? "G2MP" : "GLTL";
+        const prev = form.latticeType;
+        if (prev === next) return;
+        // radio уже новый — читаем поля, но тип оставляем старым до convert на хосте
+        readFormFromDom();
+        form.latticeType = prev;
+        vscode.postMessage({ type: "switchLatticeType", latticeType: next, form: form });
+      });
+    });
     ["zoneName", "lfixso", "lblack"].forEach((id) => {
       root.querySelector("#" + id)?.addEventListener("change", onChange);
       root.querySelector("#" + id)?.addEventListener("input", onChange);
+    });
+    ["iMin", "iMax", "jMin", "jMax", "g2mpCols", "g2mpRows", "vaX", "vaY", "vaZ", "vbX", "vbY", "vbZ", "vcX", "vcY", "vcZ"].forEach(
+      (id) => {
+        root.querySelector("#" + id)?.addEventListener("change", () => {
+          readFormFromDom();
+          ensureCartogram();
+          onChange();
+        });
+        root.querySelector("#" + id)?.addEventListener("input", () => {
+          readFormFromDom();
+          ensureCartogram();
+          schedulePlotRefresh();
+          schedulePush();
+        });
+      }
+    );
+    root.querySelectorAll(".lg-brush[data-brush]").forEach((btn) => {
+      btn.onclick = () => {
+        paintBrush = btn.getAttribute("data-brush") || "0";
+        root.querySelectorAll(".lg-brush").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        if (isCartogram()) renderPlotOnly();
+      };
+    });
+    root.querySelectorAll(".lg-cell[data-i][data-j]").forEach((cell) => {
+      cell.onclick = () => {
+        const i = parseInt(cell.getAttribute("data-i"), 10);
+        const j = parseInt(cell.getAttribute("data-j"), 10);
+        if (!Number.isFinite(i) || !Number.isFinite(j)) return;
+        setG2arCell(i, j, paintBrush);
+        onChange();
+        render();
+      };
+    });
+    root.querySelectorAll(".lg-cell[data-g2mp-i][data-g2mp-j]").forEach((cell) => {
+      cell.onclick = () => {
+        const i = parseInt(cell.getAttribute("data-g2mp-i"), 10);
+        const j = parseInt(cell.getAttribute("data-g2mp-j"), 10);
+        if (!Number.isFinite(i) || !Number.isFinite(j)) return;
+        setG2mpCell(i, j, paintBrush);
+        onChange();
+        render();
+      };
     });
     root.querySelectorAll(".pl-n, .pl-x, .pl-y, .pl-z").forEach((el) => {
       el.addEventListener("change", onChange);
@@ -1258,7 +2201,13 @@
     if (!msg || !msg.type) return;
     if (msg.type === "form") {
       form = msg.form;
-      form.latticeType = "GLTL";
+      if (isG2ar()) {
+        paintBrush = form.elements?.[0] || "0";
+        ensureG2arCartogram();
+      } else if (isG2mp()) {
+        paintBrush = "0";
+        ensureG2mpCartogram();
+      }
       render();
     } else if (msg.type === "context") {
       context = {

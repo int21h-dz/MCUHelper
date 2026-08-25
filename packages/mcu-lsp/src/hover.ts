@@ -1,5 +1,6 @@
 import {
   BOUNDARY_CODES,
+  CONT_SYMMETRY_SUGGESTIONS,
   FRAGMENT_DISPLAY,
   MODS_VALUES,
   formatCardHover,
@@ -490,10 +491,54 @@ function appendKeywordExtrasToHover(
   return out;
 }
 
-function hoverContextual(line: string, word: string): string | null {
-  const bc = BOUNDARY_CODES.find((b) => b.code === word);
-  if (bc && /\bCONT\b/i.test(line)) {
-    return `**${bc.title}**\n\nКод граничного условия в карте CONT.`;
+/** Токен CONT под курсором: W(0.5), S90, PRS60, … */
+export function contTokenAtPosition(line: string, character: number): string | null {
+  const re = /(?:PRS|S)(?:180|90|60|45|30)|[BWMCT](?:\([^)]*\)|\[[^\]]*\])?/gi;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(line)) !== null) {
+    const start = match.index;
+    const end = start + match[0].length;
+    if (character >= start && character < end) return match[0];
+  }
+  return null;
+}
+
+function hoverContToken(token: string): string | null {
+  const upper = token.toUpperCase();
+  const sym = CONT_SYMMETRY_SUGGESTIONS.find((s) => s.code === upper);
+  if (sym) {
+    const kind = upper.startsWith("PRS") ? "PRS" : "S";
+    return (
+      `**${sym.code}** — ${sym.title}\n\n` +
+      `Угол зеркальной симметрии в карте CONT. Допустимы 180, 90, 60, 45, 30. ` +
+      (kind === "PRS"
+        ? "Плоскости симметричны относительно OXZ."
+        : "Отсчёт от плоскости OXZ.") +
+      ` После токена можно указать поворот вокруг OZ (градусы).`
+    );
+  }
+
+  const bcM = token.match(/^([BWMCT])(?:\(([^)]*)\)|\[([^\]]*)\])?$/i);
+  if (!bcM) return null;
+  const code = bcM[1]!.toUpperCase();
+  const bc = BOUNDARY_CODES.find((b) => b.code === code);
+  if (!bc) return null;
+  const prob = bcM[2] ?? bcM[3];
+  const probLine =
+    prob != null && prob !== ""
+      ? `\n\nВероятность отражения: **${prob}** (интервал (0,1); иначе поглощение).`
+      : code === "W" || code === "M" || code === "C"
+        ? "\n\nБез вероятности — всегда отражение. Можно задать `W(0.5)` / `M[0.8]`."
+        : "";
+  const desc = "description" in bc && typeof bc.description === "string" ? bc.description : "Код граничного условия в карте CONT.";
+  return `**${bc.title}** (\`${code}\`)\n\n${desc}${probLine}`;
+}
+
+function hoverContextual(line: string, word: string, character?: number): string | null {
+  if (/\bCONT\b/i.test(line)) {
+    const contTok = character != null ? contTokenAtPosition(line, character) : null;
+    const fromCont = contTok ? hoverContToken(contTok) : hoverContToken(word);
+    if (fromCont) return fromCont;
   }
 
   if (MODS_VALUES.includes(word) && /MODS\s*=/i.test(line)) {
@@ -908,12 +953,12 @@ export function getHover(
     !(word === "SI" && !isSumIsotopeCardLine(line));
   const fragmentAtLine = resolveFragmentAtLine(index, pos.line, editorUri);
 
-  const contextual = hoverContextual(line, word);
+  const contextual = hoverContextual(line, word, pos.character);
   if (contextual) {
     if (word === "MODS" || /MODS\s*=/i.test(line)) {
       if (fragmentAtLine != null && fragmentAtLine !== "physical") return null;
     }
-    if (/\bCONT\b/i.test(line) && BOUNDARY_CODES.some((b) => b.code === word)) {
+    if (/\bCONT\b/i.test(line) && (BOUNDARY_CODES.some((b) => b.code === word) || contTokenAtPosition(line, pos.character))) {
       if (fragmentAtLine != null && fragmentAtLine !== "geometry") return null;
     }
     return contextual;

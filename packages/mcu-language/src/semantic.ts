@@ -18,6 +18,7 @@ import { TRANSF_FORBIDDEN_PROTO_TYPES } from "./constants";
 import { analyzeEnergyGroupStatements } from "./energyGroups";
 import { analyzeBurnupSemantics } from "./burnupSemantics";
 import { analyzeMatrCardParams } from "./matrCardValidation";
+import { analyzeContCards } from "./contValidation";
 import {
   getDbmLibRoot,
   getDbmMaterial,
@@ -425,6 +426,7 @@ export function analyzeSemantics(ast: DocumentAst): DiagnosticMessage[] {
   diags.push(...analyzeBodyParameterCounts(ast));
   diags.push(...analyzeNuclideParameterCounts(ast));
   diags.push(...analyzeMatrCardParams(ast));
+  diags.push(...analyzeContCards(ast));
   diags.push(...analyzeBurnupSemantics(ast));
   diags.push(...analyzeCrossModuleLinks(ast));
 

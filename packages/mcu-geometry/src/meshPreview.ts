@@ -52,6 +52,11 @@ export interface MeshDescriptor {
   bodyType: string;
   kind: MeshKind;
   color?: string;
+  /**
+   * Участвует в авто-кадре сечения. Соседи — false (прозрачность по дистанции,
+   * но камера остаётся на фокусе).
+   */
+  frame?: boolean;
   zoneHint?: string;
   /** Центр (или опорная точка для plane). */
   center: Vec3;
@@ -1068,6 +1073,187 @@ export function applyTransfToBodyParams(
   }
 }
 
+function addPoint(out: number[], i: number, dx: number, dy: number, dz: number): void {
+  out[i] = (out[i] ?? 0) + dx;
+  out[i + 1] = (out[i + 1] ?? 0) + dy;
+  out[i + 2] = (out[i + 2] ?? 0) + dz;
+}
+
+/**
+ * Сдвиг параметров тела. В отличие от TRANSF, работает и для RPP/плоскостей —
+ * массивы по трансляции всегда разворачиваются в копии того же типа.
+ */
+export function translateBodyParams(
+  bodyType: string,
+  params: number[],
+  dx: number,
+  dy: number,
+  dz: number
+): number[] | null {
+  const t = bodyType.toUpperCase();
+  const out = params.slice();
+  const P = (i: number) => addPoint(out, i, dx, dy, dz);
+  switch (t) {
+    case "SPH":
+      if (out.length < 4) return null;
+      P(0);
+      return out;
+    case "RCC":
+      if (out.length < 7) return null;
+      P(0);
+      return out;
+    case "RCZ":
+      if (out.length < 5) return null;
+      P(0);
+      return out;
+    case "UCZ":
+      if (out.length < 3) return null;
+      out[0] = (out[0] ?? 0) + dx;
+      out[1] = (out[1] ?? 0) + dy;
+      return out;
+    case "UCX":
+      if (out.length < 3) return null;
+      out[0] = (out[0] ?? 0) + dy;
+      out[1] = (out[1] ?? 0) + dz;
+      return out;
+    case "UCY":
+      if (out.length < 3) return null;
+      out[0] = (out[0] ?? 0) + dx;
+      out[1] = (out[1] ?? 0) + dz;
+      return out;
+    case "HEX":
+      if (out.length < 6) return null;
+      P(0);
+      return out;
+    case "HEXX":
+    case "HEXY":
+      if (out.length < 5) return null;
+      P(0);
+      return out;
+    case "HEXG":
+      if (out.length < 9) return null;
+      P(0);
+      return out;
+    case "BOX":
+    case "WED":
+      if (out.length < 12) return null;
+      P(0);
+      return out;
+    case "ELL":
+      if (out.length < 7) return null;
+      P(0);
+      if ((params[6] ?? 0) >= 0) P(3);
+      return out;
+    case "SLA":
+      if (out.length < 6) return null;
+      P(0);
+      return out;
+    case "SLB": {
+      if (out.length < 5) return null;
+      const nx = params[0] ?? 0;
+      const ny = params[1] ?? 0;
+      const nz = params[2] ?? 0;
+      const add = nx * dx + ny * dy + nz * dz;
+      out[3] = (params[3] ?? 0) + add;
+      out[4] = (params[4] ?? 0) + add;
+      return out;
+    }
+    case "PLG": {
+      if (out.length < 4) return null;
+      const nx = params[0] ?? 0;
+      const ny = params[1] ?? 0;
+      const nz = params[2] ?? 0;
+      out[3] = (params[3] ?? 0) + nx * dx + ny * dy + nz * dz;
+      return out;
+    }
+    case "PLX":
+      if (!out.length) return null;
+      out[0] = (out[0] ?? 0) + dx;
+      return out;
+    case "PLY":
+      if (!out.length) return null;
+      out[0] = (out[0] ?? 0) + dy;
+      return out;
+    case "PLZ":
+      if (!out.length) return null;
+      out[0] = (out[0] ?? 0) + dz;
+      return out;
+    case "TRC":
+      if (out.length < 8) return null;
+      P(0);
+      return out;
+    case "REC":
+      if (out.length < 12) return null;
+      P(0);
+      return out;
+    case "RPP":
+      if (out.length < 6) return null;
+      out[0] = (out[0] ?? 0) + dx;
+      out[1] = (out[1] ?? 0) + dx;
+      out[2] = (out[2] ?? 0) + dy;
+      out[3] = (out[3] ?? 0) + dy;
+      out[4] = (out[4] ?? 0) + dz;
+      out[5] = (out[5] ?? 0) + dz;
+      return out;
+    case "SBOX":
+      if (out.length < 9) return null;
+      if (Math.hypot(dx, dy, dz) < 1e-12) return out;
+      return null;
+    case "SHEX":
+      return null;
+    default:
+      return null;
+  }
+}
+
+/** Опорная точка для раскладки по кривой / отрезку. */
+export function bodyAnchorPoint(bodyType: string, params: number[]): { x: number; y: number; z: number } | null {
+  const t = bodyType.toUpperCase();
+  const p = params;
+  const xyz = (i = 0) =>
+    p.length >= i + 3 ? { x: p[i] ?? 0, y: p[i + 1] ?? 0, z: p[i + 2] ?? 0 } : null;
+  switch (t) {
+    case "SPH":
+    case "RCC":
+    case "RCZ":
+    case "HEX":
+    case "HEXX":
+    case "HEXY":
+    case "HEXG":
+    case "BOX":
+    case "WED":
+    case "ELL":
+    case "SLA":
+    case "TRC":
+    case "REC":
+      return xyz(0);
+    case "UCZ":
+      return p.length >= 2 ? { x: p[0] ?? 0, y: p[1] ?? 0, z: 0 } : null;
+    case "UCX":
+      return p.length >= 2 ? { x: 0, y: p[0] ?? 0, z: p[1] ?? 0 } : null;
+    case "UCY":
+      return p.length >= 2 ? { x: p[0] ?? 0, y: 0, z: p[1] ?? 0 } : null;
+    case "RPP":
+      if (p.length < 6) return null;
+      return {
+        x: ((p[0] ?? 0) + (p[1] ?? 0)) / 2,
+        y: ((p[2] ?? 0) + (p[3] ?? 0)) / 2,
+        z: ((p[4] ?? 0) + (p[5] ?? 0)) / 2,
+      };
+    case "SBOX":
+    case "SHEX":
+      return { x: 0, y: 0, z: 0 };
+    case "PLX":
+      return { x: p[0] ?? 0, y: 0, z: 0 };
+    case "PLY":
+      return { x: 0, y: p[0] ?? 0, z: 0 };
+    case "PLZ":
+      return { x: 0, y: 0, z: p[0] ?? 0 };
+    default:
+      return xyz(0);
+  }
+}
+
 export function applyTransfToPrimitive(
   proto: PrimitiveSolid,
   newName: string,
@@ -1125,14 +1311,50 @@ export function firstContainerIndex(bodies: PrimitiveSolid[]): number {
 }
 
 export interface NearbyBodiesOptions {
-  /** Сколько ближайших тел показать (по умолчанию 12). */
+  /**
+   * Сколько ближайших тел показать.
+   * По умолчанию без лимита (`Infinity`) — все, кроме excluded.
+   */
   maxCount?: number;
   /**
-   * Макс. зазор: множитель размера черновика (по умолчанию 4).
-   * Тела дальше отсекаются, даже если входят в top-N.
+   * Макс. зазор: множитель размера фокуса.
+   * По умолчанию без отсечения по дистанции (`Infinity`);
+   * дальние тела рисуются бледнее (`neighborColorByGap`).
    */
   maxGapFactor?: number;
   excludeName?: string;
+}
+
+/**
+ * Цвет контура соседа по дистанции.
+ * `fadeScale` — max дистанция среди соседей (XY-центры + AABB-gap).
+ * Близко: светлее и плотнее; далеко: тусклее, но всё ещё читаемо на тёмном фоне
+ * (раньше alpha→0.06 делал единственного/дальнего соседа «прозрачным»).
+ */
+export function neighborColorByGap(dist: number, fadeScale: number): string {
+  const ref = Math.max(fadeScale, 1e-6);
+  const t = Math.min(1, Math.max(0, dist) / ref);
+  const k = Math.pow(1 - t, 1.65);
+  const alpha = 0.48 + 0.47 * k;
+  const r = Math.round(110 + (186 - 110) * k);
+  const g = Math.round(115 + (195 - 115) * k);
+  const b = Math.round(135 + (215 - 135) * k);
+  return `rgba(${r}, ${g}, ${b}, ${alpha.toFixed(3)})`;
+}
+
+/** AABB-gap часто 0 при пересечении тел — для затухания берём ещё 3D-расстояние центров. */
+export function neighborFadeDistance(focus: BoundingBox, body: PrimitiveSolid): number {
+  const gap = neighborGap(focus, body);
+  const a = bboxCenterSize(focus).center;
+  const b = bboxCenterSize(body.bbox).center;
+  const spatial = Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
+  return Math.max(gap, spatial);
+}
+
+function fadeScaleForNeighbors(focus: BoundingBox, neighbors: PrimitiveSolid[]): number {
+  let maxD = 0;
+  for (const n of neighbors) maxD = Math.max(maxD, neighborFadeDistance(focus, n));
+  return Math.max(maxD, 1e-6);
 }
 
 /** Ближайшие тела по AABB-зазору (не вся сцена). */
@@ -1177,21 +1399,43 @@ export function selectNearbyBodies(
   bodies: PrimitiveSolid[],
   options: NearbyBodiesOptions = {}
 ): PrimitiveSolid[] {
-  const maxCount = options.maxCount ?? 12;
-  const maxGapFactor = options.maxGapFactor ?? 4;
-  const maxGap = bboxExtent(focus) * maxGapFactor;
+  const maxCount = options.maxCount ?? Number.POSITIVE_INFINITY;
+  const maxGapFactor = options.maxGapFactor ?? Number.POSITIVE_INFINITY;
+  const maxGap = Number.isFinite(maxGapFactor) ? bboxExtent(focus) * maxGapFactor : Number.POSITIVE_INFINITY;
   const containerIdx = firstContainerIndex(bodies);
-  return rankNearbyBodies(focus, bodies, options.excludeName)
-    .filter((x) => {
-      const idx = bodies.indexOf(x.body);
-      return !isNeighborExcluded(x.body, focus, idx === containerIdx && containerIdx >= 0);
-    })
-    .filter((x) => x.gap <= maxGap)
-    .slice(0, maxCount)
-    .map((x) => x.body);
+  const ranked = rankNearbyBodies(focus, bodies, options.excludeName).filter((x) => {
+    const idx = bodies.indexOf(x.body);
+    return !isNeighborExcluded(x.body, focus, idx === containerIdx && containerIdx >= 0);
+  });
+  const within = ranked.filter((x) => x.gap <= maxGap);
+  const limited = Number.isFinite(maxCount) ? within.slice(0, maxCount) : within;
+  return limited.map((x) => x.body);
 }
 
-export const DRAFT_BODY_COLOR = "#3d9a8b";
+/** Как selectNearbyBodies, но с gap для окраски по расстоянию. */
+export function selectNearbyBodiesWithGap(
+  focus: BoundingBox,
+  bodies: PrimitiveSolid[],
+  options: NearbyBodiesOptions = {}
+): Array<{ body: PrimitiveSolid; gap: number }> {
+  const maxCount = options.maxCount ?? Number.POSITIVE_INFINITY;
+  const maxGapFactor = options.maxGapFactor ?? Number.POSITIVE_INFINITY;
+  const maxGap = Number.isFinite(maxGapFactor) ? bboxExtent(focus) * maxGapFactor : Number.POSITIVE_INFINITY;
+  const containerIdx = firstContainerIndex(bodies);
+  const ranked = rankNearbyBodies(focus, bodies, options.excludeName).filter((x) => {
+    const idx = bodies.indexOf(x.body);
+    return !isNeighborExcluded(x.body, focus, idx === containerIdx && containerIdx >= 0);
+  });
+  const within = ranked.filter((x) => x.gap <= maxGap);
+  return Number.isFinite(maxCount) ? within.slice(0, maxCount) : within;
+}
+
+/** Как первая зона в live preview (`colorForZone(0)`). */
+export const DRAFT_BODY_COLOR = "#e6194b";
+/** Копии массива — тот же тон, чуть мягче. */
+export const COPY_BODY_COLOR = "#e06b7a";
+/** Исключённые из вставки копии — «призрак», кликабельны чтобы вернуть. */
+export const COPY_EXCLUDED_COLOR = "#8a6a72";
 export const NEIGHBOR_BODY_COLOR = "#585b70";
 
 export interface DraftBodyPreviewInput {
@@ -1203,6 +1447,8 @@ export interface DraftBodyPreviewInput {
   nearby?: NearbyBodiesOptions;
   /** Положение секущих плоскостей (иначе — центр focus-bbox). */
   slicePositions?: Partial<{ x: number; y: number; z: number }>;
+  /** Копии массива (тот же тип, преобразованные параметры). */
+  extraBodies?: Array<{ name: string; bodyType: string; params: number[]; excluded?: boolean }>;
   /** UserGuide §9.1.3.22: черновик TRANSF — прототип из сцены + M|R A B f. */
   transf?: {
     protoName: string;
@@ -1241,6 +1487,11 @@ export interface SlicePolyline {
   color: string;
   highlight: boolean;
   name: string;
+  /**
+   * Участвует в авто-кадре сечения (фокус / копии массива).
+   * Соседи — false: иначе камера уезжает на всю сцену.
+   */
+  frame?: boolean;
 }
 
 export interface BodySliceView {
@@ -1546,7 +1797,8 @@ function sliceMesh(
   highlight: boolean
 ): SlicePolyline[] {
   const color = m.color || (highlight ? DRAFT_BODY_COLOR : NEIGHBOR_BODY_COLOR);
-  const base = { closed: true as const, color, highlight, name: m.name };
+  const frame = m.frame ?? highlight;
+  const base = { closed: true as const, color, highlight, name: m.name, frame };
   const out: SlicePolyline[] = [];
   const push = (points: SlicePoint2d[] | null | undefined) => {
     if (points && points.length >= 2) out.push({ ...base, points });
@@ -1764,6 +2016,7 @@ function boundsOfPolys(
   let vMin = Infinity;
   let vMax = -Infinity;
   for (const p of polys) {
+    if (p.frame === false) continue;
     for (const q of p.points) {
       uMin = Math.min(uMin, q.u);
       uMax = Math.max(uMax, q.u);
@@ -1934,32 +2187,63 @@ export function buildDraftBodyPreview(input: DraftBodyPreviewInput): DraftBodyPr
     color: DRAFT_BODY_COLOR,
   };
 
+  const extraSolids: PrimitiveSolid[] = [];
+  for (const extra of input.extraBodies ?? []) {
+    const et = extra.bodyType.toUpperCase();
+    const eb = bboxFromBodyParams(et, extra.params);
+    if (!eb) continue;
+    extraSolids.push({
+      type: et,
+      name: extra.name,
+      params: extra.params,
+      bbox: eb,
+      color: extra.excluded ? COPY_EXCLUDED_COLOR : COPY_BODY_COLOR,
+    });
+  }
+
   const ranked = rankNearbyBodies(bbox, input.scenePrimitives, name);
   const containerIdx = firstContainerIndex(input.scenePrimitives);
-  const localRanked = ranked.filter((x) => {
+  const neighbors = ranked.filter((x) => {
     const idx = input.scenePrimitives.indexOf(x.body);
     return !isNeighborExcluded(x.body, bbox, idx === containerIdx && containerIdx >= 0);
   });
-  const nearest = localRanked[0] ? { name: localRanked[0].body.name, gap: localRanked[0].gap } : undefined;
-  const maxCount = input.nearby?.maxCount ?? 12;
-  const maxGapFactor = input.nearby?.maxGapFactor ?? 4;
-  const maxGap = bboxExtent(bbox) * maxGapFactor;
-  const neighbors = localRanked.filter((x) => x.gap <= maxGap).slice(0, maxCount).map((x) => x.body);
+  // Опциональный legacy-фильтр, если caller явно задал maxCount / maxGapFactor.
+  const maxCount = input.nearby?.maxCount ?? Number.POSITIVE_INFINITY;
+  const maxGapFactor = input.nearby?.maxGapFactor ?? Number.POSITIVE_INFINITY;
+  const maxGap = Number.isFinite(maxGapFactor) ? bboxExtent(bbox) * maxGapFactor : Number.POSITIVE_INFINITY;
+  const shownNeighbors = neighbors
+    .filter((x) => x.gap <= maxGap)
+    .slice(0, Number.isFinite(maxCount) ? maxCount : neighbors.length);
+  const nearest = shownNeighbors[0]
+    ? { name: shownNeighbors[0].body.name, gap: shownNeighbors[0].gap }
+    : undefined;
+  const fadeScale = fadeScaleForNeighbors(
+    bbox,
+    shownNeighbors.map((x) => x.body)
+  );
 
+  // Кадр = черновик + копии массива. Соседей в bbox не включаем — иначе камера
+  // уезжает на всю сцену; дальние контуры просто бледные / за краем до зума.
   let previewBbox: BoundingBox = padBbox(bbox);
-  for (const n of neighbors) {
-    previewBbox = {
-      min: {
-        x: Math.min(previewBbox.min.x, n.bbox.min.x),
-        y: Math.min(previewBbox.min.y, n.bbox.min.y),
-        z: Math.min(previewBbox.min.z, n.bbox.min.z),
-      },
-      max: {
-        x: Math.max(previewBbox.max.x, n.bbox.max.x),
-        y: Math.max(previewBbox.max.y, n.bbox.max.y),
-        z: Math.max(previewBbox.max.z, n.bbox.max.z),
-      },
-    };
+  let arrayFocus: BoundingBox = bbox;
+  const grow = (target: BoundingBox, b: BoundingBox): BoundingBox => ({
+    min: {
+      x: Math.min(target.min.x, b.min.x),
+      y: Math.min(target.min.y, b.min.y),
+      z: Math.min(target.min.z, b.min.z),
+    },
+    max: {
+      x: Math.max(target.max.x, b.max.x),
+      y: Math.max(target.max.y, b.max.y),
+      z: Math.max(target.max.z, b.max.z),
+    },
+  });
+  const growPreview = (b: BoundingBox) => {
+    previewBbox = grow(previewBbox, b);
+  };
+  for (const extra of extraSolids) {
+    arrayFocus = grow(arrayFocus, extra.bbox);
+    growPreview(extra.bbox);
   }
   const sceneBbox = previewBbox;
 
@@ -1969,7 +2253,7 @@ export function buildDraftBodyPreview(input: DraftBodyPreviewInput): DraftBodyPr
   } else {
     const draftMesh = bodyToMeshDescriptor(draftSolid, sceneBbox);
     if (draftMesh) {
-      meshes.push({ ...draftMesh, color: DRAFT_BODY_COLOR });
+      meshes.push({ ...draftMesh, color: DRAFT_BODY_COLOR, frame: true });
     } else {
       warnings.push("Не удалось построить mesh черновика");
       meshes.push({
@@ -1977,20 +2261,39 @@ export function buildDraftBodyPreview(input: DraftBodyPreviewInput): DraftBodyPr
         bodyType: t,
         kind: "bbox",
         color: DRAFT_BODY_COLOR,
+        frame: true,
         ...bboxCenterSize(bbox),
       });
     }
   }
 
-  for (const n of neighbors) {
-    const m = bodyToMeshDescriptor({ ...n, color: NEIGHBOR_BODY_COLOR }, sceneBbox);
-    if (m) meshes.push({ ...m, color: NEIGHBOR_BODY_COLOR });
+  for (const extra of extraSolids) {
+    const copyColor = extra.color || COPY_BODY_COLOR;
+    const m = bodyToMeshDescriptor(extra, sceneBbox);
+    if (m) meshes.push({ ...m, color: copyColor, frame: true });
+    else {
+      meshes.push({
+        name: extra.name,
+        bodyType: extra.type.toUpperCase(),
+        kind: "bbox",
+        color: copyColor,
+        frame: true,
+        ...bboxCenterSize(extra.bbox),
+      });
+    }
+  }
+
+  for (const { body: n } of shownNeighbors) {
+    const color = neighborColorByGap(neighborFadeDistance(bbox, n), fadeScale);
+    const m = bodyToMeshDescriptor({ ...n, color }, sceneBbox);
+    if (m) meshes.push({ ...m, color, frame: false });
     else {
       meshes.push({
         name: n.name,
         bodyType: n.type.toUpperCase(),
         kind: "bbox",
-        color: NEIGHBOR_BODY_COLOR,
+        color,
+        frame: false,
         ...bboxCenterSize(n.bbox),
       });
     }
@@ -1999,12 +2302,12 @@ export function buildDraftBodyPreview(input: DraftBodyPreviewInput): DraftBodyPr
   return {
     meshes,
     focusName: name,
-    neighborNames: neighbors.map((n) => n.name),
+    neighborNames: shownNeighbors.map((n) => n.body.name),
     nearest,
     bbox: previewBbox,
-    focusBbox: bbox,
+    focusBbox: arrayFocus,
     unsupported: isMeshPreviewUnsupported(t),
     warnings,
-    slices: buildBodySlices(meshes, name, bbox, previewBbox, input.slicePositions),
+    slices: buildBodySlices(meshes, name, arrayFocus, previewBbox, input.slicePositions),
   };
 }

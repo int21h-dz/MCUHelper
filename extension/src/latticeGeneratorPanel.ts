@@ -15,7 +15,8 @@ type HostMsg =
   | { type: "fromContext" }
   | { type: "clearContext" }
   | { type: "requestContext" }
-  | { type: "insertLcell"; name: string };
+  | { type: "insertLcell"; name: string }
+  | { type: "switchLatticeType"; latticeType: "GLTL" | "G2AR" | "G2MP"; form?: LatticeGeneratorInput };
 
 type BoundLattice = {
   uri: vscode.Uri;
@@ -32,9 +33,10 @@ type ContextPayload = {
 };
 
 /**
- * Webview-конструктор LATT GLTL (UserGuide §9.2.6.1).
- * LISTEL = упорядоченный список прототипов; PARM = [/n] x,y,z.
- * Автооткрытие при курсоре в блоке LATT GLTL — как live body preview.
+ * Webview-конструктор LATT GLTL / G2AR / G2MP (UserGuide §9.2.6.1–3).
+ * LISTEL = упорядоченный список прототипов; GLTL — PARM [/n] x,y,z;
+ * G2AR/G2MP — картограмма + векторы A,B,C.
+ * Автооткрытие при курсоре в блоке LATT — как live body preview.
  */
 const AUTO_DEBOUNCE_MS = 180;
 
@@ -86,7 +88,7 @@ export class LatticeGeneratorPanel {
     this.client = client;
   }
 
-  /** Первый кадр, если при активации курсор уже в LATT GLTL. */
+  /** Первый кадр, если при активации курсор уже в LATT. */
   nudge(): void {
     this.scheduleAuto();
   }
@@ -125,7 +127,7 @@ export class LatticeGeneratorPanel {
     }, AUTO_DEBOUNCE_MS);
   }
 
-  /** Курсор в блоке LATT GLTL → открыть/подгрузить (без nearest по файлу). */
+  /** Курсор в блоке LATT → открыть/подгрузить (без nearest по файлу). */
   private async refreshFromCursor(): Promise<void> {
     const editor = vscode.window.activeTextEditor;
     if (!editor || !isMcunrDocument(editor.document)) return;
@@ -133,7 +135,7 @@ export class LatticeGeneratorPanel {
     this.lastUri = editor.document.uri;
     this.lastLine = editor.selection.active.line;
 
-    const hit = this.gltlBlockAtCursor(editor.document, this.lastLine);
+    const hit = this.latticeBlockAtCursor(editor.document, this.lastLine);
     if (!hit) return;
 
     const key = `${editor.document.uri.toString()}:${hit.startLine}`;
@@ -148,7 +150,7 @@ export class LatticeGeneratorPanel {
     await this.pushState();
   }
 
-  private gltlBlockAtCursor(
+  private latticeBlockAtCursor(
     doc: vscode.TextDocument,
     line: number
   ): { startLine: number; endLine: number } | null {
@@ -159,7 +161,7 @@ export class LatticeGeneratorPanel {
       if (!range) return null;
       // только если курсор реально внутри блока (не «ближайший ниже»)
       if (line < range.startLine || line > range.endLine) return null;
-      if (!/^\s*LATT\s+GLTL\b/i.test(lines[range.startLine] ?? "")) return null;
+      if (!/^\s*LATT\s+(GLTL|G2AR|G2MP)\b/i.test(lines[range.startLine] ?? "")) return null;
       return range;
     } catch {
       return null;
@@ -176,7 +178,7 @@ export class LatticeGeneratorPanel {
 
     this.panel = vscode.window.createWebviewPanel(
       "mcuhelper.latticeGenerator",
-      "MCU-NR: Решётка GLTL",
+      "MCU-NR: Решётка",
       { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
       {
         enableScripts: true,
@@ -263,6 +265,15 @@ export class LatticeGeneratorPanel {
       case "insertLcell":
         await this.insertLcellStub(msg.name);
         break;
+      case "switchLatticeType": {
+        const api = loadLatticeGeneratorApi();
+        const target =
+          msg.latticeType === "G2AR" ? "G2AR" : msg.latticeType === "G2MP" ? "G2MP" : "GLTL";
+        const base = msg.form ? this.normalizeForm(msg.form) : this.normalizeForm(this.form);
+        this.form = this.normalizeForm(api.convertLatticeGeneratorType(base, target));
+        await this.pushState();
+        break;
+      }
       default:
         break;
     }
@@ -272,15 +283,87 @@ export class LatticeGeneratorPanel {
     const elements = (raw.elements ?? [])
       .map((e) => String(e ?? "").trim())
       .filter(Boolean);
+    const els = elements.length ? elements : ["A"];
+    const rawType = String(raw.latticeType ?? "GLTL").toUpperCase();
+    const latticeType: LatticeGeneratorInput["latticeType"] =
+      rawType === "G2AR" ? "G2AR" : rawType === "G2MP" ? "G2MP" : "GLTL";
+    const lfixso = String(raw.lfixso ?? "").trim();
+    const lblack = String(raw.lblack ?? "").trim();
+    const footprints = Array.isArray(raw.footprints) ? raw.footprints : [];
+    const api = loadLatticeGeneratorApi();
+    const vec = (v: [string, string, string] | undefined, d: [string, string, string]) =>
+      [String(v?.[0] ?? d[0]), String(v?.[1] ?? d[1]), String(v?.[2] ?? d[2])] as [
+        string,
+        string,
+        string,
+      ];
+
+    if (latticeType === "G2MP") {
+      const cols = Math.max(1, Math.min(99, Math.floor(Number(raw.cols ?? 4))));
+      const rows = Math.max(1, Math.min(99, Math.floor(Number(raw.rows ?? 4))));
+      const cartogram = api.resizeCartogram(raw.cartogram ?? [], cols, rows, "0");
+      return {
+        latticeType: "G2MP",
+        zoneName: String(raw.zoneName ?? "ZL").trim() || "ZL",
+        elements: els,
+        cols,
+        rows,
+        iMin: 0,
+        iMax: cols - 1,
+        jMin: 0,
+        jMax: rows - 1,
+        vectorA: vec(raw.vectorA, ["0", "0", "0"]),
+        vectorB: vec(raw.vectorB, ["25", "0", "0"]),
+        vectorC: vec(raw.vectorC, ["0", "25", "0"]),
+        cartogram,
+        placements: [],
+        lfixso,
+        lblack,
+        footprints,
+      };
+    }
+
+    if (latticeType === "G2AR") {
+      let iMin = Math.floor(Number(raw.iMin ?? 0));
+      let iMax = Math.floor(Number(raw.iMax ?? 3));
+      let jMin = Math.floor(Number(raw.jMin ?? 0));
+      let jMax = Math.floor(Number(raw.jMax ?? 3));
+      if (iMax < iMin) [iMin, iMax] = [iMax, iMin];
+      if (jMax < jMin) [jMin, jMax] = [jMax, jMin];
+      const cols = Math.max(1, iMax - iMin + 1);
+      const rows = Math.max(1, jMax - jMin + 1);
+      const fill = els[0] ?? "A";
+      const cartogram = api.resizeCartogram(raw.cartogram ?? [], cols, rows, fill);
+      return {
+        latticeType: "G2AR",
+        zoneName: String(raw.zoneName ?? "ZL").trim() || "ZL",
+        elements: els,
+        cols,
+        rows,
+        iMin,
+        iMax,
+        jMin,
+        jMax,
+        vectorA: vec(raw.vectorA, ["0", "0", "0"]),
+        vectorB: vec(raw.vectorB, ["25", "0", "0"]),
+        vectorC: vec(raw.vectorC, ["0", "25", "0"]),
+        cartogram,
+        placements: [],
+        lfixso,
+        lblack,
+        footprints,
+      };
+    }
+
     const placements = (raw.placements ?? []).map((p) => {
       const element = String(p.element ?? "").trim();
       let protoIndex =
         typeof p.protoIndex === "number" && p.protoIndex >= 1
           ? Math.floor(p.protoIndex)
-          : elements.indexOf(element) + 1;
+          : els.indexOf(element) + 1;
       if (protoIndex < 1) protoIndex = 1;
       return {
-        element: elements[protoIndex - 1] ?? element,
+        element: els[protoIndex - 1] ?? element,
         protoIndex,
         x: String(p.x ?? "0"),
         y: String(p.y ?? "0"),
@@ -290,7 +373,7 @@ export class LatticeGeneratorPanel {
     return {
       latticeType: "GLTL",
       zoneName: String(raw.zoneName ?? "ZL").trim() || "ZL",
-      elements: elements.length ? elements : ["A"],
+      elements: els,
       cols: 1,
       rows: 1,
       iMin: 0,
@@ -303,10 +386,10 @@ export class LatticeGeneratorPanel {
       cartogram: [],
       placements: placements.length
         ? placements
-        : [{ element: elements[0] ?? "A", protoIndex: 1, x: "0", y: "0", z: "0" }],
-      lfixso: String(raw.lfixso ?? "").trim(),
-      lblack: String(raw.lblack ?? "").trim(),
-      footprints: Array.isArray(raw.footprints) ? raw.footprints : [],
+        : [{ element: els[0] ?? "A", protoIndex: 1, x: "0", y: "0", z: "0" }],
+      lfixso,
+      lblack,
+      footprints,
     };
   }
 
@@ -321,7 +404,7 @@ export class LatticeGeneratorPanel {
       this.bound = undefined;
       if (notify) {
         vscode.window.showErrorMessage(
-          `Конструктор GLTL: ${(err instanceof Error ? err.message : String(err)).slice(0, 180)}`
+          `Конструктор решётки: ${(err instanceof Error ? err.message : String(err)).slice(0, 180)}`
         );
       }
       return false;
@@ -344,71 +427,111 @@ export class LatticeGeneratorPanel {
     const uriStr = uri.toString();
     const lines = text.replace(/\r\n/g, "\n").split("\n");
 
-    // 1) строка курсора → блок LATT; иначе (только по кнопке) ближайший GLTL
+    // 1) строка курсора → блок LATT; иначе (только по кнопке) ближайший GLTL/G2AR/G2MP
     let line = this.lastLine;
     let range = api.findLatticeBlockAtLine(lines, line);
     if (range && (line < range.startLine || line > range.endLine)) {
       range = null;
     }
-    if (!range || !/^\s*LATT\s+GLTL\b/i.test(lines[range.startLine] ?? "")) {
+    const headerOk = (r: { startLine: number; endLine: number } | null) =>
+      Boolean(r && /^\s*LATT\s+(GLTL|G2AR|G2MP)\b/i.test(lines[r.startLine] ?? ""));
+    if (!headerOk(range)) {
       if (!allowNearest) {
         this.bound = undefined;
         return false;
       }
       const near =
-        api.findNearestGltlLatticeLine?.(text, line) ??
-        lines.findIndex((l) => /^\s*LATT\s+GLTL\b/i.test(l));
-      if (near >= 0) {
+        api.findNearestLatticeLine?.(text, line, ["GLTL", "G2AR", "G2MP"]) ??
+        lines.findIndex((l) => /^\s*LATT\s+(GLTL|G2AR|G2MP)\b/i.test(l));
+      if (near !== null && near >= 0) {
         line = near;
         range = api.findLatticeBlockAtLine(lines, line);
       }
     }
-    if (!range) {
+    if (!headerOk(range)) {
       this.bound = undefined;
       if (notify) {
-        vscode.window.showInformationMessage("В файле нет блока LATT GLTL.");
+        vscode.window.showInformationMessage("В файле нет блока LATT GLTL, G2AR или G2MP.");
       }
       return false;
     }
 
+    const genMatch = (lines[range!.startLine] ?? "").match(/^\s*LATT\s+(GLTL|G2AR|G2MP)\b/i);
+    const genType = (genMatch?.[1]?.toUpperCase() ?? "GLTL") as "GLTL" | "G2AR" | "G2MP";
+
     // 2) PARM/LISTEL из текста блока редактора (как в файле)
-    const block = lines.slice(range.startLine, range.endLine + 1).join("\n");
+    const block = lines.slice(range!.startLine, range!.endLine + 1).join("\n");
     const fromText = api.parseLatticeBlockText(block);
-    if (!fromText || fromText.latticeType !== "GLTL") {
+    if (!fromText || fromText.latticeType !== genType) {
       this.bound = undefined;
       if (notify) {
-        vscode.window.showWarningMessage("Блок LATT не разобран как GLTL.");
+        vscode.window.showWarningMessage(`Блок LATT не разобран как ${genType}.`);
       }
       return false;
     }
 
     // 3) полный разбор (AST + footprints) поверх текста
     let hit =
-      api.parseGltlLatticeAtLine?.(text, range.startLine, { uri: uriStr }) ??
-      (() => {
-        const h = api.parseLatticeAtLine(text, range!.startLine);
-        return h && h.input.latticeType === "GLTL" ? h : null;
-      })();
+      genType === "G2MP"
+        ? api.parseG2mpLatticeAtLine?.(text, range!.startLine, { uri: uriStr }) ??
+          (() => {
+            const h = api.parseLatticeAtLine(text, range!.startLine);
+            return h && h.input.latticeType === "G2MP" ? h : null;
+          })()
+        : genType === "G2AR"
+        ? api.parseG2arLatticeAtLine?.(text, range!.startLine, { uri: uriStr }) ??
+          (() => {
+            const h = api.parseLatticeAtLine(text, range!.startLine);
+            return h && h.input.latticeType === "G2AR" ? h : null;
+          })()
+        : api.parseGltlLatticeAtLine?.(text, range!.startLine, { uri: uriStr }) ??
+          (() => {
+            const h = api.parseLatticeAtLine(text, range!.startLine);
+            return h && h.input.latticeType === "GLTL" ? h : null;
+          })();
 
     const input = hit?.input ?? fromText;
-    // текст блока побеждает по placements/elements, если он полнее
+    // текст блока побеждает, если он полнее
     if (fromText.elements.length >= (input.elements?.length ?? 0)) {
       input.elements = fromText.elements;
-    }
-    if (fromText.placements.length >= (input.placements?.length ?? 0)) {
-      input.placements = fromText.placements;
     }
     input.zoneName = fromText.zoneName || input.zoneName;
     input.lfixso = fromText.lfixso || input.lfixso;
     input.lblack = fromText.lblack || input.lblack;
-    input.latticeType = "GLTL";
+    input.latticeType = genType;
+
+    if (genType === "GLTL") {
+      if (fromText.placements.length >= (input.placements?.length ?? 0)) {
+        input.placements = fromText.placements;
+      }
+    } else if (genType === "G2MP") {
+      input.cols = fromText.cols;
+      input.rows = fromText.rows;
+      input.vectorA = fromText.vectorA;
+      input.vectorB = fromText.vectorB;
+      input.vectorC = fromText.vectorC;
+      if (fromText.cartogram?.length) {
+        input.cartogram = fromText.cartogram;
+      }
+    } else {
+      input.iMin = fromText.iMin;
+      input.iMax = fromText.iMax;
+      input.jMin = fromText.jMin;
+      input.jMax = fromText.jMax;
+      input.vectorA = fromText.vectorA;
+      input.vectorB = fromText.vectorB;
+      input.vectorC = fromText.vectorC;
+      if (fromText.cartogram?.length) {
+        input.cartogram = fromText.cartogram;
+      }
+    }
 
     // LISTEL как в сайдбаре
     if (this.client) {
       try {
         const index = (await this.client.sendRequest("mcuhelper/getIndex", {
           uri: uriStr,
-          line: range.startLine,
+          line: range!.startLine,
           character: 0,
         })) as {
           summaries?: {
@@ -421,7 +544,7 @@ export class LatticeGeneratorPanel {
         };
         const match = (index.summaries?.lattices ?? []).find(
           (l) =>
-            l.latticeType.toUpperCase() === "GLTL" &&
+            l.latticeType.toUpperCase() === genType &&
             l.range.start.line >= range!.startLine - 2 &&
             l.range.start.line <= range!.endLine
         );
@@ -429,13 +552,15 @@ export class LatticeGeneratorPanel {
           const names = match.elements.map((e) => e.name).filter(Boolean);
           if (names.length >= input.elements.length) {
             input.elements = names;
-            input.placements = (input.placements ?? []).map((p) => {
-              const i =
-                p.protoIndex && p.protoIndex >= 1
-                  ? p.protoIndex
-                  : Math.max(1, names.indexOf(p.element) + 1);
-              return { ...p, protoIndex: i, element: names[i - 1] ?? p.element };
-            });
+            if (genType === "GLTL") {
+              input.placements = (input.placements ?? []).map((p) => {
+                const i =
+                  p.protoIndex && p.protoIndex >= 1
+                    ? p.protoIndex
+                    : Math.max(1, names.indexOf(p.element) + 1);
+                return { ...p, protoIndex: i, element: names[i - 1] ?? p.element };
+              });
+            }
           }
         }
       } catch {
@@ -451,17 +576,31 @@ export class LatticeGeneratorPanel {
     this.form = this.normalizeForm(input);
     this.bound = {
       uri: doc.uri,
-      startLine: range.startLine,
-      endLine: range.endLine,
+      startLine: range!.startLine,
+      endLine: range!.endLine,
     };
-    this.lastAutoKey = `${doc.uri.toString()}:${range.startLine}`;
+    this.lastAutoKey = `${doc.uri.toString()}:${range!.startLine}`;
     if (notify) {
-      const g = api.inferGltlGridSize?.(this.form.placements);
-      const grid = g ? ` · ${g.cols}×${g.rows}` : "";
       const fp = this.form.footprints.filter((f) => f.shapes.length > 0).length;
-      vscode.window.showInformationMessage(
-        `GLTL ← стр.${range.startLine + 1}: ${this.form.elements.join(", ")} · ${this.form.placements.length} сдвигов${grid} · контуров ${fp}/${this.form.elements.length}`
-      );
+      if (genType === "GLTL") {
+        const g = api.inferGltlGridSize?.(this.form.placements);
+        const grid = g ? ` · ${g.cols}×${g.rows}` : "";
+        vscode.window.showInformationMessage(
+          `GLTL ← стр.${range!.startLine + 1}: ${this.form.elements.join(", ")} · ${this.form.placements.length} сдвигов${grid} · контуров ${fp}/${this.form.elements.length}`
+        );
+      } else if (genType === "G2MP") {
+        const cells =
+          this.form.cartogram.flat().filter((c) => c && c !== "0").length;
+        vscode.window.showInformationMessage(
+          `G2MP ← стр.${range!.startLine + 1}: ${this.form.elements.join(", ")} · ${this.form.cols}×${this.form.rows} · ${cells} ячеек · контуров ${fp}/${this.form.elements.length}`
+        );
+      } else {
+        const cells =
+          this.form.cartogram.flat().filter((c) => c && c !== "0").length;
+        vscode.window.showInformationMessage(
+          `G2AR ← стр.${range!.startLine + 1}: ${this.form.elements.join(", ")} · ${this.form.iMin}:${this.form.iMax}×${this.form.jMin}:${this.form.jMax} · ${cells} ячеек · контуров ${fp}/${this.form.elements.length}`
+        );
+      }
     }
     return true;
   }
@@ -471,7 +610,7 @@ export class LatticeGeneratorPanel {
     const docLabel = uri ? uri.fsPath.replace(/\\/g, "/").split("/").pop() ?? "" : "";
     const canReplace = Boolean(this.bound);
     const boundLabel = this.bound
-      ? `GLTL ${this.form.zoneName} · стр. ${this.bound.startLine + 1}–${this.bound.endLine + 1}`
+      ? `${this.form.latticeType} ${this.form.zoneName} · стр. ${this.bound.startLine + 1}–${this.bound.endLine + 1}`
       : "";
     if (!this.client || !uri) {
       return { lcellNames: [], zoneNames: [], docLabel, canReplace, boundLabel };
@@ -513,7 +652,7 @@ export class LatticeGeneratorPanel {
 
   private async pushPreview(): Promise<void> {
     if (!this.panel) return;
-    const built = loadLatticeGeneratorApi().buildGltlLatticeStatement(this.form);
+    const built = loadLatticeGeneratorApi().buildLatticeStatement(this.form);
     await this.panel.webview.postMessage({
       type: "preview",
       text: built.text,
@@ -537,7 +676,7 @@ export class LatticeGeneratorPanel {
       return;
     }
     this.form = this.normalizeForm(this.form);
-    const built = loadLatticeGeneratorApi().buildGltlLatticeStatement(this.form);
+    const built = loadLatticeGeneratorApi().buildLatticeStatement(this.form);
     if (!built.okToInsert) {
       vscode.window.showWarningMessage(built.warnings[0] ?? "Исправьте параметры.");
       return;
@@ -578,7 +717,7 @@ export class LatticeGeneratorPanel {
     }
 
     vscode.window.showInformationMessage(
-      replace ? "LATT GLTL заменена (Undo)." : "LATT GLTL вставлена (Undo)."
+      replace ? "LATT решётка заменена (Undo)." : "LATT решётка вставлена (Undo)."
     );
     await this.pushContextOnly();
   }
@@ -635,10 +774,10 @@ export class LatticeGeneratorPanel {
   <meta http-equiv="Content-Security-Policy" content="${csp}" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="stylesheet" href="${css}" />
-  <title>Решётка GLTL</title>
+  <title>Решётка</title>
 </head>
 <body>
-  <div id="root"><p style="padding:16px;opacity:.7">Загрузка конструктора GLTL…</p></div>
+  <div id="root"><p style="padding:16px;opacity:.7">Загрузка конструктора решётки…</p></div>
   <script src="${js}"></script>
 </body>
 </html>`;

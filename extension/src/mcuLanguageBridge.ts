@@ -63,6 +63,58 @@ export type BodyGeneratorInput = {
   params: string[];
 };
 
+export function loadBodyArrayGeneratorApi(): {
+  buildPatternInstances: (input: {
+    group: string;
+    mode?: string;
+    values?: Record<string, number | string | boolean | undefined>;
+    seedAnchor?: { x: number; y: number; z: number };
+  }) => {
+    instances: Array<{ index: number; pose: { kind: string; [k: string]: number | string } }>;
+    warnings: string[];
+    ok: boolean;
+    useTransfCandidate: boolean;
+    summary: string;
+  };
+  emitBodyArray: (input: {
+    seed: BodyGeneratorInput;
+    instances: Array<{ index: number; pose: { kind: string; [k: string]: number | string } }>;
+    expand: boolean;
+    canUseTransf: boolean;
+    existingNames?: Iterable<string>;
+    transformExpanded?: (pose: { kind: string; [k: string]: number | string }) => string[] | null;
+  }) => {
+    text: string;
+    warnings: string[];
+    okToInsert: boolean;
+    summary: string;
+    names: string[];
+  };
+  patternCanUseTransf: (bodyType: string, useTransfCandidate: boolean) => { ok: boolean; reason: string };
+  hexLatticeInstanceCount: (rings: number) => number;
+  applyTranslateToBodyParamStrings: (
+    bodyType: string,
+    params: string[],
+    dx: number,
+    dy: number,
+    dz: number
+  ) => string[] | null;
+  mergePreservedParamStrings: (seedParams: string[], resolvedNums: number[], nextNums: number[]) => string[];
+  applyPatternExclusions: (
+    instances: Array<{ index: number; pose: { kind: string; [k: string]: number | string } }>,
+    excludedIndices?: number[]
+  ) => {
+    instances: Array<{ index: number; pose: { kind: string; [k: string]: number | string } }>;
+    excludedCount: number;
+    warnings: string[];
+    ok: boolean;
+  };
+  pruneExcludedIndices: (excludedIndices: number[] | undefined, instanceCount: number) => number[];
+  MAX_BODY_ARRAY_COUNT: number;
+} {
+  return requireLanguage("bodyArrayGenerator");
+}
+
 export function loadBodyGeneratorApi(): {
   listBodyGeneratorTypes: () => BodyTypeOption[];
   getBodyGeneratorType: (key: string) => BodyTypeOption | undefined;
@@ -185,6 +237,27 @@ export function loadLatticeGeneratorApi(): {
     input: LatticeGeneratorInput;
     range: { startLine: number; endLine: number };
   } | null;
+  parseG2arLatticeAtLine: (
+    fullText: string,
+    line: number,
+    opts?: { uri?: string }
+  ) => {
+    input: LatticeGeneratorInput;
+    range: { startLine: number; endLine: number };
+  } | null;
+  parseG2mpLatticeAtLine: (
+    fullText: string,
+    line: number,
+    opts?: { uri?: string }
+  ) => {
+    input: LatticeGeneratorInput;
+    range: { startLine: number; endLine: number };
+  } | null;
+  findNearestLatticeLine: (
+    fullText: string,
+    preferLine: number,
+    types?: Array<"G2MP" | "G2AR" | "GLTL">
+  ) => number | null;
   findNearestGltlLatticeLine: (fullText: string, preferLine: number) => number | null;
   rebuildGltlPlacements: (
     parmText: string,
@@ -203,6 +276,10 @@ export function loadLatticeGeneratorApi(): {
     ys: number[];
     zs: number[];
   };
+  convertLatticeGeneratorType: (
+    input: LatticeGeneratorInput,
+    target: "G2MP" | "G2AR" | "GLTL"
+  ) => LatticeGeneratorInput;
 } {
   return requireLanguage("latticeGenerator");
 }

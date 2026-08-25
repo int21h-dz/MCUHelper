@@ -6,6 +6,7 @@ node_modules/
 extension/server/
 extension/vendor/
 extension/README.md
+extension/LICENSE
 extension/media/Promo.gif
 extension/media/Thenx.png
 release/

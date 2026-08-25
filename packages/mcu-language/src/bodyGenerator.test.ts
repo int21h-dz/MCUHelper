@@ -71,13 +71,23 @@ describe("bodyGenerator", () => {
     assert.equal(ok.warnings.length, 0);
   });
 
+  it("emits body cards in uppercase (names and EQU)", () => {
+    const { text, okToInsert } = buildBodyStatement({
+      bodyType: "rcz",
+      name: "z1",
+      params: ["lg2", "lg2", "0", "hall", "0.35"],
+    });
+    assert.equal(okToInsert, true);
+    assert.equal(text.trim(), "RCZ Z1 LG2,LG2,0 HALL 0.35");
+  });
+
   it("builds RCZ statement with grouped params", () => {
     const { text, warnings } = buildBodyStatement({
       bodyType: "RCZ",
       name: "fuel",
       params: ["0", "0", "0", "H", "R"],
     });
-    assert.equal(text.trim(), "RCZ fuel 0,0,0 H R");
+    assert.equal(text.trim(), "RCZ FUEL 0,0,0 H R");
     assert.equal(warnings.length, 0);
   });
 
@@ -107,9 +117,9 @@ describe("bodyGenerator", () => {
   });
 
   it("sanitizes and rejects invalid body names", () => {
-    assert.equal(sanitizeBodyName(" fuel 1"), "fuel1");
-    assert.equal(sanitizeBodyName("1fuel"), "fuel");
-    assert.equal(sanitizeBodyName("abcdefg"), "abcdef");
+    assert.equal(sanitizeBodyName(" fuel 1"), "FUEL1");
+    assert.equal(sanitizeBodyName("1fuel"), "FUEL");
+    assert.equal(sanitizeBodyName("abcdefg"), "ABCDEF");
     assert.equal(sanitizeBodyName("*"), "*");
     assert.ok(isValidBodyName("fuel"));
     assert.ok(!isValidBodyName("1fuel"));
@@ -133,6 +143,16 @@ describe("bodyGenerator", () => {
     const { nums, warnings } = resolveBodyParamNumbers(["0", "0", "0", "H", "R*0.5"], vars);
     assert.deepEqual(nums, [0, 0, 0, 10, 1]);
     assert.equal(warnings.length, 0);
+  });
+
+  it("accepts MCU trailing-dot numbers and EQU names like RCO", () => {
+    const vars = constantsToVarMap([
+      { name: "RCO", value: 10 },
+      { name: "RCI", expression: "5" },
+    ]);
+    const { nums, warnings } = resolveBodyParamNumbers(["0.", "0.", "-100.", "200.", "RCO"], vars);
+    assert.equal(warnings.length, 0);
+    assert.deepEqual(nums, [0, 0, -100, 200, 10]);
   });
 
   it("evaluates 12.5+LG2 with visible EQU", () => {

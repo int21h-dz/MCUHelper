@@ -7,12 +7,15 @@ import {
   isMeshPreviewSupported,
   isMeshPreviewUnsupported,
   selectNearbyBodies,
+  neighborColorByGap,
   buildDraftBodyPreview,
   bboxFromBodyParams,
   firstContainerIndex,
   isNeighborExcluded,
   DRAFT_BODY_COLOR,
   applyTransfToBodyParams,
+  translateBodyParams,
+  bodyAnchorPoint,
   transfPoint,
 } from "./meshPreview";
 import type { GeometryScene, PrimitiveSolid } from "./types";
@@ -138,7 +141,7 @@ describe("meshPreview", () => {
     assert.deepStrictEqual(m!.normal, { x: 1, y: 0, z: 0 });
   });
 
-  it("selectNearbyBodies keeps only close bodies", () => {
+  it("selectNearbyBodies keeps only close bodies when maxGapFactor set", () => {
     const focus = { min: { x: 0, y: 0, z: 0 }, max: { x: 1, y: 1, z: 1 } };
     const near = prim("SPH", "near", [0.5, 0.5, 0.5, 0.2], {
       min: { x: 0.3, y: 0.3, z: 0.3 },
@@ -155,6 +158,92 @@ describe("meshPreview", () => {
     );
   });
 
+  it("selectNearbyBodies without limits returns all non-excluded bodies", () => {
+    const focus = { min: { x: 0, y: 0, z: 0 }, max: { x: 1, y: 1, z: 1 } };
+    const near = prim("SPH", "near", [0.5, 0.5, 0.5, 0.2], {
+      min: { x: 0.3, y: 0.3, z: 0.3 },
+      max: { x: 0.7, y: 0.7, z: 0.7 },
+    });
+    const far = prim("SPH", "far", [100, 0, 0, 1], {
+      min: { x: 99, y: -1, z: -1 },
+      max: { x: 101, y: 1, z: 1 },
+    });
+    const picked = selectNearbyBodies(focus, [near, far], {});
+    assert.deepStrictEqual(
+      picked.map((p) => p.name).sort(),
+      ["far", "near"]
+    );
+  });
+
+  it("draft preview fades distant neighbors more than nearby ones on tall RCZ", () => {
+    const near = prim("RCZ", "NEAR", [2, 0, -100, 200, 1], {
+      min: { x: 1, y: -1, z: -100 },
+      max: { x: 3, y: 1, z: 100 },
+    });
+    const far = prim("RCZ", "FAR", [40, 0, -100, 200, 1], {
+      min: { x: 39, y: -1, z: -100 },
+      max: { x: 41, y: 1, z: 100 },
+    });
+    const prev = buildDraftBodyPreview({
+      bodyType: "RCZ",
+      name: "DRAFT",
+      params: [0, 0, -100, 200, 1],
+      scenePrimitives: [near, far],
+    });
+    const nearM = prev.meshes.find((m) => m.name === "NEAR");
+    const farM = prev.meshes.find((m) => m.name === "FAR");
+    assert.ok(nearM && farM);
+    const aNear = Number(String(nearM!.color).match(/([\d.]+)\)$/)?.[1]);
+    const aFar = Number(String(farM!.color).match(/([\d.]+)\)$/)?.[1]);
+    assert.ok(aNear > aFar + 0.35, `near=${aNear} far=${aFar} colors ${nearM!.color} vs ${farM!.color}`);
+  });
+
+  it("fades overlapping concentric RCZ by XYZ center distance, not AABB gap", () => {
+    const inner = prim("RCZ", "IN", [0, 0, -100, 200, 5], {
+      min: { x: -5, y: -5, z: -100 },
+      max: { x: 5, y: 5, z: 100 },
+    });
+    const offset = prim("RCZ", "OFF", [30, 0, -100, 200, 5], {
+      min: { x: 25, y: -5, z: -100 },
+      max: { x: 35, y: 5, z: 100 },
+    });
+    const prev = buildDraftBodyPreview({
+      bodyType: "RCZ",
+      name: "OUT",
+      params: [0, 0, -100, 200, 20],
+      scenePrimitives: [inner, offset],
+    });
+    const inM = prev.meshes.find((m) => m.name === "IN");
+    const offM = prev.meshes.find((m) => m.name === "OFF");
+    assert.ok(inM && offM);
+    const aIn = Number(String(inM!.color).match(/([\d.]+)\)$/)?.[1]);
+    const aOff = Number(String(offM!.color).match(/([\d.]+)\)$/)?.[1]);
+    assert.ok(aIn > aOff + 0.25, `in=${aIn} off=${aOff}`);
+  });
+
+  it("fades bodies shifted only along Z using XYZ distance", () => {
+    const sameXY = prim("SPH", "UP", [0, 0, 50, 1], {
+      min: { x: -1, y: -1, z: 49 },
+      max: { x: 1, y: 1, z: 51 },
+    });
+    const near = prim("SPH", "NEAR", [3, 0, 0, 1], {
+      min: { x: 2, y: -1, z: -1 },
+      max: { x: 4, y: 1, z: 1 },
+    });
+    const prev = buildDraftBodyPreview({
+      bodyType: "SPH",
+      name: "C",
+      params: [0, 0, 0, 1],
+      scenePrimitives: [sameXY, near],
+    });
+    const upM = prev.meshes.find((m) => m.name === "UP");
+    const nearM = prev.meshes.find((m) => m.name === "NEAR");
+    assert.ok(upM && nearM);
+    const aUp = Number(String(upM!.color).match(/([\d.]+)\)$/)?.[1]);
+    const aNear = Number(String(nearM!.color).match(/([\d.]+)\)$/)?.[1]);
+    assert.ok(aNear > aUp + 0.2, `near=${aNear} up=${aUp}`);
+  });
+
   it("skips section container as nearest and keeps camera on locals", () => {
     const container = prim("HEX", "C", [0, 0, 0, 20, 0, 100], {
       min: { x: -20, y: -20, z: 0 },
@@ -169,7 +258,6 @@ describe("meshPreview", () => {
       name: "newz",
       params: [2, 0, 0, 100, 0.4],
       scenePrimitives: [container, fuel],
-      nearby: { maxCount: 8, maxGapFactor: 20 },
     });
     assert.ok(prev.nearest);
     assert.strictEqual(prev.nearest!.name, "FU");
@@ -203,7 +291,6 @@ describe("meshPreview", () => {
       name: "ball",
       params: [0, 0, 0.5, 0.5],
       scenePrimitives: [neighbor],
-      nearby: { maxCount: 8, maxGapFactor: 20 },
     });
     assert.ok(prev.meshes.length >= 1);
     assert.strictEqual(prev.focusName, "ball");
@@ -212,6 +299,10 @@ describe("meshPreview", () => {
     assert.strictEqual(prev.nearest!.name, "box1");
     assert.ok(prev.nearest!.gap >= 0);
     assert.strictEqual(prev.meshes[0]!.color, DRAFT_BODY_COLOR);
+    const neighborMesh = prev.meshes.find((m) => m.name === "box1");
+    assert.ok(neighborMesh);
+    assert.ok(String(neighborMesh!.color).startsWith("rgba("), String(neighborMesh!.color));
+    assert.strictEqual(neighborMesh!.frame, false);
     assert.ok(prev.slices.length === 3);
     assert.deepStrictEqual(
       prev.slices.map((s) => s.axis),
@@ -527,6 +618,51 @@ describe("meshPreview extra types and slices", () => {
     assert.ok(Math.abs(next![1]) < 1e-6);
     assert.equal(next![3], 10);
     assert.equal(applyTransfToBodyParams("RPP", [0, 1, 0, 1, 0, 1], "R", 0, 0, 90), null);
+  });
+
+  it("translateBodyParams shifts SPH/RCC/HEX origins", () => {
+    const sph = translateBodyParams("SPH", [1, 2, 3, 4], 10, -1, 0.5);
+    assert.deepEqual(sph, [11, 1, 3.5, 4]);
+    const rcc = translateBodyParams("RCC", [0, 0, 0, 0, 0, 10, 1], 2, 3, 0);
+    assert.deepEqual(rcc, [2, 3, 0, 0, 0, 10, 1]);
+    const hex = translateBodyParams("HEX", [0, 0, 0, 1.8, 0, 100], 5, 0, 0);
+    assert.deepEqual(hex, [5, 0, 0, 1.8, 0, 100]);
+    const rpp = translateBodyParams("RPP", [-1, 1, -2, 2, 0, 3], 10, 0, 0);
+    assert.deepEqual(rpp, [9, 11, -2, 2, 0, 3]);
+    assert.equal(translateBodyParams("SBOX", [1, 0, 0, 0, 1, 0, 0, 0, 1], 1, 0, 0), null);
+  });
+
+  it("ring expand 4 matches TRANSF R 0/90/180/270", () => {
+    const seed = [1, 0, 0, 10, 1];
+    const angles = [90, 180, 270];
+    for (const f of angles) {
+      const viaTransf = applyTransfToBodyParams("RCZ", seed, "R", 0, 0, f);
+      assert.ok(viaTransf);
+      const p = { x: viaTransf![0], y: viaTransf![1], z: viaTransf![2] };
+      const expected = transfPoint({ x: 1, y: 0, z: 0 }, "R", 0, 0, f);
+      assert.ok(Math.abs(p.x - expected.x) < 1e-9);
+      assert.ok(Math.abs(p.y - expected.y) < 1e-9);
+    }
+    assert.equal(applyTransfToBodyParams("RPP", [0, 1, 0, 1, 0, 1], "R", 0, 0, 90), null);
+  });
+
+  it("bodyAnchorPoint uses geometric origin", () => {
+    assert.deepEqual(bodyAnchorPoint("SPH", [1, 2, 3, 4]), { x: 1, y: 2, z: 3 });
+    assert.deepEqual(bodyAnchorPoint("RPP", [-2, 0, -4, 2, 0, 10]), { x: -1, y: -1, z: 5 });
+  });
+
+  it("buildDraftBodyPreview extraBodies appear as copies", () => {
+    const prev = buildDraftBodyPreview({
+      bodyType: "RCZ",
+      name: "Z1",
+      params: [0, 0, 0, 10, 1],
+      scenePrimitives: [],
+      extraBodies: [{ name: "Z2", bodyType: "RCZ", params: [2, 0, 0, 10, 1] }],
+    });
+    assert.ok(prev.meshes.some((m) => m.name === "Z1"));
+    assert.ok(prev.meshes.some((m) => m.name === "Z2"));
+    assert.ok(prev.focusBbox);
+    assert.ok(prev.focusBbox.max.x > prev.focusBbox.min.x + 1.5);
   });
 
   it("buildDraftBodyPreview applies TRANSF to a scene prototype", () => {

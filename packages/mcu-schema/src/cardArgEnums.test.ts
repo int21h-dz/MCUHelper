@@ -41,4 +41,13 @@ describe("cardArgEnums", () => {
       assert.ok(spec.values.some((v) => v.value === "SPNU"));
     }
   });
+
+  it("resolves CNTAND 0|1 spec", () => {
+    const spec = getCardArgSpec("CNTAND");
+    assert.ok(spec && spec.kind === "enum");
+    if (spec.kind === "enum") {
+      assert.ok(spec.values.some((v) => v.value === "0"));
+      assert.ok(spec.values.some((v) => v.value === "1"));
+    }
+  });
 });
