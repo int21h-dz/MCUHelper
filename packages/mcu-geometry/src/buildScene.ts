@@ -1,5 +1,10 @@
 import type { DocumentAst } from "@mcuhelper/mcu-language";
-import { buildZoneRegistrationMap, getResolvedZoneNumbers, parseNumbers } from "@mcuhelper/mcu-language";
+import {
+  buildScopedVars,
+  buildZoneRegistrationMap,
+  getResolvedZoneNumbers,
+  parseNumbers,
+} from "@mcuhelper/mcu-language";
 import { colorForBody, colorForZone } from "./colors";
 import { buildPrimitive, buildVars, bboxUnion, emptyBbox } from "./primitives";
 import { applyTransfToPrimitive, normalizeTransfMode } from "./meshPreview";
@@ -19,8 +24,12 @@ function bodyZoneHint(bodyName: string, zones: ZoneSolid[]): string | undefined 
   return undefined;
 }
 
+/** EQU/SET, видимые в точке определения тела (global + локаль прототипа). */
+function varsForBody(ast: DocumentAst, body: { scope?: string; range: { offset: number } }): Map<string, number> {
+  return buildScopedVars(ast.constants, body.range.offset, body.scope ?? "global");
+}
+
 export function buildScene(ast: DocumentAst, options?: { scope?: string }): GeometryScene {
-  const vars = buildVars(ast);
   const want = options?.scope;
   const inScope = (s?: string) => {
     const sc = s ?? "global";
@@ -34,6 +43,9 @@ export function buildScene(ast: DocumentAst, options?: { scope?: string }): Geom
 
   for (const b of ast.bodies) {
     if (!inScope(b.scope)) continue;
+    // Не общий buildVars: иначе локальный X1/LG2 в CELL перебивается чужим EQU,
+    // и live-превью (scoped) расходится с соседями из сцены.
+    const vars = varsForBody(ast, b);
     if (b.bodyType.toUpperCase() === "TRANSF") {
       const protoName = (b.protoName ?? "").toUpperCase();
       const mode = normalizeTransfMode(b.transfMode ?? "");
@@ -96,9 +108,11 @@ export function buildScene(ast: DocumentAst, options?: { scope?: string }): Geom
     temperature: m.temperature,
   }));
 
+  // NET ROOT — обычно на global EQU; полный buildVars достаточен.
+  const netVars = buildVars(ast);
   const nets: NetInstance[] = [];
   for (const net of ast.nets) {
-    const rootParts = parseNumbers([net.root], vars);
+    const rootParts = parseNumbers([net.root], netVars);
     const origin = { x: rootParts[0] ?? 0, y: rootParts[1] ?? 0, z: rootParts[2] ?? 0 };
     for (let j = 0; j < net.rows; j++) {
       for (let i = 0; i < net.cols; i++) {

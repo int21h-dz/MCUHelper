@@ -72,4 +72,42 @@ FINISH`,
     assert.ok(Math.abs(made!.params[1]) < 1e-6);
     assert.equal(made!.params[3], 10);
   });
+
+  it("evaluates CELL bodies with local EQU, not last global overwrite", () => {
+    // Глобальный X1=0; в PIN X1=5; в OTHER X1=99. Старый общий buildVars
+    // подставлял last-wins (99) и в PIN — live-превью (scoped) расходилось с соседями.
+    const src = `HEAD 3 0
+EQU X1 = 0
+EQU LG2 = 0
+EQU HALL = 10
+EQU RCO = 1
+EQU RVC = 0.5
+RPP CNT -20 20 -20 20 0 10
+CELL PIN
+EQU X1 = 5
+RCZ R01 X1 LG2 0 HALL RCO
+RCZ G01 X1 LG2 0 HALL RVC
+END
+END
+CELL OTHER
+EQU X1 = 99
+RCZ Z99 X1 LG2 0 HALL RCO
+END
+END
+ENDXCL
+FINISH`;
+    const ast = parseDocument(src, { uri: "scoped-x1" });
+    const pin = buildScene(ast, { scope: "cell:PIN" });
+    const r01 = pin.primitives.find((p) => p.name === "R01");
+    const g01 = pin.primitives.find((p) => p.name === "G01");
+    assert.ok(r01 && g01, `PIN got ${pin.primitives.map((p) => `${p.name}@${p.params[0]}`).join(",")}`);
+    assert.ok(Math.abs(r01!.params[0] - 5) < 1e-9, `R01.x=${r01!.params[0]}`);
+    assert.ok(Math.abs(g01!.params[0] - 5) < 1e-9, `G01.x=${g01!.params[0]}`);
+    assert.ok(Math.abs(r01!.params[0] - g01!.params[0]) < 1e-12);
+
+    const other = buildScene(ast, { scope: "cell:OTHER" });
+    const z99 = other.primitives.find((p) => p.name === "Z99");
+    assert.ok(z99, `OTHER got ${other.primitives.map((p) => p.name).join(",")}`);
+    assert.ok(Math.abs(z99!.params[0] - 99) < 1e-9, `Z99.x=${z99!.params[0]}`);
+  });
 });
